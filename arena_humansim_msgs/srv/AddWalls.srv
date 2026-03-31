@@ -1,0 +1,6 @@
+string[] names
+geometry_msgs/Point32[] starts
+geometry_msgs/Point32[] ends
+---
+bool success
+string message

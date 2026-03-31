@@ -1,0 +1,5 @@
+arena_humansim_msgs/SourceConfig source
+---
+bool success
+string message
+string name

@@ -1,0 +1,8 @@
+# Deliver feedback to arena_humansim (robot poses, etc.)
+# Agent states are published on the agent_states topic, not in the response.
+builtin_interfaces/Time stamp
+arena_humansim_msgs/RobotState[] robots   # batched robot poses
+---
+bool success
+int32[] spawned_ids      # agents spawned since last call
+int32[] despawned_ids    # agents despawned since last call

@@ -1,0 +1,6 @@
+float64 desired_velocity_min
+float64 desired_velocity_max
+float64 agent_radius
+string behavior_tree
+string agent_type
+arena_humansim_msgs/SinkAffinity[] sink_affinity

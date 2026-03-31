@@ -1,0 +1,6 @@
+# Spawn or update agents in the simulation
+arena_humansim_msgs/AgentState[] agents
+---
+bool success
+string message
+int32[] spawned_ids

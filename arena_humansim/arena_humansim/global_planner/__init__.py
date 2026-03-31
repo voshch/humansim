@@ -1,0 +1,129 @@
+from __future__ import annotations
+
+import heapq
+import math
+from abc import ABC, abstractmethod
+from collections.abc import Iterable, Sequence
+from typing import Any
+
+import numpy as np
+
+from arena_humansim.agents import BaseAgent
+from arena_humansim.utils import ModuleRegistry
+from arena_humansim.utils.loggable import Loggable
+from arena_humansim.utils.types import Pose2D
+
+_registry = ModuleRegistry()
+
+
+def simplify_path(
+    waypoints: Sequence[Pose2D],
+    min_area: float = 0.01,
+) -> list[Pose2D]:
+    n = len(waypoints)
+    if n <= 2:
+        return list(waypoints)
+
+    xs = [w.x for w in waypoints]
+    ys = [w.y for w in waypoints]
+    prev_idx = list(range(-1, n - 1))
+    next_idx = list(range(1, n + 1))
+
+    _inf = math.inf
+    _heappush = heapq.heappush
+    _heappop = heapq.heappop
+
+    def _area(i: int) -> float:
+        p, nx = prev_idx[i], next_idx[i]
+        return 0.5 * abs(
+            (xs[i] - xs[p]) * (ys[nx] - ys[p])
+            - (xs[nx] - xs[p]) * (ys[i] - ys[p])
+        )
+
+    areas = [_inf] + [_area(i) for i in range(1, n - 1)] + [_inf]
+    heap = [(areas[i], i) for i in range(1, n - 1)]
+    heapq.heapify(heap)
+    removed = bytearray(n)
+
+    while heap:
+        area, i = _heappop(heap)
+        if removed[i] or areas[i] != area:
+            continue
+        if area >= min_area:
+            break
+
+        removed[i] = 1
+        p, nx = prev_idx[i], next_idx[i]
+        next_idx[p] = nx
+        prev_idx[nx] = p
+
+        if p > 0:
+            a = max(_area(p), area)
+            areas[p] = a
+            _heappush(heap, (a, p))
+        if nx < n - 1:
+            a = max(_area(nx), area)
+            areas[nx] = a
+            _heappush(heap, (a, nx))
+
+    return [waypoints[i] for i in range(n) if not removed[i]]
+
+
+class GlobalPlanner(Loggable, ABC):
+    @abstractmethod
+    def set_walls(self, segments: list) -> None: ...
+
+    @abstractmethod
+    def compute(
+        self,
+        agents: Iterable[BaseAgent],
+        high_level_commands: dict[int, Any],
+    ) -> dict[int, Any]: ...
+
+    @abstractmethod
+    def get_cached_goals(self) -> dict[int, Any]: ...
+
+    def get_cached_paths(self) -> dict[int, list[Pose2D]]:
+        return {}
+
+    def get_markers(self, agents: Iterable[BaseAgent], stamp) -> list:
+        return []
+
+    @staticmethod
+    def advance_along_path(
+        agent_pos: Pose2D,
+        waypoints: Sequence[Pose2D],
+        current_idx: int,
+    ) -> int:
+        idx = current_idx
+        while idx < len(waypoints) - 1:
+            wp = waypoints[idx]
+            nxt = waypoints[idx + 1]
+            dx, dy = nxt.x - wp.x, nxt.y - wp.y
+            tx, ty = agent_pos.x - wp.x, agent_pos.y - wp.y
+            if dx * tx + dy * ty >= dx * dx + dy * dy:
+                idx += 1
+            else:
+                break
+        return idx
+
+    @classmethod
+    def register(cls, name: str):
+        return _registry.register(name)
+
+    @classmethod
+    def create(cls, name: str, *args, **kwargs) -> GlobalPlanner:
+        return _registry.get(name)(*args, **kwargs)
+
+    @classmethod
+    def list_available(cls) -> list[str]:
+        return _registry.list_available()
+
+
+def _load_astar():
+    from .astar import AStarPlanner
+
+    return AStarPlanner
+
+
+_registry.register("astar")(_load_astar)

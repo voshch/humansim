@@ -1,0 +1,4 @@
+arena_humansim_msgs/FlowConfig flow
+---
+bool success
+string message

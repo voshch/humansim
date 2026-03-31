@@ -1,0 +1,5 @@
+# Request: batched perception deltas since last tick
+PerceptionEvents events
+---
+# Response: only new or changed high-level commands
+HighLevelCommand[] commands

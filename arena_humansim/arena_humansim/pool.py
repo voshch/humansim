@@ -1,0 +1,179 @@
+from __future__ import annotations
+
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+if TYPE_CHECKING:
+    from arena_humansim.agents import BaseAgent
+
+_DEFAULT_CAPACITY = 512
+
+
+class AgentPool:
+    def __init__(self, capacity: int = _DEFAULT_CAPACITY):
+        self.capacity = capacity
+        self.n: int = 0
+        self._id_to_idx: dict[int, int] = {}
+
+        self.agent_ids = np.zeros(capacity, dtype=np.int32)
+        self.pos = np.zeros((capacity, 2), dtype=np.float64)
+        self.vel = np.zeros((capacity, 2), dtype=np.float64)
+        self.prev_vel = np.zeros((capacity, 2), dtype=np.float64)
+        self.theta = np.zeros(capacity, dtype=np.float64)
+        self.desired_vel = np.zeros(capacity, dtype=np.float64)
+
+        self.agent_radius = np.zeros(capacity, dtype=np.float64)
+        self.max_velocity = np.zeros(capacity, dtype=np.float64)
+        self.max_acceleration = np.zeros(capacity, dtype=np.float64)
+        self.max_deceleration = np.zeros(capacity, dtype=np.float64)
+        self.min_turning_radius = np.zeros(capacity, dtype=np.float64)
+        self.pivot_angular_velocity = np.zeros(capacity, dtype=np.float64)
+
+        self.relaxation_time = np.zeros(capacity, dtype=np.float64)
+        self.repulsion_strength = np.zeros(capacity, dtype=np.float64)
+        self.repulsion_range = np.zeros(capacity, dtype=np.float64)
+        self.anisotropy = np.zeros(capacity, dtype=np.float64)
+
+        self.vision_range = np.zeros(capacity, dtype=np.float64)
+        self.vision_fov = np.zeros(capacity, dtype=np.float64)
+
+        self.goal_pos = np.zeros((capacity, 2), dtype=np.float64)
+        self.has_goal = np.zeros(capacity, dtype=np.bool_)
+
+        self.neighbor_indptr = np.zeros(1, dtype=np.int32)
+        self.neighbor_indices = np.empty(0, dtype=np.int32)
+
+    def idx(self, agent_id: int) -> int:
+        return self._id_to_idx[agent_id]
+
+    def add_agent(self, agent: BaseAgent) -> int:
+        i = self.n
+        if i >= self.capacity:
+            self._grow(i + 1)
+        self.n = i + 1
+
+        aid = agent.state.agent_id
+        self._id_to_idx[aid] = i
+        self.agent_ids[i] = aid
+
+        self.pos[i, 0] = agent.state.pose.x
+        self.pos[i, 1] = agent.state.pose.y
+        self.theta[i] = agent.state.pose.theta
+        self.vel[i, 0] = agent.state.velocity[0]
+        self.vel[i, 1] = agent.state.velocity[1]
+        self.desired_vel[i] = agent.state.desired_velocity
+
+        p = agent.params
+        self.agent_radius[i] = p.agent_radius
+        self.max_velocity[i] = p.max_velocity
+        self.max_acceleration[i] = p.max_acceleration
+        self.max_deceleration[i] = p.max_deceleration
+        self.min_turning_radius[i] = p.min_turning_radius
+        self.pivot_angular_velocity[i] = p.pivot_angular_velocity
+
+        lp = p.local_planner_params
+        self.relaxation_time[i] = lp.relaxation_time
+        self.repulsion_strength[i] = lp.repulsion_strength
+        self.repulsion_range[i] = lp.repulsion_range
+        self.anisotropy[i] = lp.anisotropy
+
+        perc = p.perception
+        self.vision_range[i] = perc.vision_range
+        self.vision_fov[i] = perc.vision_fov
+
+        self.has_goal[i] = False
+        self.prev_vel[i] = self.vel[i]
+        return i
+
+    def swap_remove(self, agent_id: int) -> int | None:
+        idx = self._id_to_idx.pop(agent_id)
+        last = self.n - 1
+        if idx != last:
+            swapped_id = int(self.agent_ids[last])
+            self._id_to_idx[swapped_id] = idx
+            for arr in (
+                self.agent_ids, self.theta, self.desired_vel,
+                self.agent_radius, self.max_velocity, self.max_acceleration,
+                self.max_deceleration, self.min_turning_radius, self.pivot_angular_velocity,
+                self.relaxation_time, self.repulsion_strength, self.repulsion_range,
+                self.anisotropy, self.vision_range, self.vision_fov, self.has_goal,
+            ):
+                arr[idx] = arr[last]
+            for arr in (self.pos, self.vel, self.prev_vel, self.goal_pos):
+                arr[idx] = arr[last]
+        else:
+            swapped_id = None
+        self.n = last
+        return swapped_id
+
+    def reset(self) -> None:
+        self.n = 0
+        self._id_to_idx.clear()
+
+    def sync_back(self, agents: Iterable[BaseAgent]) -> None:
+        n = self.n
+        for i, agent in enumerate(agents):
+            agent.state.pose.x = float(self.pos[i, 0])
+            agent.state.pose.y = float(self.pos[i, 1])
+            agent.state.pose.theta = float(self.theta[i])
+            agent.state.velocity = (float(self.vel[i, 0]), float(self.vel[i, 1]))
+
+    def set_goals(self, goals: dict[int, object]) -> None:
+        self.has_goal[: self.n] = False
+        for aid, goal in goals.items():
+            idx = self._id_to_idx.get(aid)
+            if idx is None:
+                continue
+            if hasattr(goal, "x") and hasattr(goal, "y"):
+                self.goal_pos[idx, 0] = goal.x
+                self.goal_pos[idx, 1] = goal.y
+            else:
+                self.goal_pos[idx, 0] = float(goal[0])
+                self.goal_pos[idx, 1] = float(goal[1])
+            self.has_goal[idx] = True
+
+    def store_prev_vel(self) -> None:
+        n = self.n
+        self.prev_vel[:n] = self.vel[:n]
+
+    def set_neighbor_csr(self, indptr: np.ndarray, indices: np.ndarray) -> None:
+        self.neighbor_indptr = indptr
+        self.neighbor_indices = indices
+
+    def _grow(self, min_capacity: int) -> None:
+        new_cap = max(min_capacity, self.capacity * 2)
+        old = self.capacity
+
+        def _resize_1d(arr: np.ndarray) -> np.ndarray:
+            out = np.zeros(new_cap, dtype=arr.dtype)
+            out[:old] = arr[:old]
+            return out
+
+        def _resize_2d(arr: np.ndarray) -> np.ndarray:
+            out = np.zeros((new_cap, arr.shape[1]), dtype=arr.dtype)
+            out[:old] = arr[:old]
+            return out
+
+        self.agent_ids = _resize_1d(self.agent_ids)
+        self.pos = _resize_2d(self.pos)
+        self.vel = _resize_2d(self.vel)
+        self.prev_vel = _resize_2d(self.prev_vel)
+        self.theta = _resize_1d(self.theta)
+        self.desired_vel = _resize_1d(self.desired_vel)
+        self.agent_radius = _resize_1d(self.agent_radius)
+        self.max_velocity = _resize_1d(self.max_velocity)
+        self.max_acceleration = _resize_1d(self.max_acceleration)
+        self.max_deceleration = _resize_1d(self.max_deceleration)
+        self.min_turning_radius = _resize_1d(self.min_turning_radius)
+        self.pivot_angular_velocity = _resize_1d(self.pivot_angular_velocity)
+        self.relaxation_time = _resize_1d(self.relaxation_time)
+        self.repulsion_strength = _resize_1d(self.repulsion_strength)
+        self.repulsion_range = _resize_1d(self.repulsion_range)
+        self.anisotropy = _resize_1d(self.anisotropy)
+        self.vision_range = _resize_1d(self.vision_range)
+        self.vision_fov = _resize_1d(self.vision_fov)
+        self.goal_pos = _resize_2d(self.goal_pos)
+        self.has_goal = _resize_1d(self.has_goal)
+        self.capacity = new_cap

@@ -1,0 +1,150 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Value: true
+      Cell Size: 1
+      Line Style:
+        Line Width: 0.03
+        Value: Lines
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Plane: XY
+      Plane Cell Count: 50
+      Reference Frame: <Fixed Frame>
+
+    # ── Perception ──
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Perception
+      Enabled: true
+      Value: true
+      Topic:
+        Value: /arena_humansim/viz/perception
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+
+    # ── Behavior ──
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Behavior
+      Enabled: true
+      Value: true
+      Topic:
+        Value: /arena_humansim/viz/behavior
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+
+    # ── Global Plan ──
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Global Plan
+      Enabled: true
+      Value: true
+      Topic:
+        Value: /arena_humansim/viz/global_plan
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+
+    # ── Local Plan ──
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Local Plan
+      Enabled: true
+      Value: true
+      Topic:
+        Value: /arena_humansim/viz/local_plan
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+
+    # ── Interaction ──
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Interaction
+      Enabled: true
+      Value: true
+      Topic:
+        Value: /arena_humansim/viz/interaction
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+
+    # ── Waypoints ──
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Waypoints
+      Enabled: true
+      Value: true
+      Topic:
+        Value: /arena_humansim/viz/waypoints
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+
+    # ── Infrastructure ──
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Infrastructure
+      Enabled: true
+      Value: true
+      Topic:
+        Value: /arena_humansim/viz/infrastructure
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+
+    # ── Module Detail (SFM forces, A* grid, etc.) ──
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Module Detail
+      Enabled: false
+      Value: true
+      Topic:
+        Value: /arena_humansim/viz/module_detail
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Value: true
+
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: TopDownOrtho
+      Enable Stereo Rendering:
+        Value: false
+      Near Clip Distance: 0.01
+      Scale: 50
+      Target Frame: <Fixed Frame>
+      Value: TopDownOrtho (rviz_default_plugins)
+      X: 0
+      Y: 0
+
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 800
+  Width: 1200
+  X: 100
+  Y: 100

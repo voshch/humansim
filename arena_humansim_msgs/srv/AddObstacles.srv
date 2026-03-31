@@ -1,0 +1,4 @@
+arena_humansim_msgs/ObstacleConfig[] obstacles
+---
+bool success
+string message

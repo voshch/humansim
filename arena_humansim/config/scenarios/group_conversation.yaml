@@ -1,0 +1,88 @@
+# group_conversation.yaml
+# Six agents arranged as three pairs that should form pairwise conversations.
+
+name: group_conversation
+description: >-
+  Six pedestrians form three conversational pairs. Each pair walks toward a
+  shared meeting point, then a scripted TALK_TO interaction is triggered.
+
+simulation:
+  seed: 123
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 3000
+  execution_mode: master
+
+modules:
+  perception: default
+  global_planner: astar
+  local_planner: sfm
+  interaction_manager: default
+  animation: kinematic
+  perception_params:
+    vision_range: 6.0
+    vision_fov: 180.0
+  local_planner_params:
+    relaxation_time: 0.5
+    repulsion_strength: 2.1
+    repulsion_range: 0.3
+    desired_velocity: 1.0
+    max_velocity: 1.8
+    agent_radius: 0.35
+
+agents:
+  # Pair A — meeting at (2, 0)
+  - agent_id: 0
+    spawn_pose: {x: -2.0, y: 0.0, theta: 0.0}
+    goal_sequence:
+      - {x: 1.5, y: 0.0}
+    desired_velocity: 1.0
+
+  - agent_id: 1
+    spawn_pose: {x: 6.0, y: 0.0, theta: 3.14159}
+    goal_sequence:
+      - {x: 2.5, y: 0.0}
+    desired_velocity: 1.0
+
+  # Pair B — meeting at (-3, 5)
+  - agent_id: 2
+    spawn_pose: {x: -7.0, y: 5.0, theta: 0.0}
+    goal_sequence:
+      - {x: -3.5, y: 5.0}
+    desired_velocity: 1.0
+
+  - agent_id: 3
+    spawn_pose: {x: 1.0, y: 5.0, theta: 3.14159}
+    goal_sequence:
+      - {x: -2.5, y: 5.0}
+    desired_velocity: 1.0
+
+  # Pair C — meeting at (0, -4)
+  - agent_id: 4
+    spawn_pose: {x: -4.0, y: -4.0, theta: 0.0}
+    goal_sequence:
+      - {x: -0.5, y: -4.0}
+    desired_velocity: 1.0
+
+  - agent_id: 5
+    spawn_pose: {x: 4.0, y: -4.0, theta: 3.14159}
+    goal_sequence:
+      - {x: 0.5, y: -4.0}
+    desired_velocity: 1.0
+
+interaction_scripts:
+  # Trigger conversations once each pair is close enough (estimated arrival ticks)
+  - tick: 100
+    interaction_type: TALK_TO
+    participants: [0, 1]
+    duration_ticks: 500
+
+  - tick: 100
+    interaction_type: TALK_TO
+    participants: [2, 3]
+    duration_ticks: 500
+
+  - tick: 100
+    interaction_type: TALK_TO
+    participants: [4, 5]
+    duration_ticks: 500

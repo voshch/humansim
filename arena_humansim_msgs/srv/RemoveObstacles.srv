@@ -1,0 +1,5 @@
+# empty names = remove all
+string[] names
+---
+bool success
+string message

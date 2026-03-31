@@ -1,0 +1,5 @@
+arena_humansim_msgs/SinkConfig sink
+---
+bool success
+string message
+string name

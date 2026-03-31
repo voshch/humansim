@@ -1,0 +1,6 @@
+# Inform AgentManager about the robot's current pose
+string name
+geometry_msgs/Pose2D pose
+float64 radius
+---
+bool success

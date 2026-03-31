@@ -1,0 +1,5 @@
+# Remove agents from the simulation (-1 = remove all)
+int32[] agent_ids
+---
+bool success
+string message

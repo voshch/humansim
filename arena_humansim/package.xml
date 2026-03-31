@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='utf-8'?>
+<package format="3">
+  <name>arena_humansim</name>
+  <version>0.0.0</version>
+  <description>Arena human simulator: modular, deterministic pedestrian simulation</description>
+  <maintainer email="dev@voshch.dev">voshch</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>arena_humansim_msgs</depend>
+  <exec_depend>python3-attr</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
