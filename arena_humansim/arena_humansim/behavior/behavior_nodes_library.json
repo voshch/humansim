@@ -1,0 +1,197 @@
+{
+  "BlockNodeSchema": {
+    "Purpose": "Command agent to block a target agent in a duration (second)",
+    "Parameters": {
+      "agent": {
+        "type": "BaseAgent",
+        "description": "The blocker"
+      },
+      "target_agent": {
+        "type": "BaseAgent",
+        "description": "The agent will be blocked"
+      },
+      "duration": {
+        "type": "float",
+        "description": "The duration of time of the block"
+      }
+    }
+  },
+  "FollowNodeSchema": {
+    "Purpose": "Command agent to follow a target agent in a duration (second)",
+    "Parameters": {
+      "agent": {
+        "type": "BaseAgent",
+        "description": "The follower"
+      },
+      "target_agent": {
+        "type": "BaseAgent",
+        "description": "The agent will be followed"
+      },
+      "duration": {
+        "type": "float",
+        "description": "The duration of time of the follow"
+      }
+    }
+  },
+  "GoToNodeSchema": {
+    "Purpose": "Navigate the agent to a specific coordinate.",
+    "Parameters": {
+      "agent": {
+        "type": "BaseAgent",
+        "description": "Agent that is commanded to navigate to the target position"
+      },
+      "target_pose": {
+        "type": "Pose2D",
+        "description": "Position of the target point"
+      }
+    }
+  },
+  "GroupTalkNodeSchema": {
+    "Purpose": "Orchestrates a social gathering by first navigating the agent to a focal point and then transitioning into a synchronized group conversation state.",
+    "Parameters": {
+      "agent": {
+        "type": "BaseAgent",
+        "description": "The local agent instance controlled by this specific behavior tree node."
+      },
+      "participant_agents": {
+        "type": "List[arena_humansim.agents.base.BaseAgent]",
+        "description": "The full roster of agents participating in the talk. The first agent in this list is designated as the 'initiator' or 'leader' for synchronization purposes."
+      },
+      "group_center": {
+        "type": "Pose2D",
+        "description": "The spatial coordinates (target) where the agents gather to form the conversation circle."
+      },
+      "duration": {
+        "type": "float",
+        "description": "The total time in seconds the group should remain in the ACTIVE conversation state."
+      }
+    }
+  },
+  "IdleNodeSchema": {
+    "Purpose": "Command agent to idle for a specific amount of time.",
+    "Parameters": {
+      "agent": {
+        "type": "BaseAgent",
+        "description": "Agent that is commanded to idle"
+      },
+      "duration": {
+        "type": "float",
+        "description": "Duration to idle"
+      }
+    }
+  },
+  "LieOnNodeSchema": {
+    "Purpose": "Command agent to navigate to an object and lie on it for a specific duration of time",
+    "Parameters": {
+      "agent": {
+        "type": "BaseAgent",
+        "description": "Agent that will lie on the object"
+      },
+      "object_name": {
+        "type": "str",
+        "description": "Object to be lied on"
+      },
+      "duration": {
+        "type": "float",
+        "description": "The duration of time the agent will lie on the object"
+      }
+    }
+  },
+  "LookAtNodeSchema": {
+    "Purpose": "Command agent to look at a target position in a duration (second)",
+    "Parameters": {
+      "agent": {
+        "type": "BaseAgent",
+        "description": "The agent will look"
+      },
+      "target_look_pose": {
+        "type": "Pose2D",
+        "description": "The target position for the agent to look at"
+      },
+      "duration": {
+        "type": "float",
+        "description": "The duration of time of the look"
+      }
+    }
+  },
+  "QueueNodeSchema": {
+    "Purpose": "Commands an agent to join a queue and progress to the front.",
+    "Parameters": {
+      "agent": {
+        "type": "BaseAgent",
+        "description": "The agent joining the queue"
+      },
+      "service_duration": {
+        "type": "float",
+        "description": "Time spent at the very front of the queue (e.g., at the counter)"
+      },
+      "front_pose": {
+        "type": "Pose2D",
+        "description": "The head of the queue. Yaw determines the direction the line forms."
+      },
+      "post_queue_pose": {
+        "type": "Pose2D",
+        "description": "Where the agent goes after finishing the service."
+      },
+      "step_distance": {
+        "type": "float",
+        "description": "Distance between people in the queue"
+      },
+      "chaos_mode": {
+        "type": "bool",
+        "description": "If True, agent ignores strict ordering and rushes for the gap"
+      }
+    }
+  },
+  "SitOnNodeSchema": {
+    "Purpose": "Command agent to navigate to an object and sit on it for a specific duration of time",
+    "Parameters": {
+      "agent": {
+        "type": "BaseAgent",
+        "description": "Agent that will sit on the object"
+      },
+      "object_name": {
+        "type": "str",
+        "description": "Object to be sit on"
+      },
+      "duration": {
+        "type": "float",
+        "description": "The duration of time the agent will sit on the object"
+      }
+    }
+  },
+  "TalkToNodeSchema": {
+    "Purpose": "Command agent to talk to a target agent in a duration (second)",
+    "Parameters": {
+      "agent": {
+        "type": "BaseAgent",
+        "description": "The agent will talk"
+      },
+      "target_agent": {
+        "type": "BaseAgent",
+        "description": "The agent will listen"
+      },
+      "duration": {
+        "type": "float",
+        "description": "The duration of time of the talk"
+      }
+    }
+  },
+  "WaveAtNodeSchema": {
+    "Purpose": "Command agent to wave at a target agent in a duration (second)",
+    "Parameters": {
+      "agent": {
+        "type": "BaseAgent",
+        "description": "The agent will wave"
+      },
+      "target_agent": {
+        "type": "BaseAgent",
+        "description": "The agent will be wave at"
+      },
+      "duration": {
+        "type": "float",
+        "description": "The duration of time of the waving"
+      }
+    }
+  }
+}
