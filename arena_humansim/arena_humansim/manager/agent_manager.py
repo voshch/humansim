@@ -20,6 +20,7 @@ from arena_humansim_msgs.srv import (
     AddSource,
     AddWalls,
     Feedback,
+    GetProfile,
     RemoveAgents,
     RemoveObstacles,
     RemoveSink,
@@ -160,7 +161,7 @@ class AgentManager(Node):
         self.declare_parameter("dt", 0.05)
         self.declare_parameter("bt_tick_interval", 5)
         self.declare_parameter("perception", "default")
-        self.declare_parameter("global_planner", "dijkstra")
+        self.declare_parameter("global_planner", "astar")
         self.declare_parameter("local_planner", "sfm")
         self.declare_parameter("animation", "noop")
         self.declare_parameter("collision", "wall_projection")
@@ -342,6 +343,11 @@ class AgentManager(Node):
             ResetSimulation,
             "reset",
             self._reset_callback,
+        )
+        self._get_profile_srv = self.create_service(
+            GetProfile,
+            "get_profile",
+            self._get_profile_callback,
         )
 
         if self._mode == self.MODE_MASTER:
@@ -567,6 +573,17 @@ class AgentManager(Node):
 
     def _phase_end(self, name: str, t0: float):
         self._tick_phases[name] = (time.perf_counter() - t0) * 1000.0
+
+    def _get_profile_callback(self, request, response):
+        for name, times in self._phase_accum.items():
+            response.phase_names.append(name)
+            response.phase_means_ms.append(float(np.mean(times)))
+            response.phase_p95s_ms.append(float(np.percentile(times, 95)))
+        response.n_ticks = sum(len(t) for t in self._phase_accum.values()) // max(len(self._phase_accum), 1)
+        response.n_agents = self._pool.n
+        if request.reset:
+            self._phase_accum.clear()
+        return response
 
     def _flush_profile(self):
         if not self._phase_accum:

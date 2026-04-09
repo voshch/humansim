@@ -125,9 +125,9 @@ class AgentType:
     local_planner_params: LocalPlannerDist = attrs.Factory(LocalPlannerDist)
 
     perception_stack: tuple[str, ...] = ("default",)
-    local_planner: str = "sfm"
-    global_planner: str = "dijkstra"
-    animation: str = "noop"
+    local_planner: str | None = None
+    global_planner: str | None = None
+    animation: str | None = None
 
     needs: dict[str, NeedDist] = attrs.Factory(dict)
     utility_weights: dict[str, float] = attrs.Factory(dict)
@@ -174,9 +174,9 @@ class SampledParams:
     local_planner_params: SampledLocalPlanner = attrs.Factory(SampledLocalPlanner)
 
     perception_stack: tuple[str, ...] = ("default",)
-    local_planner: str = "sfm"
-    global_planner: str = "dijkstra"
-    animation: str = "noop"
+    local_planner: str | None = None
+    global_planner: str | None = None
+    animation: str | None = None
 
     needs: dict[str, SampledNeed] = attrs.Factory(dict)
     utility_weights: dict[str, float] = attrs.Factory(dict)

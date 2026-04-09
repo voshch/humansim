@@ -1,0 +1,7 @@
+bool reset
+---
+string[] phase_names
+float64[] phase_means_ms
+float64[] phase_p95s_ms
+int32 n_ticks
+int32 n_agents

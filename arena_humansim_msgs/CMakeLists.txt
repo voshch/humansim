@@ -39,6 +39,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/RemoveWalls.srv"
   "srv/SetFlow.srv"
   "srv/SpawnAgents.srv"
+  "srv/GetProfile.srv"
   "srv/UpdateRobot.srv"
   DEPENDENCIES builtin_interfaces geometry_msgs std_msgs
 )
