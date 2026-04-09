@@ -5,6 +5,9 @@ from typing import Any
 import attrs
 import numpy as np
 import rclpy
+
+from py_trees.trees import BehaviourTree
+
 from arena_humansim_msgs.msg import AgentState as AgentStateMsg
 from arena_humansim_msgs.msg import AgentStates as AgentStatesMsg
 from arena_humansim_msgs.msg import ObstacleConfig as ObstacleConfigMsg
@@ -30,7 +33,16 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from rosgraph_msgs.msg import Clock
 
-from arena_humansim.agents import BUILTIN_AGENTS, BaseAgent, SampledParams, TickPhase, create_agent, create_agent_from_params, load_agent_types, resolve_agent_type
+from arena_humansim.agents import (
+    BUILTIN_AGENTS,
+    BaseAgent,
+    SampledParams,
+    TickPhase,
+    create_agent,
+    create_agent_from_params,
+    load_agent_types,
+    resolve_agent_type,
+)
 from arena_humansim.agents.loader import is_path_agent_type, resolve_agent_type_name
 from arena_humansim.animation import MotionAnimation
 from arena_humansim.behavior.compiler import compile_agent_behavior
@@ -49,7 +61,17 @@ from arena_humansim.utils import RNG
 from arena_humansim.utils.event_bus import EventBus
 from arena_humansim.utils.loggable import Loggable
 from arena_humansim.utils.scenario import EventScript, ScenarioConfig, WorldObjectConfig
-from arena_humansim.utils.types import AgentState, BehaviorTreeMovement, BeliefState, HighLevelCommand, InteractionOutcome, Pose2D, SpawnRequest, WaypointMode, WaypointMovement
+from arena_humansim.utils.types import (
+    AgentState,
+    BehaviorTreeMovement,
+    BeliefState,
+    HighLevelCommand,
+    InteractionOutcome,
+    Pose2D,
+    SpawnRequest,
+    WaypointMode,
+    WaypointMovement,
+)
 from arena_humansim.viz import MarkerPublisher
 
 
@@ -57,7 +79,9 @@ from arena_humansim.viz import MarkerPublisher
 class ObstacleData:
     name: str
     pose: Pose2D
-    bb: tuple[float, float, float, float, float, float]  # x_min, x_max, y_min, y_max, z_min, z_max
+    bb: tuple[
+        float, float, float, float, float, float
+    ]  # x_min, x_max, y_min, y_max, z_min, z_max
     interaction_types: tuple[str, ...]
     obstacle_type: str
     wall_segments: tuple[tuple[tuple[float, float], tuple[float, float]], ...]
@@ -143,7 +167,9 @@ class AgentManager(Node):
             default_name: self._perception_cache[default_name],
         }
 
-        self._behavior_trees: dict[int, object] = {}  # agent_id -> BehaviourTree or None
+        self._behavior_trees: dict[
+            int, object
+        ] = {}  # agent_id -> BehaviourTree or None
         self._world_knowledge = WorldKnowledge()
         self._event_bus = EventBus()
         self._event_scripts: list[EventScript] = []
@@ -260,7 +286,9 @@ class AgentManager(Node):
         elif self._mode == self.MODE_BENCHMARK:
             self._setup_benchmark_mode()
         else:
-            raise ValueError(f"Unknown mode '{self._mode}'. Use '{self.MODE_MASTER}', '{self.MODE_SUBSYSTEM}', or '{self.MODE_BENCHMARK}'.")
+            raise ValueError(
+                f"Unknown mode '{self._mode}'. Use '{self.MODE_MASTER}', '{self.MODE_SUBSYSTEM}', or '{self.MODE_BENCHMARK}'."
+            )
 
         self._sim_logger = None
         if log_dir:
@@ -278,9 +306,13 @@ class AgentManager(Node):
         if replay_mode:
             self._replay = ReplayManager()
             self._replay.load(replay_mode)
-            self._logger.info(f"Replay mode: loaded {self._replay.tick_count} ticks from {replay_mode}")
+            self._logger.info(
+                f"Replay mode: loaded {self._replay.tick_count} ticks from {replay_mode}"
+            )
 
-        self._logger.info(f"AgentManager initialized (seed={seed}, dt={self._dt}, mode={self._mode})")
+        self._logger.info(
+            f"AgentManager initialized (seed={seed}, dt={self._dt}, mode={self._mode})"
+        )
 
     def _collect_ros_parameters(self) -> dict:
         params = {}
@@ -345,7 +377,9 @@ class AgentManager(Node):
                 theta=agent_msg.pose.theta,
             ),
             velocity=(agent_msg.velocity.x, agent_msg.velocity.y),
-            desired_velocity=agent_msg.desired_velocity if agent_msg.desired_velocity > 0 else 1.3,
+            desired_velocity=agent_msg.desired_velocity
+            if agent_msg.desired_velocity > 0
+            else 1.3,
         )
 
         agent_type = resolve_agent_type_name(type_name, self._agent_types)
@@ -538,7 +572,11 @@ class AgentManager(Node):
             indptr = pool.neighbor_indptr
             indices = pool.neighbor_indices
             any_extra = any(len(a.perception) > 1 for a in agents)
-            agent_states = {aid: agent.state for aid, agent in self._agents.items()} if any_extra else None
+            agent_states = (
+                {aid: agent.state for aid, agent in self._agents.items()}
+                if any_extra
+                else None
+            )
             for i, agent in enumerate(agents):
                 has_bt = self._behavior_trees.get(agent.state.agent_id) is not None
                 has_extra = len(agent.perception) > 1
@@ -561,6 +599,7 @@ class AgentManager(Node):
             for agent_id in self._pool_agent_ids:
                 bt = self._behavior_trees.get(agent_id)
                 if bt is not None:
+                    bt: BehaviourTree
                     bt.tick()
 
             for agent_id, agent in self._agents.items():
@@ -583,7 +622,9 @@ class AgentManager(Node):
         # --- LOCAL PLAN (vectorized SFM or per-agent fallback) ---
         pool.store_prev_vel()
         if hasattr(self._local_planner, "compute_pool"):
-            self._local_planner.compute_pool(pool, store_forces=self._publish_markers, dt=self._dt)
+            self._local_planner.compute_pool(
+                pool, store_forces=self._publish_markers, dt=self._dt
+            )
         else:
             self._local_plan_fallback(agents, self._cached_intermediate_goals, pool)
 
@@ -599,7 +640,9 @@ class AgentManager(Node):
             if interaction.outcome != InteractionOutcome.ACTIVE:
                 for pid in interaction.participants:
                     agent = self._agents.get(pid)
-                    if agent is not None and isinstance(agent.movement, BehaviorTreeMovement):
+                    if agent is not None and isinstance(
+                        agent.movement, BehaviorTreeMovement
+                    ):
                         agent.movement.last_outcome = interaction.outcome
             if interaction.object_id:
                 self._world_knowledge.set_queue_length(
@@ -629,7 +672,10 @@ class AgentManager(Node):
 
         if self._marker_pub is not None:
             pool.sync_back(agents)
-            velocities = {int(pool.agent_ids[i]): (float(pool.vel[i, 0]), float(pool.vel[i, 1])) for i in range(n)}
+            velocities = {
+                int(pool.agent_ids[i]): (float(pool.vel[i, 0]), float(pool.vel[i, 1]))
+                for i in range(n)
+            }
             self._marker_pub.publish_perception(agents)
             self._marker_pub.publish_behavior(agents, self._high_level_cmds)
             self._marker_pub.publish_global_plan(
@@ -861,10 +907,14 @@ class AgentManager(Node):
             return {}
         result = self._replay.replay(self, logger=self._logger)
         if result["success"]:
-            self._logger.info(f"Replay verification passed: {result['total_ticks']} ticks")
+            self._logger.info(
+                f"Replay verification passed: {result['total_ticks']} ticks"
+            )
         else:
             div = result["first_divergence"]
-            self._logger.warn(f"Replay DIVERGED at tick {div['tick']}, agent {div['agent_id']}: {div['detail']}")
+            self._logger.warn(
+                f"Replay DIVERGED at tick {div['tick']}, agent {div['agent_id']}: {div['detail']}"
+            )
         return result
 
     def _setup_master_mode(self):
@@ -941,7 +991,9 @@ class AgentManager(Node):
         response.despawned_ids = self._accumulated_despawned
         self._accumulated_spawned = []
         self._accumulated_despawned = []
-        self._logger.debug(f"feedback: {len(request.robots)} robots, spawned={len(response.spawned_ids)}, despawned={len(response.despawned_ids)}")
+        self._logger.debug(
+            f"feedback: {len(request.robots)} robots, spawned={len(response.spawned_ids)}, despawned={len(response.despawned_ids)}"
+        )
         return response
 
     def _world_state_callback(self, msg: AgentStatesMsg):
@@ -999,7 +1051,10 @@ class AgentManager(Node):
                 aid = self._next_agent_id
                 self._next_agent_id += 1
 
-            waypoints = [Pose2D(x=pt.pose.x, y=pt.pose.y, theta=pt.pose.theta) for pt in agent_msg.waypoints.points]
+            waypoints = [
+                Pose2D(x=pt.pose.x, y=pt.pose.y, theta=pt.pose.theta)
+                for pt in agent_msg.waypoints.points
+            ]
             radii = [pt.radius for pt in agent_msg.waypoints.points]
 
             agent = self._build_base_agent(aid, agent_msg, waypoints)
@@ -1119,7 +1174,9 @@ class AgentManager(Node):
         radius = request.radius if request.radius > 0 else 0.3
         self._robots[name] = (pose, radius)
         response.success = True
-        self._logger.debug(f"update_robot: {name} at ({pose.x:.2f}, {pose.y:.2f}), r={radius:.2f}")
+        self._logger.debug(
+            f"update_robot: {name} at ({pose.x:.2f}, {pose.y:.2f}), r={radius:.2f}"
+        )
         return response
 
     @staticmethod
@@ -1132,18 +1189,30 @@ class AgentManager(Node):
         vertices = [Pose2D(x=v.x, y=v.y) for v in shape_msg.vertices]
         if shape_msg.type == _RECT and shape_msg.width > 0 and shape_msg.height > 0:
             hw, hh = shape_msg.width / 2.0, shape_msg.height / 2.0
-            vertices = [Pose2D(x=-hw, y=-hh), Pose2D(x=hw, y=-hh), Pose2D(x=hw, y=hh), Pose2D(x=-hw, y=hh)]
+            vertices = [
+                Pose2D(x=-hw, y=-hh),
+                Pose2D(x=hw, y=-hh),
+                Pose2D(x=hw, y=hh),
+                Pose2D(x=-hw, y=hh),
+            ]
         return Shape(type=stype, radius=shape_msg.radius, vertices=vertices)
 
     @staticmethod
     def _source_msg_to_config(src_msg) -> "SourceConfig":
-        from arena_humansim.utils.types import AgentTemplate, RateKeyframe, SinkAffinity, SourceConfig
+        from arena_humansim.utils.types import (
+            AgentTemplate,
+            RateKeyframe,
+            SinkAffinity,
+            SourceConfig,
+        )
 
         return SourceConfig(
             name=src_msg.name,
             pose=Pose2D(x=src_msg.pose.x, y=src_msg.pose.y, theta=src_msg.pose.theta),
             shape=AgentManager._shape_msg_to_shape(src_msg.shape),
-            rate_profile=[RateKeyframe(t=kf.t, rate=kf.rate) for kf in src_msg.rate_profile],
+            rate_profile=[
+                RateKeyframe(t=kf.t, rate=kf.rate) for kf in src_msg.rate_profile
+            ],
             max_concurrent=src_msg.max_concurrent,
             max_total=src_msg.max_total,
             agent=AgentTemplate(
@@ -1151,7 +1220,10 @@ class AgentManager(Node):
                 desired_velocity_max=src_msg.agent.desired_velocity_max,
                 agent_radius=src_msg.agent.agent_radius,
                 agent_type=src_msg.agent.agent_type,
-                sink_affinity=[SinkAffinity(sink_name=sa.sink_name, weight=sa.weight) for sa in src_msg.agent.sink_affinity],
+                sink_affinity=[
+                    SinkAffinity(sink_name=sa.sink_name, weight=sa.weight)
+                    for sa in src_msg.agent.sink_affinity
+                ],
             ),
         )
 
@@ -1161,7 +1233,9 @@ class AgentManager(Node):
 
         return SinkConfig(
             name=sink_msg.name,
-            pose=Pose2D(x=sink_msg.pose.x, y=sink_msg.pose.y, theta=sink_msg.pose.theta),
+            pose=Pose2D(
+                x=sink_msg.pose.x, y=sink_msg.pose.y, theta=sink_msg.pose.theta
+            ),
             shape=AgentManager._shape_msg_to_shape(sink_msg.shape),
             absorption_radius=sink_msg.absorption_radius,
             capacity=sink_msg.capacity,
@@ -1252,7 +1326,9 @@ class AgentManager(Node):
             self._walls[name] = ((start.x, start.y), (end.x, end.y))
         self._refresh_planners()
         response.success = True
-        response.message = f"Added {len(request.names)} wall(s), total {len(self._walls)}"
+        response.message = (
+            f"Added {len(request.names)} wall(s), total {len(self._walls)}"
+        )
         self._logger.debug(response.message)
         return response
 
@@ -1263,7 +1339,9 @@ class AgentManager(Node):
         else:
             for name in request.names:
                 self._walls.pop(name, None)
-            response.message = f"Removed {len(request.names)} wall(s), remaining {len(self._walls)}"
+            response.message = (
+                f"Removed {len(request.names)} wall(s), remaining {len(self._walls)}"
+            )
         self._refresh_planners()
         response.success = True
         self._logger.debug(response.message)
@@ -1313,7 +1391,14 @@ class AgentManager(Node):
             self._obstacles[obs_msg.name] = ObstacleData(
                 name=obs_msg.name,
                 pose=pose,
-                bb=(obs_msg.bb_x_min, obs_msg.bb_x_max, obs_msg.bb_y_min, obs_msg.bb_y_max, obs_msg.bb_z_min, obs_msg.bb_z_max),
+                bb=(
+                    obs_msg.bb_x_min,
+                    obs_msg.bb_x_max,
+                    obs_msg.bb_y_min,
+                    obs_msg.bb_y_max,
+                    obs_msg.bb_z_min,
+                    obs_msg.bb_z_max,
+                ),
                 interaction_types=tuple(obs_msg.interaction_types),
                 obstacle_type=obs_msg.obstacle_type,
                 wall_segments=tuple(wall_segments),
