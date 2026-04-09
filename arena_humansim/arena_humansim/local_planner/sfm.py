@@ -41,6 +41,9 @@ class SFMPlanner(LocalPlanner):
             self._wall_segments_np = np.array(segments, dtype=np.float64).reshape(-1, 2, 2)
         else:
             self._wall_segments_np = np.empty((0, 2, 2), dtype=np.float64)
+        self._wall_p1 = self._wall_segments_np[:, 0, :]
+        self._wall_d = self._wall_segments_np[:, 1, :] - self._wall_p1
+        self._wall_len_sq = np.sum(self._wall_d ** 2, axis=1)
         self._logger.info(f"Loaded {len(segments)} wall segment(s)")
 
     def compute_pool(self, pool: AgentPool, store_forces: bool = False, dt: float = 1.0) -> None:
@@ -63,7 +66,7 @@ class SFMPlanner(LocalPlanner):
         max_v = pool.max_velocity[:n]
 
         d_goal = goal - pos
-        dist_goal = np.linalg.norm(d_goal, axis=1, keepdims=True)
+        dist_goal = np.hypot(d_goal[:, 0], d_goal[:, 1])[:, None]
         dist_goal_safe = np.maximum(dist_goal, _EPS)
         e_goal = d_goal / dist_goal_safe
 
@@ -82,7 +85,7 @@ class SFMPlanner(LocalPlanner):
             pair_nbr = indices
 
             diff = pos[pair_obs] - pos[pair_nbr]
-            dists = np.linalg.norm(diff, axis=1)
+            dists = np.hypot(diff[:, 0], diff[:, 1])
             dists = np.maximum(dists, _EPS)
             normals = diff / dists[:, None]
 
@@ -102,7 +105,7 @@ class SFMPlanner(LocalPlanner):
         total_f = f_att + f_rep + f_wall
         new_vel = vel + total_f * dt
 
-        speed = np.linalg.norm(new_vel, axis=1)
+        speed = np.hypot(new_vel[:, 0], new_vel[:, 1])
         too_fast = speed > max_v
         if np.any(too_fast):
             new_vel[too_fast] *= (max_v[too_fast] / speed[too_fast])[:, None]
@@ -130,10 +133,9 @@ class SFMPlanner(LocalPlanner):
         if self._wall_segments_np.shape[0] == 0:
             return np.zeros((n, 2), dtype=np.float64)
 
-        seg_p1 = self._wall_segments_np[:, 0, :]
-        seg_p2 = self._wall_segments_np[:, 1, :]
-        seg_d = seg_p2 - seg_p1
-        seg_len_sq = np.sum(seg_d**2, axis=1)
+        seg_p1 = self._wall_p1
+        seg_d = self._wall_d
+        seg_len_sq = self._wall_len_sq
 
         ap = agent_pos[:, None, :]
         diff_to_p1 = ap - seg_p1[None, :, :]
@@ -143,7 +145,7 @@ class SFMPlanner(LocalPlanner):
 
         cp = seg_p1[None, :, :] + t[:, :, None] * seg_d[None, :, :]
         diff = ap - cp
-        dist = np.linalg.norm(diff, axis=2)
+        dist = np.hypot(diff[:, :, 0], diff[:, :, 1])
         dist = np.maximum(dist, _EPS)
         normals = diff / dist[:, :, None]
 
