@@ -1,0 +1,3 @@
+# Rules for implementing behavior nodes:
+- **Decentralized**: One behavior node (subclass of `py_trees.behavior.Behavior`) should control one and only one agent only. For example, in `group_talk.GroupTalkNode.update()`, we emit `HighLevelCommand` controlling only for agent `agent`, we do not emit `HighLevelCommand` for `participant_agents`. 
+- **For interactive behavior** (Behavior with command type is not `CommandType.NAVIGATE`): Emit `HighLevelCommand` only once, when agent is ready, let `InteractionManager` handle elapsed time. Emit `HighLevelCommand` multiple times at every tick will leads to unbounded time as `InteractionManager` appends `HighLevelCommand` every behavior tree tick. For example, see `follow.py` or `group_talk.py`

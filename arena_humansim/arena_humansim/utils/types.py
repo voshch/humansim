@@ -21,12 +21,15 @@ class InteractionType(enum.IntEnum):
     LIE_ON = 4
     USE = 5
     QUEUE_USE = 6
+    WAVE_AT = 7
+    BLOCK = 8
 
 
 class InteractionOutcome(enum.IntEnum):
-    ACTIVE = 0
-    COMPLETED = 1
-    INTERRUPTED = 2
+    FORMING = 0
+    ACTIVE = 1
+    COMPLETED = 2
+    INTERRUPTED = 3
 
 
 @attrs.define
@@ -91,7 +94,7 @@ class InteractionState:
     participants: list[int] = attrs.Factory(list)
     state: dict = attrs.Factory(dict)
     object_id: str | None = None
-    outcome: int = 0  # InteractionOutcome.ACTIVE
+    outcome: int = 0  # InteractionOutcome.FORMING
 
 
 @attrs.define

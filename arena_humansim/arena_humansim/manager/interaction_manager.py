@@ -55,6 +55,7 @@ class CommandType(enum.IntEnum):
     ACCEPT = 3
     DECLINE = 4
     STOP = 5
+    IDLE = 6
 
 
 @dataclasses.dataclass
