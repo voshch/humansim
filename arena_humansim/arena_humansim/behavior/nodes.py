@@ -22,6 +22,7 @@ from arena_humansim.utils.types import (
     InteractionType,
     Pose2D,
 )
+from arena_humansim.utils import DT, DISTANCE_TOLERANCE
 
 _bt_logger = get_logger("behavior_tree")
 
@@ -81,9 +82,6 @@ def score_actions(
     return scored
 
 
-_ARRIVAL_THRESHOLD = 0.5  # metres
-
-
 def _sample_param_dist(dist: ParamDist, rng: np.random.Generator) -> float:
     value = rng.normal(dist.mean, dist.std) if dist.std > 0 else dist.mean
     return float(np.clip(value, dist.clip_low, dist.clip_high))
@@ -117,7 +115,7 @@ def _interaction_command(
 def _at_target(agent: BaseAgent, target_pose: Pose2D) -> bool:
     dx = agent.state.pose.x - target_pose.x
     dy = agent.state.pose.y - target_pose.y
-    return math.hypot(dx, dy) < _ARRIVAL_THRESHOLD
+    return math.hypot(dx, dy) < DISTANCE_TOLERANCE
 
 
 class ConcreteStepNode(py_trees.behaviour.Behaviour):
@@ -128,7 +126,7 @@ class ConcreteStepNode(py_trees.behaviour.Behaviour):
         agent: BaseAgent,
         world: WorldKnowledge,
         rng: np.random.Generator,
-        dt: float = 0.05,
+        dt: float = DT,
     ) -> None:
         super().__init__(name=name)
         self._step = step_def
@@ -221,7 +219,7 @@ class AutonomousNode(py_trees.behaviour.Behaviour):
         world: WorldKnowledge,
         event_bus: EventBus,
         rng: np.random.Generator,
-        dt: float = 0.05,
+        dt: float = DT,
     ) -> None:
         super().__init__(name=name)
         self._step = step_def
@@ -298,7 +296,7 @@ class AutonomousNode(py_trees.behaviour.Behaviour):
 
 
 class NeedsDecayNode(py_trees.behaviour.Behaviour):
-    def __init__(self, name: str, agent: BaseAgent, dt: float) -> None:
+    def __init__(self, name: str, agent: BaseAgent, dt: float = DT) -> None:
         super().__init__(name=name)
         self._agent = agent
         self._dt = dt
