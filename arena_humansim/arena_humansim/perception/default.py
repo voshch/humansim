@@ -44,6 +44,8 @@ class DefaultPerception(Perception):
     def shared_positions(self) -> list[tuple[float, float]] | None:
         return self._shared_positions
 
+    _SMALL_N_THRESHOLD = 64
+
     def compute_pool(self, pool: AgentPool) -> None:
         n = pool.n
         if n <= 1:
@@ -54,6 +56,47 @@ class DefaultPerception(Perception):
             return
 
         positions = pool.pos[:n]
+
+        if n <= self._SMALL_N_THRESHOLD:
+            self._compute_pool_dense(pool, positions, n)
+        else:
+            self._compute_pool_kdtree(pool, positions, n)
+
+    def _compute_pool_dense(self, pool: AgentPool, positions: np.ndarray, n: int) -> None:
+        diff = positions[:, None, :] - positions[None, :, :]
+        dists = np.hypot(diff[:, :, 0], diff[:, :, 1])
+        np.fill_diagonal(dists, np.inf)
+
+        vision_range = pool.vision_range[:n]
+        mask = dists <= vision_range[:, None]
+
+        vision_fov = pool.vision_fov[:n]
+        if not np.all(vision_fov >= 360.0):
+            needs_fov = vision_fov < 360.0
+            if np.any(needs_fov):
+                heading = pool.theta[:n]
+                bearing = np.arctan2(diff[:, :, 1], diff[:, :, 0])
+                angle_diff = bearing - heading[:, None]
+                angle_diff = np.abs(np.arctan2(np.sin(angle_diff), np.cos(angle_diff)))
+                half_fov = np.radians(vision_fov * 0.5)
+                fov_mask = angle_diff <= half_fov[:, None]
+                fov_mask[~needs_fov, :] = True
+                mask &= fov_mask
+
+        row, col = np.where(mask)
+        if len(row) == 0:
+            pool.set_neighbor_csr(
+                np.zeros(n + 1, dtype=np.int32),
+                np.empty(0, dtype=np.int32),
+            )
+            return
+
+        counts = mask.sum(axis=1)
+        indptr = np.zeros(n + 1, dtype=np.int32)
+        np.cumsum(counts, out=indptr[1:])
+        pool.set_neighbor_csr(indptr, col.astype(np.int32))
+
+    def _compute_pool_kdtree(self, pool: AgentPool, positions: np.ndarray, n: int) -> None:
         tree = cKDTree(positions)
         self._shared_tree = tree
 
