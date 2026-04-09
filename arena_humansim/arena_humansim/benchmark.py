@@ -221,28 +221,34 @@ def launch_humansim(
     params_file: str | None,
     extra_params: dict,
     dt: float,
+    profile: bool = False,
+    profile_interval: int = 100,
 ) -> subprocess.Popen:
     cmd = [
         "ros2",
         "run",
         "arena_humansim",
         "arena_humansim_node",
+    ]
+    if profile:
+        cmd.extend(["--profile", "--profile-interval", str(profile_interval)])
+    cmd.extend([
         "--ros-args",
         "-p",
         "mode:=benchmark",
         "-p",
-        "publish_markers:=false",
+        "publish_markers:=0",
         "-p",
         f"dt:={dt}",
-    ]
+    ])
     if params_file:
         cmd.extend(["--params-file", params_file])
     for k, v in extra_params.items():
         cmd.extend(["-p", f"{k}:={v}"])
     proc = subprocess.Popen(
         cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL if not profile else None,
+        stderr=subprocess.PIPE if not profile else None,
         start_new_session=True,
     )
     return proc
@@ -270,8 +276,10 @@ def run_single(
     warmup: int,
     seed: int,
     executor,
+    profile: bool = False,
+    profile_interval: int = 100,
 ) -> RunResult:
-    proc = launch_humansim(params_file, extra_params, dt)
+    proc = launch_humansim(params_file, extra_params, dt, profile=profile, profile_interval=profile_interval)
     try:
         time.sleep(1.5)
         driver.wait_for_services(timeout=10.0)
@@ -295,8 +303,10 @@ def run_incremental(
     warmup: int,
     seed: int,
     executor,
+    profile: bool = False,
+    profile_interval: int = 100,
 ) -> IncrementalResult:
-    proc = launch_humansim(params_file, extra_params, dt)
+    proc = launch_humansim(params_file, extra_params, dt, profile=profile, profile_interval=profile_interval)
     try:
         time.sleep(1.5)
         driver.wait_for_services(timeout=10.0)
@@ -427,6 +437,8 @@ def main():
     parser.add_argument("--rounds", type=int, default=None, help="Rounds per (config, agent_count) pair (default: 3)")
     parser.add_argument("--incremental", action="store_true", help="Spawn 1 agent every --spawn-interval ticks for --ticks total")
     parser.add_argument("--spawn-interval", type=int, default=None, help="Ticks between spawns in incremental mode (default: 5)")
+    parser.add_argument("--profile", action="store_true", help="Enable per-phase tick profiling inside the sim node")
+    parser.add_argument("--profile-interval", type=int, default=100, help="Ticks between profile log dumps (default: 100)")
     args = parser.parse_args()
 
     cfg = {}
@@ -481,6 +493,7 @@ def main():
                 print(f"{label}: running incremental...", flush=True)
                 result = run_incremental(
                     driver, params_file, extra, dt, n_ticks, spawn_interval, warmup, seed, executor,
+                    profile=args.profile, profile_interval=args.profile_interval,
                 )
                 print_incremental_results(label, result)
             executor.shutdown()
@@ -510,6 +523,8 @@ def main():
                         warmup,
                         seed,
                         executor,
+                        profile=args.profile,
+                        profile_interval=args.profile_interval,
                     )
                     round_list.append(result)
                     print(

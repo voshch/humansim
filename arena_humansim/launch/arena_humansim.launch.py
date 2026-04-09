@@ -30,7 +30,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('mode', default_value='master', choices=['master', 'subsystem']),
         DeclareLaunchArgument('use_sim_time', default_value='false'),
-        DeclareLaunchArgument('markers', default_value='false'),
+        DeclareLaunchArgument('markers', default_value='0', description='0=off, 1=basic, 2=full'),
         DeclareLaunchArgument('rviz', default_value='true', description='true = default config, false = off, path = custom config'),
         Node(
             package='arena_humansim',
