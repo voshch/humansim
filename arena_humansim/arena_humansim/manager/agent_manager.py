@@ -110,7 +110,7 @@ class AgentManager(Node):
         self.declare_parameter("dt", 0.05)
         self.declare_parameter("bt_tick_interval", 5)
         self.declare_parameter("perception", "default")
-        self.declare_parameter("global_planner", "astar")
+        self.declare_parameter("global_planner", "dijkstra")
         self.declare_parameter("local_planner", "sfm")
         self.declare_parameter("animation", "noop")
         self.declare_parameter("collision", "wall_projection")

@@ -41,7 +41,7 @@ All modules are swappable via a plugin registry.
 
 | Layer | Options | Default |
 |---|---|---|
-| Global Planner | `astar` | `astar` |
+| Global Planner | `dijkstra` | `dijkstra` |
 | Local Planner | `sfm`, `orca` | `sfm` |
 | Perception | `default` | `default` |
 | Animation | `noop`, `kinematic` | `noop` |
@@ -139,11 +139,11 @@ ros2 run arena_humansim benchmark
 | `seed` | `0` | RNG seed for deterministic runs |
 | `dt` | `0.05` | Simulation timestep (s) |
 | `bt_tick_interval` | `5` | BT ticks every N sim ticks |
-| `global_planner` | `astar` | Global planner module |
+| `global_planner` | `dijkstra` | Global planner module |
 | `local_planner` | `sfm` | Local planner module |
 | `animation` | `noop` | Animation module |
 | `collision` | `wall_projection` | Collision resolver |
-| `publish_markers` | `true` | Emit RViz visualization markers |
+| `publish_markers` | `0` | RViz markers: 0=off, 1=infrastructure+labels+interactions, 2=full |
 | `log_dir` | `""` | Directory for replay logs |
 
 ### ROS Interface

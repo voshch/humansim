@@ -1,42 +1,21 @@
 from __future__ import annotations
 
-import heapq
 import math
 from collections.abc import Iterable, Sequence
 from typing import Any, Optional
 
 import attrs
 import numpy as np
+from scipy.ndimage import binary_dilation
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import dijkstra
 
 from arena_humansim.agents import BaseAgent
 from arena_humansim.utils.types import HighLevelCommand, Pose2D
 
 from . import GlobalPlanner, simplify_path
 
-
-@attrs.define(frozen=True)
-class AStarConfig:
-    replan_distance: float = 1.0
-    resolution: float = 0.05
-    inflation_radius: float = 0.3
-
-
-_NEIGHBORS_8: tuple[tuple[int, int, float], ...] = (
-    (-1, 0, 1.0),
-    (1, 0, 1.0),
-    (0, -1, 1.0),
-    (0, 1, 1.0),
-    (-1, -1, math.sqrt(2)),
-    (-1, 1, math.sqrt(2)),
-    (1, -1, math.sqrt(2)),
-    (1, 1, math.sqrt(2)),
-)
-
-
-def _heuristic(r1: int, c1: int, r2: int, c2: int) -> float:
-    dr = abs(r1 - r2)
-    dc = abs(c1 - c2)
-    return (dr + dc) + (math.sqrt(2) - 2.0) * min(dr, dc)
+_SQRT2 = math.sqrt(2)
 
 
 def _nearest_free_cell(
@@ -59,22 +38,61 @@ def _nearest_free_cell(
     return None
 
 
-def _astar_grid(
+def _build_grid_graph(grid: np.ndarray) -> csr_matrix:
+    rows, cols = grid.shape
+    free = grid == 0
+    free_flat = free.ravel()
+    n_cells = rows * cols
+
+    src = []
+    dst = []
+    weights = []
+
+    for dr, dc, cost in (
+        (-1, 0, 1.0), (1, 0, 1.0), (0, -1, 1.0), (0, 1, 1.0),
+        (-1, -1, _SQRT2), (-1, 1, _SQRT2), (1, -1, _SQRT2), (1, 1, _SQRT2),
+    ):
+        # build index arrays for the valid region of the shift
+        r_src = slice(max(-dr, 0), rows + min(-dr, 0))
+        c_src = slice(max(-dc, 0), cols + min(-dc, 0))
+        r_dst = slice(max(dr, 0), rows + min(dr, 0))
+        c_dst = slice(max(dc, 0), cols + min(dc, 0))
+
+        src_free = free[r_src, c_src]
+        dst_free = free[r_dst, c_dst]
+        both_free = src_free & dst_free
+
+        r_idx, c_idx = np.where(both_free)
+
+        src_r = r_idx + max(-dr, 0)
+        src_c = c_idx + max(-dc, 0)
+        dst_r = r_idx + max(dr, 0)
+        dst_c = c_idx + max(dc, 0)
+
+        src_flat = src_r * cols + src_c
+        dst_flat = dst_r * cols + dst_c
+
+        src.append(src_flat)
+        dst.append(dst_flat)
+        weights.append(np.full(src_flat.shape[0], cost, dtype=np.float32))
+
+    src = np.concatenate(src)
+    dst = np.concatenate(dst)
+    weights = np.concatenate(weights)
+
+    return csr_matrix((weights, (src, dst)), shape=(n_cells, n_cells))
+
+
+def _dijkstra_path(
+    graph: csr_matrix,
     grid: np.ndarray,
     start: tuple[int, int],
     goal: tuple[int, int],
 ) -> Optional[list[tuple[int, int]]]:
     rows, cols = grid.shape
-    sr, sc = start
-    gr, gc = goal
 
-    if not (0 <= sr < rows and 0 <= sc < cols):
-        return None
-    if not (0 <= gr < rows and 0 <= gc < cols):
-        return None
-
-    actual_start = _nearest_free_cell(grid, sr, sc)
-    actual_goal = _nearest_free_cell(grid, gr, gc)
+    actual_start = _nearest_free_cell(grid, start[0], start[1])
+    actual_goal = _nearest_free_cell(grid, goal[0], goal[1])
     if actual_start is None or actual_goal is None:
         return None
 
@@ -83,76 +101,67 @@ def _astar_grid(
     sr, sc = actual_start
     gr, gc = actual_goal
 
-    remapped_start = (sr, sc)
-    if remapped_start == (gr, gc):
-        path = [remapped_start]
+    if (sr, sc) == (gr, gc):
+        path = [(sr, sc)]
         if prepend_start:
             path.insert(0, start)
         if append_goal:
             path.append(goal)
         return path
 
-    counter = 0
-    open_set: list = []
-    heapq.heappush(open_set, (_heuristic(sr, sc, gr, gc), counter, sr, sc))
-    counter += 1
+    goal_flat = gr * cols + gc
+    start_flat = sr * cols + sc
 
-    g_score: dict[tuple[int, int], float] = {remapped_start: 0.0}
-    came_from: dict[tuple[int, int], tuple[int, int]] = {}
-    closed: set = set()
+    # straight-line distance as lower bound; allow 4x detour before giving up
+    straight = math.sqrt((sr - gr) ** 2 + (sc - gc) ** 2)
+    limit = max(straight * 4.0, 200.0)
 
-    while open_set:
-        _, _, r, c = heapq.heappop(open_set)
+    dist, predecessors = dijkstra(
+        graph, directed=False, indices=goal_flat,
+        return_predecessors=True, limit=limit,
+    )
 
-        if (r, c) in closed:
-            continue
-        closed.add((r, c))
+    if np.isinf(dist[start_flat]):
+        # retry without limit in case path requires long detour
+        dist, predecessors = dijkstra(
+            graph, directed=False, indices=goal_flat,
+            return_predecessors=True,
+        )
 
-        if r == gr and c == gc:
-            path: list[tuple[int, int]] = [(r, c)]
-            while (r, c) in came_from:
-                r, c = came_from[(r, c)]
-                path.append((r, c))
-            path.reverse()
-            if prepend_start:
-                path.insert(0, start)
-            if append_goal:
-                path.append(goal)
-            return path
+    if np.isinf(dist[start_flat]):
+        return None
 
-        cur_g = g_score[(r, c)]
+    # trace back from start to goal
+    path_flat = []
+    node = start_flat
+    while node != goal_flat:
+        path_flat.append(node)
+        node = predecessors[node]
+        if node < 0:
+            return None
+    path_flat.append(goal_flat)
 
-        for dr, dc, move_cost in _NEIGHBORS_8:
-            nr, nc = r + dr, c + dc
-            if not (0 <= nr < rows and 0 <= nc < cols):
-                continue
-            if grid[nr, nc] != 0:
-                continue
-            if (nr, nc) in closed:
-                continue
+    path = [(idx // cols, idx % cols) for idx in path_flat]
 
-            tentative_g = cur_g + move_cost
-            if tentative_g < g_score.get((nr, nc), math.inf):
-                g_score[(nr, nc)] = tentative_g
-                came_from[(nr, nc)] = (r, c)
-                f = tentative_g + _heuristic(nr, nc, gr, gc)
-                heapq.heappush(open_set, (f, counter, nr, nc))
-                counter += 1
-
-    return None
+    if prepend_start:
+        path.insert(0, start)
+    if append_goal:
+        path.append(goal)
+    return path
 
 
-class AStarPlanner(GlobalPlanner):
+class DijkstraPlanner(GlobalPlanner):
     def __init__(
         self,
         replan_distance: float = 1.0,
-        inflation_radius: float = 0.3,
+        inflation_radius: float = 0.5,
     ):
         self._replan_distance = replan_distance
         self._inflation_radius = inflation_radius
 
         self._occupancy_grid: Optional[np.ndarray] = None
-        self._resolution: float = 0.05
+        self._grid_graph: Optional[csr_matrix] = None
+        self._resolution: float = 0.2
         self._origin: Pose2D = Pose2D()
         self._wall_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
 
@@ -162,6 +171,7 @@ class AStarPlanner(GlobalPlanner):
 
     def set_walls(self, segments: list) -> None:
         self._path_cache.clear()
+        self._grid_graph = None
         self._wall_segments = list(segments)
         if not segments:
             self._occupancy_grid = None
@@ -176,11 +186,11 @@ class AStarPlanner(GlobalPlanner):
         y_max = float(all_points[:, 1].max()) + margin
 
         self._origin = Pose2D(x=x_min, y=y_min)
-        cols = int(math.ceil((x_max - x_min) / self._resolution)) + 1
-        rows = int(math.ceil((y_max - y_min) / self._resolution)) + 1
+        res = self._resolution
+        cols = int(math.ceil((x_max - x_min) / res)) + 1
+        rows = int(math.ceil((y_max - y_min) / res)) + 1
         grid = np.zeros((rows, cols), dtype=np.uint8)
 
-        res = self._resolution
         for (x1, y1), (x2, y2) in segments:
             c1, r1 = (x1 - x_min) / res, (y1 - y_min) / res
             c2, r2 = (x2 - x_min) / res, (y2 - y_min) / res
@@ -195,22 +205,15 @@ class AStarPlanner(GlobalPlanner):
         if radius_cells > 0:
             y, x = np.ogrid[-radius_cells : radius_cells + 1, -radius_cells : radius_cells + 1]
             kernel = (x * x + y * y) <= radius_cells * radius_cells
-            inflated = np.zeros_like(grid)
-            wall_rows, wall_cols = np.where(grid != 0)
-            for wr, wc in zip(wall_rows, wall_cols):
-                r_lo = max(wr - radius_cells, 0)
-                r_hi = min(wr + radius_cells + 1, rows)
-                c_lo = max(wc - radius_cells, 0)
-                c_hi = min(wc + radius_cells + 1, cols)
-                kr_lo = r_lo - (wr - radius_cells)
-                kr_hi = kernel.shape[0] - ((wr + radius_cells + 1) - r_hi)
-                kc_lo = c_lo - (wc - radius_cells)
-                kc_hi = kernel.shape[1] - ((wc + radius_cells + 1) - c_hi)
-                inflated[r_lo:r_hi, c_lo:c_hi] |= kernel[kr_lo:kr_hi, kc_lo:kc_hi]
-            grid = inflated
+            grid = binary_dilation(grid, structure=kernel).astype(np.uint8)
 
         self._occupancy_grid = grid
-        self._logger.info(f"Walls rasterized: {cols}x{rows}, res={self._resolution}m, {len(segments)} segment(s), inflation={self._inflation_radius}m ({radius_cells} cells)")
+        self._grid_graph = _build_grid_graph(grid)
+        self._logger.info(
+            f"Walls rasterized: {cols}x{rows} ({cols * rows} cells), res={res}m, "
+            f"{len(segments)} segment(s), inflation={self._inflation_radius}m ({radius_cells} cells), "
+            f"graph edges={self._grid_graph.nnz}"
+        )
 
     def get_cached_goals(self) -> dict[int, Any]:
         return dict(self._cached_results)
@@ -354,7 +357,7 @@ class AStarPlanner(GlobalPlanner):
                 goals[agent_id] = target
                 continue
 
-            if self._occupancy_grid is None:
+            if self._occupancy_grid is None or self._grid_graph is None:
                 goals[agent_id] = target
                 continue
 
@@ -368,7 +371,7 @@ class AStarPlanner(GlobalPlanner):
             start_rc = self._world_to_grid(agent_pos.x, agent_pos.y)
             goal_rc = self._world_to_grid(target.x, target.y)
 
-            raw_path = _astar_grid(self._occupancy_grid, start_rc, goal_rc)
+            raw_path = _dijkstra_path(self._grid_graph, self._occupancy_grid, start_rc, goal_rc)
 
             if raw_path is None:
                 self._logger.debug(f"No path for agent {agent_id} ({start_rc} -> {goal_rc}), using direct goal")

@@ -37,7 +37,7 @@ class SimulationParams:
 @attrs.define
 class ModuleConfig:
     perception: str = "default"
-    global_planner: str = "astar"
+    global_planner: str = "dijkstra"
     local_planner: str = "sfm"
     animation: str = "noop"
 

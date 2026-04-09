@@ -120,10 +120,10 @@ class GlobalPlanner(Loggable, ABC):
         return _registry.list_available()
 
 
-def _load_astar():
-    from .astar import AStarPlanner
+def _load_dijkstra():
+    from .dijkstra import DijkstraPlanner
 
-    return AStarPlanner
+    return DijkstraPlanner
 
 
-_registry.register("astar")(_load_astar)
+_registry.register("dijkstra")(_load_dijkstra)

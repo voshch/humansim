@@ -126,7 +126,7 @@ class AgentType:
 
     perception_stack: tuple[str, ...] = ("default",)
     local_planner: str = "sfm"
-    global_planner: str = "astar"
+    global_planner: str = "dijkstra"
     animation: str = "noop"
 
     needs: dict[str, NeedDist] = attrs.Factory(dict)
@@ -175,7 +175,7 @@ class SampledParams:
 
     perception_stack: tuple[str, ...] = ("default",)
     local_planner: str = "sfm"
-    global_planner: str = "astar"
+    global_planner: str = "dijkstra"
     animation: str = "noop"
 
     needs: dict[str, SampledNeed] = attrs.Factory(dict)
