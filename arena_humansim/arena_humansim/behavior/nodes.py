@@ -4,11 +4,24 @@ import numpy as np
 import py_trees
 from rclpy.logging import get_logger
 
-from arena_humansim.agents import ActionDef, BaseAgent, NeedCondition, ParamDist, SequenceDef, StepDef
+from arena_humansim.agents import (
+    ActionDef,
+    BaseAgent,
+    NeedCondition,
+    ParamDist,
+    SequenceDef,
+    StepDef,
+)
 from arena_humansim.manager.interaction_manager import CommandType
 from arena_humansim.manager.world_knowledge import WorldKnowledge
 from arena_humansim.utils.event_bus import EventBus
-from arena_humansim.utils.types import BehaviorTreeMovement, HighLevelCommand, InteractionOutcome, InteractionType, Pose2D
+from arena_humansim.utils.types import (
+    BehaviorTreeMovement,
+    HighLevelCommand,
+    InteractionOutcome,
+    InteractionType,
+    Pose2D,
+)
 
 _bt_logger = get_logger("behavior_tree")
 
@@ -157,7 +170,9 @@ class ConcreteStepNode(py_trees.behaviour.Behaviour):
             return py_trees.common.Status.RUNNING
 
         if self._step.interaction is not None:
-            self._agent.movement.command = _interaction_command(self._agent, self._step.interaction)
+            self._agent.movement.command = _interaction_command(
+                self._agent, self._step.interaction
+            )
 
         if self._duration is not None:
             if self._elapsed >= self._duration:
@@ -222,7 +237,9 @@ class AutonomousNode(py_trees.behaviour.Behaviour):
         self._duration: float | None = None
         self._elapsed: float = 0.0
 
-    def _filter_actions(self, action_defs: dict[str, ActionDef]) -> dict[str, ActionDef]:
+    def _filter_actions(
+        self, action_defs: dict[str, ActionDef]
+    ) -> dict[str, ActionDef]:
         if self._step.allowed_actions is not None:
             allowed = set(self._step.allowed_actions)
             return {k: v for k, v in action_defs.items() if k in allowed}
@@ -233,7 +250,11 @@ class AutonomousNode(py_trees.behaviour.Behaviour):
 
     def initialise(self) -> None:
         self._elapsed = 0.0
-        self._duration = _sample_param_dist(self._step.duration, self._rng) if self._step.duration is not None else None
+        self._duration = (
+            _sample_param_dist(self._step.duration, self._rng)
+            if self._step.duration is not None
+            else None
+        )
 
     def update(self) -> py_trees.common.Status:
         agent_id = self._agent.state.agent_id
@@ -258,11 +279,15 @@ class AutonomousNode(py_trees.behaviour.Behaviour):
             best_action = self._actions[best_name]
 
             if best_action.target_object:
-                obj = self._world.nearest_object(best_action.target_object, self._agent.state.pose)
+                obj = self._world.nearest_object(
+                    best_action.target_object, self._agent.state.pose
+                )
                 if obj is not None:
                     self._agent.movement.command = _nav_command(self._agent, obj.pose)
             elif best_action.interaction:
-                self._agent.movement.command = _interaction_command(self._agent, best_action.interaction)
+                self._agent.movement.command = _interaction_command(
+                    self._agent, best_action.interaction
+                )
             else:
                 self._agent.movement.command = None
         else:
@@ -336,9 +361,13 @@ class SequenceStateMachine(py_trees.behaviour.Behaviour):
 
     def _goto(self, target: str) -> py_trees.common.Status:
         if target not in self._sequences:
-            _bt_logger.warning(f'Agent {self._agent.state.agent_id}: invalid transition target "{target}"')
+            _bt_logger.warning(
+                f'Agent {self._agent.state.agent_id}: invalid transition target "{target}"'
+            )
             return py_trees.common.Status.FAILURE
-        _bt_logger.debug(f"Agent {self._agent.state.agent_id}: {self._current_name} -> {target}")
+        _bt_logger.debug(
+            f"Agent {self._agent.state.agent_id}: {self._current_name} -> {target}"
+        )
         self._current_node.terminate(py_trees.common.Status.FAILURE)
         self._current_name = target
         self._current_node = self._sequences[target]

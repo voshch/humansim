@@ -4,25 +4,48 @@ from typing import Any
 
 from arena_humansim.utils import RNG
 from arena_humansim.utils.loggable import Loggable
-from arena_humansim.utils.types import HighLevelCommand, InteractionContract, InteractionOutcome, InteractionState, InteractionType
+from arena_humansim.utils.types import (
+    HighLevelCommand,
+    InteractionContract,
+    InteractionOutcome,
+    InteractionState,
+    InteractionType,
+)
 
 
 def _make_contract(interaction_type: int) -> InteractionContract:
     it = InteractionType(interaction_type)
     if it == InteractionType.TALK_TO:
-        return InteractionContract(type=interaction_type, min_participants=2, max_participants=2)
+        return InteractionContract(
+            type=interaction_type, min_participants=2, max_participants=2
+        )
     elif it == InteractionType.GROUP_CONVERSATION:
-        return InteractionContract(type=interaction_type, min_participants=2, max_participants=-1)
+        return InteractionContract(
+            type=interaction_type, min_participants=2, max_participants=-1
+        )
     elif it == InteractionType.FOLLOW:
-        return InteractionContract(type=interaction_type, min_participants=2, max_participants=2)
+        return InteractionContract(
+            type=interaction_type, min_participants=2, max_participants=2
+        )
     elif it in (InteractionType.SIT_ON, InteractionType.LIE_ON):
-        return InteractionContract(type=interaction_type, min_participants=1, max_participants=1)
+        return InteractionContract(
+            type=interaction_type, min_participants=1, max_participants=1
+        )
     elif it == InteractionType.USE:
-        return InteractionContract(type=interaction_type, min_participants=1, max_participants=1)
+        return InteractionContract(
+            type=interaction_type, min_participants=1, max_participants=1
+        )
     elif it == InteractionType.QUEUE_USE:
-        return InteractionContract(type=interaction_type, min_participants=1, max_participants=1, queueable=True)
+        return InteractionContract(
+            type=interaction_type,
+            min_participants=1,
+            max_participants=1,
+            queueable=True,
+        )
     else:
-        return InteractionContract(type=interaction_type, min_participants=2, max_participants=2)
+        return InteractionContract(
+            type=interaction_type, min_participants=2, max_participants=2
+        )
 
 
 class CommandType(enum.IntEnum):
@@ -47,9 +70,15 @@ class InteractionManager(Loggable):
         self.interactions: dict[int, InteractionState] = {}
         self.next_interaction_id: int = 0
         self._advertisements: dict[int, list[_Advertisement]] = {}
-        self._ads_by_type: dict[int, list[_Advertisement]] = {}  # interaction_type -> ads
-        self._agent_to_interactions: dict[int, set[int]] = {}  # agent_id -> set of interaction_ids
-        self._agent_to_queues: dict[int, set[int]] = {}  # agent_id -> set of interaction_ids they're queued in
+        self._ads_by_type: dict[
+            int, list[_Advertisement]
+        ] = {}  # interaction_type -> ads
+        self._agent_to_interactions: dict[
+            int, set[int]
+        ] = {}  # agent_id -> set of interaction_ids
+        self._agent_to_queues: dict[
+            int, set[int]
+        ] = {}  # agent_id -> set of interaction_ids they're queued in
         self._rng = rng_manager.get_substream("interaction_manager")
 
     def advertise(self, agent_id: int, interaction_type: int) -> _Advertisement:
@@ -90,7 +119,9 @@ class InteractionManager(Loggable):
             if contract.queueable:
                 if contract.max_queue == -1 or len(contract.queue) < contract.max_queue:
                     contract.queue.append(agent_id)
-                    self._agent_to_queues.setdefault(agent_id, set()).add(interaction_id)
+                    self._agent_to_queues.setdefault(agent_id, set()).add(
+                        interaction_id
+                    )
                     return True
             return False
 
@@ -198,7 +229,9 @@ class InteractionManager(Loggable):
                         del self._agent_to_queues[next_agent]
                 interaction.participants.append(next_agent)
                 contract.current_participants.append(next_agent)
-                self._agent_to_interactions.setdefault(next_agent, set()).add(interaction.id)
+                self._agent_to_interactions.setdefault(next_agent, set()).add(
+                    interaction.id
+                )
 
     def _process_command(self, cmd: HighLevelCommand) -> None:
         ctype = cmd.type
@@ -217,7 +250,9 @@ class InteractionManager(Loggable):
 
         elif ctype == CommandType.SEARCH:
             results = self.search(cmd.agent_id, cmd.interaction_type)
-            cmd.__dict__["_search_results"] = [ad.interaction_id for ad in results if ad.interaction_id is not None]
+            cmd.__dict__["_search_results"] = [
+                ad.interaction_id for ad in results if ad.interaction_id is not None
+            ]
 
         elif ctype == CommandType.ACCEPT:
             target_id = cmd.interaction_target
@@ -272,10 +307,14 @@ class InteractionManager(Loggable):
         contract.current_participants.append(creator_id)
         self._agent_to_interactions.setdefault(creator_id, set()).add(iid)
         self.interactions[iid] = interaction
-        self._logger.debug(f"Interaction {iid} created: type={InteractionType(interaction_type).name}, creator={creator_id}")
+        self._logger.debug(
+            f"Interaction {iid} created: type={InteractionType(interaction_type).name}, creator={creator_id}"
+        )
         return interaction
 
-    def _readvertise_for_participant(self, agent_id: int, interaction: InteractionState) -> None:
+    def _readvertise_for_participant(
+        self, agent_id: int, interaction: InteractionState
+    ) -> None:
         if interaction.contract.is_full:
             return
         ads = self._advertisements.get(agent_id, [])
@@ -303,7 +342,9 @@ class InteractionManager(Loggable):
         if ads is None:
             return
         removed = [ad for ad in ads if ad.interaction_id == interaction_id]
-        self._advertisements[agent_id] = [ad for ad in ads if ad.interaction_id != interaction_id]
+        self._advertisements[agent_id] = [
+            ad for ad in ads if ad.interaction_id != interaction_id
+        ]
         if not self._advertisements[agent_id]:
             del self._advertisements[agent_id]
         for ad in removed:
@@ -325,7 +366,9 @@ class InteractionManager(Loggable):
         if interaction is None:
             return
         interaction.outcome = outcome
-        self._logger.debug(f"Interaction {interaction_id} torn down (outcome={InteractionOutcome(outcome).name}, participants={interaction.participants})")
+        self._logger.debug(
+            f"Interaction {interaction_id} torn down (outcome={InteractionOutcome(outcome).name}, participants={interaction.participants})"
+        )
         for agent_id in list(interaction.participants):
             interactions_set = self._agent_to_interactions.get(agent_id)
             if interactions_set is not None:
@@ -344,20 +387,30 @@ class InteractionManager(Loggable):
     def _tick_durations(self, dt: float) -> None:
         for iid, interaction in list(self.interactions.items()):
             contract = interaction.contract
-            if contract.duration is None or interaction.outcome != InteractionOutcome.ACTIVE:
+            if (
+                contract.duration is None
+                or interaction.outcome != InteractionOutcome.ACTIVE
+            ):
                 continue
             contract.elapsed += dt
             if contract.elapsed >= contract.duration:
                 self._teardown(iid, InteractionOutcome.COMPLETED)
 
     def _prune_ended_interactions(self) -> None:
-        to_remove = [iid for iid, interaction in self.interactions.items() if interaction.outcome != InteractionOutcome.ACTIVE]
+        to_remove = [
+            iid
+            for iid, interaction in self.interactions.items()
+            if interaction.outcome != InteractionOutcome.ACTIVE
+        ]
         for iid in to_remove:
             del self.interactions[iid]
 
     def _prune_dead_interactions(self) -> None:
         to_remove = [
-            iid for iid, interaction in self.interactions.items() if interaction.outcome == InteractionOutcome.ACTIVE and len(interaction.participants) < interaction.contract.min_participants
+            iid
+            for iid, interaction in self.interactions.items()
+            if interaction.outcome == InteractionOutcome.ACTIVE
+            and len(interaction.participants) < interaction.contract.min_participants
         ]
         for iid in to_remove:
             self._teardown(iid)
