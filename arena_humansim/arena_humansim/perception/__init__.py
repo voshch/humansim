@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from arena_humansim.utils import ModuleRegistry
@@ -10,6 +9,7 @@ from arena_humansim.utils.loggable import Loggable
 if TYPE_CHECKING:
     from arena_humansim.agents import BaseAgent
     from arena_humansim.utils.types import AgentState, BeliefState
+    from arena_humansim.viz import MarkerPublisher
 
 _registry = ModuleRegistry()
 
@@ -24,8 +24,8 @@ class Perception(Loggable, ABC):
         belief: BeliefState,
     ) -> BeliefState: ...
 
-    def get_markers(self, agents: Iterable[BaseAgent], stamp) -> list:
-        return []
+    def publish_markers(self, pub: MarkerPublisher) -> None:
+        pass
 
     @classmethod
     def get(cls, name: str) -> type:

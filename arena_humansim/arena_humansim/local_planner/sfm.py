@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -12,6 +12,7 @@ from . import LocalPlanner
 
 if TYPE_CHECKING:
     from arena_humansim.pool import AgentPool
+    from arena_humansim.viz import MarkerPublisher
 
 _EPS = 1e-6
 
@@ -32,6 +33,7 @@ class SFMPlanner(LocalPlanner):
         self._wall_segments_np: np.ndarray = np.empty((0, 2, 2), dtype=np.float64)
         self._last_forces: dict[int, tuple[tuple[float, float], tuple[float, float], tuple[float, float]]] = {}
         self._last_force_arrays: tuple | None = None
+        self._last_agents: Sequence[BaseAgent] | None = None
 
     def set_walls(self, segments: list) -> None:
         self._wall_segments = list(segments)
@@ -111,6 +113,7 @@ class SFMPlanner(LocalPlanner):
         if store_forces:
             self._last_force_arrays = (
                 pool.agent_ids[:n].copy(),
+                pos.copy(),
                 f_att.copy(),
                 f_rep.copy(),
                 f_wall.copy(),
@@ -154,6 +157,7 @@ class SFMPlanner(LocalPlanner):
         agents: Sequence[BaseAgent],
         global_goals: dict[int, Any],
     ) -> dict[int, tuple[float, float]]:
+        self._last_agents = agents
         if not agents:
             self._last_forces = {}
             return {}
@@ -264,138 +268,58 @@ class SFMPlanner(LocalPlanner):
         self._last_forces = last_forces
         return velocities
 
-    def get_markers(self, agents: Iterable[BaseAgent], stamp) -> list:
-        from arena_humansim.viz import arrow, rgba
+    def publish_markers(self, pub: MarkerPublisher) -> None:
+        from arena_humansim.viz import rgba
+        from geometry_msgs.msg import Point
+        from visualization_msgs.msg import Marker
 
         c_goal = rgba(0.2, 0.9, 0.2, 0.7)
         c_social = rgba(1.0, 0.2, 0.2, 0.7)
         c_obstacle = rgba(1.0, 0.6, 0.0, 0.7)
         scale = 0.3
-        markers = []
+
+        goal_view = pub.view("f_goal", Marker.ARROW)
+        social_view = pub.view("f_social", Marker.ARROW)
+        obstacle_view = pub.view("f_obstacle", Marker.ARROW)
 
         if self._last_force_arrays is not None:
-            ids, f_att, f_rep, f_wall = self._last_force_arrays
-            id_to_idx = {int(ids[i]): i for i in range(len(ids))}
-            for agent in agents:
-                aid = agent.state.agent_id
-                idx = id_to_idx.get(aid)
-                if idx is None:
-                    continue
-                x, y = agent.state.pose.x, agent.state.pose.y
-                fg = (float(f_att[idx, 0]), float(f_att[idx, 1]))
-                fs = (float(f_rep[idx, 0]), float(f_rep[idx, 1]))
-                fo = (float(f_wall[idx, 0]), float(f_wall[idx, 1]))
-                if abs(fg[0]) > 1e-4 or abs(fg[1]) > 1e-4:
-                    markers.append(
-                        arrow(
-                            "f_goal",
-                            aid,
-                            stamp,
-                            x,
-                            y,
-                            fg[0] * scale,
-                            fg[1] * scale,
-                            c_goal,
-                            shaft=0.02,
-                            head_d=0.04,
-                            head_l=0.04,
-                            z=0.15,
-                        )
-                    )
-                if abs(fs[0]) > 1e-4 or abs(fs[1]) > 1e-4:
-                    markers.append(
-                        arrow(
-                            "f_social",
-                            aid,
-                            stamp,
-                            x,
-                            y,
-                            fs[0] * scale,
-                            fs[1] * scale,
-                            c_social,
-                            shaft=0.02,
-                            head_d=0.04,
-                            head_l=0.04,
-                            z=0.15,
-                        )
-                    )
-                if abs(fo[0]) > 1e-4 or abs(fo[1]) > 1e-4:
-                    markers.append(
-                        arrow(
-                            "f_obstacle",
-                            aid,
-                            stamp,
-                            x,
-                            y,
-                            fo[0] * scale,
-                            fo[1] * scale,
-                            c_obstacle,
-                            shaft=0.02,
-                            head_d=0.04,
-                            head_l=0.04,
-                            z=0.15,
-                        )
-                    )
-        elif self._last_forces:
-            for agent in agents:
+            ids, pos, f_att, f_rep, f_wall = self._last_force_arrays
+            for i in range(len(ids)):
+                aid = int(ids[i])
+                x, y = float(pos[i, 0]), float(pos[i, 1])
+                fg = (float(f_att[i, 0]), float(f_att[i, 1]))
+                fs = (float(f_rep[i, 0]), float(f_rep[i, 1]))
+                fo = (float(f_wall[i, 0]), float(f_wall[i, 1]))
+                self._emit_force(goal_view, aid, x, y, fg, scale, c_goal)
+                self._emit_force(social_view, aid, x, y, fs, scale, c_social)
+                self._emit_force(obstacle_view, aid, x, y, fo, scale, c_obstacle)
+        elif self._last_forces and self._last_agents is not None:
+            for agent in self._last_agents:
                 aid = agent.state.agent_id
                 forces = self._last_forces.get(aid)
                 if forces is None:
                     continue
                 x, y = agent.state.pose.x, agent.state.pose.y
-                f_goal, f_social, f_obstacle = forces
-                if abs(f_goal[0]) > 1e-4 or abs(f_goal[1]) > 1e-4:
-                    markers.append(
-                        arrow(
-                            "f_goal",
-                            aid,
-                            stamp,
-                            x,
-                            y,
-                            f_goal[0] * scale,
-                            f_goal[1] * scale,
-                            c_goal,
-                            shaft=0.02,
-                            head_d=0.04,
-                            head_l=0.04,
-                            z=0.15,
-                        )
-                    )
-                if abs(f_social[0]) > 1e-4 or abs(f_social[1]) > 1e-4:
-                    markers.append(
-                        arrow(
-                            "f_social",
-                            aid,
-                            stamp,
-                            x,
-                            y,
-                            f_social[0] * scale,
-                            f_social[1] * scale,
-                            c_social,
-                            shaft=0.02,
-                            head_d=0.04,
-                            head_l=0.04,
-                            z=0.15,
-                        )
-                    )
-                if abs(f_obstacle[0]) > 1e-4 or abs(f_obstacle[1]) > 1e-4:
-                    markers.append(
-                        arrow(
-                            "f_obstacle",
-                            aid,
-                            stamp,
-                            x,
-                            y,
-                            f_obstacle[0] * scale,
-                            f_obstacle[1] * scale,
-                            c_obstacle,
-                            shaft=0.02,
-                            head_d=0.04,
-                            head_l=0.04,
-                            z=0.15,
-                        )
-                    )
-        return markers
+                fg, fs, fo = forces
+                self._emit_force(goal_view, aid, x, y, fg, scale, c_goal)
+                self._emit_force(social_view, aid, x, y, fs, scale, c_social)
+                self._emit_force(obstacle_view, aid, x, y, fo, scale, c_obstacle)
+
+    @staticmethod
+    def _emit_force(view, aid, x, y, f, scale, color):
+        from geometry_msgs.msg import Point
+
+        if abs(f[0]) < 1e-4 and abs(f[1]) < 1e-4:
+            return
+        m, new = view.get(aid)
+        if new:
+            m.scale.x, m.scale.y, m.scale.z = 0.02, 0.04, 0.04
+            m.color = color
+            m.points = [Point(), Point()]
+        m.points[0].x, m.points[0].y, m.points[0].z = x, y, 0.15
+        m.points[1].x = x + f[0] * scale
+        m.points[1].y = y + f[1] * scale
+        m.points[1].z = 0.15
 
     def _compute_wall_forces_scalar(self, px: float, py: float, agent_radius: float) -> tuple[float, float]:
         f_wall_x = 0.0

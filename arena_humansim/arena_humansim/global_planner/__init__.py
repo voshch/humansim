@@ -4,7 +4,7 @@ import heapq
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -12,6 +12,9 @@ from arena_humansim.agents import BaseAgent
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
 from arena_humansim.utils.types import Pose2D
+
+if TYPE_CHECKING:
+    from arena_humansim.viz import MarkerPublisher
 
 _registry = ModuleRegistry()
 
@@ -86,8 +89,8 @@ class GlobalPlanner(Loggable, ABC):
     def get_cached_paths(self) -> dict[int, list[Pose2D]]:
         return {}
 
-    def get_markers(self, agents: Iterable[BaseAgent], stamp) -> list:
-        return []
+    def publish_markers(self, pub: MarkerPublisher) -> None:
+        pass
 
     @staticmethod
     def advance_along_path(

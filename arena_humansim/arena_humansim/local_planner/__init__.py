@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Sequence
-from typing import Any
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 from arena_humansim.agents import BaseAgent
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
+
+if TYPE_CHECKING:
+    from arena_humansim.viz import MarkerPublisher
 
 _registry = ModuleRegistry()
 
@@ -19,8 +22,8 @@ class LocalPlanner(Loggable, ABC):
         global_goals: dict[int, Any],
     ) -> dict[int, tuple[float, float]]: ...
 
-    def get_markers(self, agents: Iterable[BaseAgent], stamp) -> list:
-        return []
+    def publish_markers(self, pub: MarkerPublisher) -> None:
+        pass
 
     @classmethod
     def register(cls, name: str):
