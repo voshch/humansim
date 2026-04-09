@@ -1,4 +1,6 @@
 import math
+import queue
+import threading
 import time
 from collections.abc import Iterable, Sequence
 from typing import Any
@@ -73,7 +75,7 @@ from arena_humansim.utils.types import (
     WaypointMode,
     WaypointMovement,
 )
-from arena_humansim.viz import MarkerPublisher
+from arena_humansim.viz import MarkerPublisher, publish_behavior, publish_global_plan, publish_infrastructure, publish_interaction, publish_local_plan, publish_module_markers, publish_perception, publish_waypoints
 
 
 @attrs.define
@@ -86,6 +88,54 @@ class ObstacleData:
     interaction_types: tuple[str, ...]
     obstacle_type: str
     wall_segments: tuple[tuple[tuple[float, float], tuple[float, float]], ...]
+
+
+_MSG_BLOCK = 16
+
+
+class _AgentStateMsgPool:
+    def __init__(self):
+        self._pools = ([AgentStateMsg() for _ in range(_MSG_BLOCK)], [AgentStateMsg() for _ in range(_MSG_BLOCK)])
+        self._msgs = (AgentStatesMsg(), AgentStatesMsg())
+        self._msgs[0].header.frame_id = "map"
+        self._msgs[1].header.frame_id = "map"
+        self._idx = 0
+
+    def get(self, n: int) -> AgentStatesMsg:
+        pool = self._pools[self._idx]
+        while len(pool) < n:
+            pool.extend(AgentStateMsg() for _ in range(_MSG_BLOCK))
+        msg = self._msgs[self._idx]
+        msg.agents = pool[:n]
+        self._idx ^= 1
+        return msg
+
+
+class _BackgroundPublisher:
+    def __init__(self, publisher):
+        self._publisher = publisher
+        self._queue: queue.SimpleQueue = queue.SimpleQueue()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def _loop(self):
+        while True:
+            msg = self._queue.get()
+            if msg is None:
+                break
+            while not self._queue.empty():
+                next_msg = self._queue.get()
+                if next_msg is None:
+                    return
+                msg = next_msg
+            self._publisher.publish(msg)
+
+    def publish(self, msg):
+        self._queue.put(msg)
+
+    def shutdown(self):
+        self._queue.put(None)
+        self._thread.join(timeout=1.0)
 
 
 def _group_by(agents, key):
@@ -121,7 +171,7 @@ class AgentManager(Node):
         self.declare_parameter("min_speed_for_heading", 0.1)
         self.declare_parameter("publish_markers", 0)
         self.declare_parameter("profile_phases", False)
-        self.declare_parameter("profile_interval", 100)
+        self.declare_parameter("profile_interval", 0)
 
         seed = self.get_parameter("seed").value
         self._dt = self.get_parameter("dt").value
@@ -204,6 +254,7 @@ class AgentManager(Node):
         self._marker_pub = MarkerPublisher(self) if self._publish_markers > 0 else None
         self._tick_count: int = 0
         self._sim_time_ns: int = 0
+        self._agent_states_pool = _AgentStateMsgPool()
         self._tick_phases: dict[str, float] = {}
         self._overrun_count: int = 0
         self._last_overrun_log: float = 0.0
@@ -216,6 +267,7 @@ class AgentManager(Node):
             "agent_states",
             10,
         )
+        self._agent_states_bg = _BackgroundPublisher(self._agent_states_pub)
 
         self._world_state_sub = self.create_subscription(
             AgentStatesMsg,
@@ -521,13 +573,14 @@ class AgentManager(Node):
             return
         n_agents = self._pool.n
         parts = [f"tick profile ({n_agents} agents, {self._profile_interval} ticks):"]
-        total = 0.0
+        means = {name: float(np.mean(times)) for name, times in self._phase_accum.items()}
+        total = sum(means.values())
         for name, times in self._phase_accum.items():
-            mean = np.mean(times)
+            mean = means[name]
+            pct = mean / total * 100 if total > 0 else 0
             p95 = np.percentile(times, 95)
-            total += mean
-            parts.append(f"  {name:<16s} mean={mean:.3f}ms  p95={p95:.3f}ms")
-        parts.append(f"  {'TOTAL':<16s} mean={total:.3f}ms  budget={self._dt * 1000:.1f}ms  rtf={self._dt * 1000 / total:.2f}" if total > 0 else "")
+            parts.append(f"  {name:<16s} {pct:5.1f}%  mean={mean:.3f}ms  p95={p95:.3f}ms")
+        parts.append(f"  {'TOTAL':<16s} 100.0%  mean={total:.3f}ms  budget={self._dt * 1000:.1f}ms  rtf={self._dt * 1000 / total:.2f}" if total > 0 else "")
         self._logger.info("\n".join(parts))
         self._phase_accum.clear()
 
@@ -723,14 +776,15 @@ class AgentManager(Node):
         t0 = time.perf_counter()
         self._advance_waypoints(agents, pool)
         msg = self._build_agent_states_msg()
-        self._agent_states_pub.publish(msg)
+        self._agent_states_bg.publish(msg)
 
         if self._marker_pub is not None:
             pool.sync_back(agents)
             mlvl = self._publish_markers
-            self._marker_pub.publish_behavior(agents, self._high_level_cmds)
-            self._marker_pub.publish_interaction(agents, interactions)
-            self._marker_pub.publish_infrastructure(
+            publish_behavior(self._marker_pub, agents, self._high_level_cmds)
+            publish_interaction(self._marker_pub, agents, interactions)
+            publish_infrastructure(
+                self._marker_pub,
                 self._spawn_scheduler._sources,
                 self._despawn_monitor._sinks,
                 self._walls,
@@ -742,18 +796,19 @@ class AgentManager(Node):
                     int(pool.agent_ids[i]): (float(pool.vel[i, 0]), float(pool.vel[i, 1]))
                     for i in range(n)
                 }
-                self._marker_pub.publish_perception(agents)
-                self._marker_pub.publish_global_plan(
+                publish_perception(self._marker_pub, agents)
+                publish_global_plan(
+                    self._marker_pub,
                     agents,
                     self._high_level_cmds,
                     self._cached_intermediate_goals,
                 )
-                self._marker_pub.publish_local_plan(agents, velocities)
-                self._marker_pub.publish_waypoints(agents)
+                publish_local_plan(self._marker_pub, agents, velocities)
+                publish_waypoints(self._marker_pub, agents)
                 modules = list(self._perception_cache.values())
                 modules.append(self._global_planner)
                 modules.append(self._local_planner)
-                self._marker_pub.publish_module_markers(agents, modules)
+                publish_module_markers(self._marker_pub, modules)
             self._marker_pub.flush()
         self._phase_end("publish", t0)
 
@@ -773,7 +828,7 @@ class AgentManager(Node):
         if self._profile_phases:
             for name, ms in self._tick_phases.items():
                 self._phase_accum.setdefault(name, []).append(ms)
-            if self._tick_count % self._profile_interval == 0:
+            if self._profile_interval > 0 and self._tick_count % self._profile_interval == 0:
                 self._flush_profile()
 
     def _apply_kinematic_constraints_vectorized(self, pool: AgentPool) -> None:
@@ -1100,32 +1155,22 @@ class AgentManager(Node):
     def _build_agent_states_msg(self) -> AgentStatesMsg:
         pool = self._pool
         n = pool.n
-        msg = AgentStatesMsg()
+        msg = self._agent_states_pool.get(n)
         msg.header.stamp.sec = int(self._sim_time_ns // int(1e9))
         msg.header.stamp.nanosec = int(self._sim_time_ns % int(1e9))
-        msg.header.frame_id = "map"
         if n == 0:
             return msg
-
-        ids = pool.agent_ids[:n].tolist()
-        px = pool.pos[:n, 0].tolist()
-        py = pool.pos[:n, 1].tolist()
-        th = pool.theta[:n].tolist()
-        vx = pool.vel[:n, 0].tolist()
-        vy = pool.vel[:n, 1].tolist()
-        dv = pool.desired_vel[:n].tolist()
-        rad = pool.agent_radius[:n].tolist()
-
-        agents = [None] * n
         for i in range(n):
-            a = AgentStateMsg()
-            a.agent_id = ids[i]
-            a.pose = Pose2DMsg(x=px[i], y=py[i], theta=th[i])
-            a.velocity = Vector3(x=vx[i], y=vy[i], z=0.0)
-            a.desired_velocity = dv[i]
-            a.radius = rad[i]
-            agents[i] = a
-        msg.agents = agents
+            a = msg.agents[i]
+            a.agent_id = int(pool.agent_ids[i])
+            a.pose.x = float(pool.pos[i, 0])
+            a.pose.y = float(pool.pos[i, 1])
+            a.pose.theta = float(pool.theta[i])
+            a.velocity.x = float(pool.vel[i, 0])
+            a.velocity.y = float(pool.vel[i, 1])
+            a.velocity.z = 0.0
+            a.desired_velocity = float(pool.desired_vel[i])
+            a.radius = float(pool.agent_radius[i])
         return msg
 
     def _spawn_agents_callback(
@@ -1516,6 +1561,8 @@ class AgentManager(Node):
     def destroy_node(self):
         if hasattr(self, "_timer"):
             self._timer.cancel()
+        if self._profile_phases:
+            self._flush_profile()
         if self._sim_logger is not None:
             self._sim_logger.close()
         super().destroy_node()
@@ -1526,14 +1573,14 @@ def main(args=None):
 
     parser = argparse.ArgumentParser(description="arena_humansim node")
     parser.add_argument("--profile", action="store_true", help="Enable per-phase tick profiling")
-    parser.add_argument("--profile-interval", type=int, default=100, help="Ticks between profile log dumps (default: 100)")
+    parser.add_argument("--profile-interval", type=int, default=0, help="Ticks between profile log dumps (0 = flush at shutdown only)")
     parsed, remaining = parser.parse_known_args(args)
 
     rclpy.init(args=remaining)
     node = AgentManager()
     if parsed.profile:
         node._profile_phases = True
-    if parsed.profile_interval != 100:
+    if parsed.profile_interval:
         node._profile_interval = parsed.profile_interval
     try:
         rclpy.spin(node)

@@ -438,7 +438,7 @@ def main():
     parser.add_argument("--incremental", action="store_true", help="Spawn 1 agent every --spawn-interval ticks for --ticks total")
     parser.add_argument("--spawn-interval", type=int, default=None, help="Ticks between spawns in incremental mode (default: 5)")
     parser.add_argument("--profile", action="store_true", help="Enable per-phase tick profiling inside the sim node")
-    parser.add_argument("--profile-interval", type=int, default=100, help="Ticks between profile log dumps (default: 100)")
+    parser.add_argument("--profile-interval", type=int, default=0, help="Ticks between profile log dumps (0 = flush at shutdown only)")
     args = parser.parse_args()
 
     cfg = {}
