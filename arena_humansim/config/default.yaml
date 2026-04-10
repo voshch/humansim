@@ -4,7 +4,7 @@ arena_humansim:
     dt: 0.05
     bt_tick_interval: 5
     perception: default
-    global_planner: dijkstra
+    global_planner: astar
     local_planner: sfm
     animation: noop
     collision: wall_projection

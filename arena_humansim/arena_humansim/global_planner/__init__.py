@@ -129,4 +129,11 @@ def _load_dijkstra():
     return DijkstraPlanner
 
 
+def _load_astar():
+    from .astar import AStarPlanner
+
+    return AStarPlanner
+
+
 _registry.register("dijkstra")(_load_dijkstra)
+_registry.register("astar")(_load_astar)

@@ -25,6 +25,8 @@ setup(
         "numpy",
         "scipy",
         "py_trees",
+        "pyastar2d",
+        "pydantic",
     ],
     zip_safe=True,
     maintainer="voshch",

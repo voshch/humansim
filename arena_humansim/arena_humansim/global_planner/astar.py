@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import math
+import os
 from collections.abc import Iterable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
-import attrs
 import numpy as np
+import pyastar2d
 from scipy.ndimage import binary_dilation
-from scipy.sparse import csr_matrix
-from scipy.sparse.csgraph import dijkstra
 
 from arena_humansim.agents import BaseAgent
 from arena_humansim.utils.types import HighLevelCommand, Pose2D
@@ -38,59 +38,12 @@ def _nearest_free_cell(
     return None
 
 
-def _build_grid_graph(grid: np.ndarray) -> csr_matrix:
-    rows, cols = grid.shape
-    free = grid == 0
-    free_flat = free.ravel()
-    n_cells = rows * cols
-
-    src = []
-    dst = []
-    weights = []
-
-    for dr, dc, cost in (
-        (-1, 0, 1.0), (1, 0, 1.0), (0, -1, 1.0), (0, 1, 1.0),
-        (-1, -1, _SQRT2), (-1, 1, _SQRT2), (1, -1, _SQRT2), (1, 1, _SQRT2),
-    ):
-        # build index arrays for the valid region of the shift
-        r_src = slice(max(-dr, 0), rows + min(-dr, 0))
-        c_src = slice(max(-dc, 0), cols + min(-dc, 0))
-        r_dst = slice(max(dr, 0), rows + min(dr, 0))
-        c_dst = slice(max(dc, 0), cols + min(dc, 0))
-
-        src_free = free[r_src, c_src]
-        dst_free = free[r_dst, c_dst]
-        both_free = src_free & dst_free
-
-        r_idx, c_idx = np.where(both_free)
-
-        src_r = r_idx + max(-dr, 0)
-        src_c = c_idx + max(-dc, 0)
-        dst_r = r_idx + max(dr, 0)
-        dst_c = c_idx + max(dc, 0)
-
-        src_flat = src_r * cols + src_c
-        dst_flat = dst_r * cols + dst_c
-
-        src.append(src_flat)
-        dst.append(dst_flat)
-        weights.append(np.full(src_flat.shape[0], cost, dtype=np.float32))
-
-    src = np.concatenate(src)
-    dst = np.concatenate(dst)
-    weights = np.concatenate(weights)
-
-    return csr_matrix((weights, (src, dst)), shape=(n_cells, n_cells))
-
-
-def _dijkstra_path(
-    graph: csr_matrix,
+def _astar_path(
+    weights: np.ndarray,
     grid: np.ndarray,
     start: tuple[int, int],
     goal: tuple[int, int],
 ) -> Optional[list[tuple[int, int]]]:
-    rows, cols = grid.shape
-
     actual_start = _nearest_free_cell(grid, start[0], start[1])
     actual_goal = _nearest_free_cell(grid, goal[0], goal[1])
     if actual_start is None or actual_goal is None:
@@ -98,51 +51,20 @@ def _dijkstra_path(
 
     prepend_start = actual_start != start
     append_goal = actual_goal != goal
-    sr, sc = actual_start
-    gr, gc = actual_goal
 
-    if (sr, sc) == (gr, gc):
-        path = [(sr, sc)]
+    if actual_start == actual_goal:
+        path = [actual_start]
         if prepend_start:
             path.insert(0, start)
         if append_goal:
             path.append(goal)
         return path
 
-    goal_flat = gr * cols + gc
-    start_flat = sr * cols + sc
-
-    # straight-line distance as lower bound; allow 4x detour before giving up
-    straight = math.sqrt((sr - gr) ** 2 + (sc - gc) ** 2)
-    limit = max(straight * 4.0, 200.0)
-
-    dist, predecessors = dijkstra(
-        graph, directed=False, indices=goal_flat,
-        return_predecessors=True, limit=limit,
-    )
-
-    if np.isinf(dist[start_flat]):
-        # retry without limit in case path requires long detour
-        dist, predecessors = dijkstra(
-            graph, directed=False, indices=goal_flat,
-            return_predecessors=True,
-        )
-
-    if np.isinf(dist[start_flat]):
+    result = pyastar2d.astar_path(weights, actual_start, actual_goal, allow_diagonal=True)
+    if result is None:
         return None
 
-    # trace back from start to goal
-    path_flat = []
-    node = start_flat
-    while node != goal_flat:
-        path_flat.append(node)
-        node = predecessors[node]
-        if node < 0:
-            return None
-    path_flat.append(goal_flat)
-
-    path = [(idx // cols, idx % cols) for idx in path_flat]
-
+    path = [(int(r), int(c)) for r, c in result]
     if prepend_start:
         path.insert(0, start)
     if append_goal:
@@ -150,28 +72,28 @@ def _dijkstra_path(
     return path
 
 
-class DijkstraPlanner(GlobalPlanner):
+class AStarPlanner(GlobalPlanner):
     def __init__(
         self,
         replan_distance: float = 1.0,
-        inflation_radius: float = 0.5,
+        inflation_radius: float = 0.3,
     ):
         self._replan_distance = replan_distance
         self._inflation_radius = inflation_radius
 
         self._occupancy_grid: Optional[np.ndarray] = None
-        self._grid_graph: Optional[csr_matrix] = None
+        self._weights: Optional[np.ndarray] = None
         self._resolution: float = 0.2
         self._origin: Pose2D = Pose2D()
         self._wall_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
 
         self._path_cache: dict[int, tuple[tuple[float, float], list[Pose2D], int]] = {}
-
         self._cached_results: dict[int, Any] = {}
+        self._pool = ThreadPoolExecutor(max_workers=max((os.cpu_count() or 2) - 1, 1))
 
     def set_walls(self, segments: list) -> None:
         self._path_cache.clear()
-        self._grid_graph = None
+        self._weights = None
         self._wall_segments = list(segments)
         if not segments:
             self._occupancy_grid = None
@@ -208,11 +130,10 @@ class DijkstraPlanner(GlobalPlanner):
             grid = binary_dilation(grid, structure=kernel).astype(np.uint8)
 
         self._occupancy_grid = grid
-        self._grid_graph = _build_grid_graph(grid)
+        self._weights = np.where(grid == 0, 1.0, np.inf).astype(np.float32)
         self._logger.info(
             f"Walls rasterized: {cols}x{rows} ({cols * rows} cells), res={res}m, "
-            f"{len(segments)} segment(s), inflation={self._inflation_radius}m ({radius_cells} cells), "
-            f"graph edges={self._grid_graph.nnz}"
+            f"{len(segments)} segment(s), inflation={self._inflation_radius}m ({radius_cells} cells)"
         )
 
     def get_cached_goals(self) -> dict[int, Any]:
@@ -231,28 +152,18 @@ class DijkstraPlanner(GlobalPlanner):
         wy = row * self._resolution + self._origin.y
         return Pose2D(x=wx, y=wy)
 
-    def _needs_replan(
-        self,
-        agent_id: int,
-        goal: Pose2D,
-        agent_pos: Pose2D,
-    ) -> bool:
+    def _needs_replan(self, agent_id: int, goal: Pose2D, agent_pos: Pose2D) -> bool:
         if agent_id not in self._path_cache:
             return True
-
         cached_goal, waypoints, _ = self._path_cache[agent_id]
         goal_key = (round(goal.x, 3), round(goal.y, 3))
-
         if cached_goal != goal_key:
             return True
-
         if not waypoints:
             return True
-
         min_dist = self._min_distance_to_path(agent_pos, waypoints)
         if min_dist > self._replan_distance:
             return True
-
         return False
 
     @staticmethod
@@ -271,8 +182,8 @@ class DijkstraPlanner(GlobalPlanner):
         r1, c1 = self._world_to_grid(p1.x, p1.y)
         r2, c2 = self._world_to_grid(p2.x, p2.y)
         rows, cols = grid.shape
-        # step count must cover both axes to avoid skipping thin walls diagonally
-        steps = abs(r2 - r1) + abs(c2 - c1)
+        dr, dc = abs(r2 - r1), abs(c2 - c1)
+        steps = max(dr, dc)
         if steps == 0:
             return True
         for i in range(steps + 1):
@@ -327,11 +238,7 @@ class DijkstraPlanner(GlobalPlanner):
         result.append(waypoints[-1])
         return result
 
-    def _next_waypoint(
-        self,
-        waypoints: Sequence[Pose2D],
-        idx: int,
-    ) -> Pose2D:
+    def _next_waypoint(self, waypoints: Sequence[Pose2D], idx: int) -> Pose2D:
         target = idx + 1
         if target < len(waypoints):
             return waypoints[target]
@@ -343,8 +250,10 @@ class DijkstraPlanner(GlobalPlanner):
         high_level_commands: dict[int, Any],
     ) -> dict[int, Any]:
         agent_positions: dict[int, Pose2D] = {agent.state.agent_id: agent.state.pose for agent in agents}
-
         goals: dict[int, Pose2D] = {}
+        has_grid = self._occupancy_grid is not None and self._weights is not None
+
+        replan_requests: list[tuple[int, Pose2D, Pose2D, tuple[int, int], tuple[int, int]]] = []
 
         for agent_id, cmd in high_level_commands.items():
             if not isinstance(cmd, HighLevelCommand):
@@ -353,11 +262,7 @@ class DijkstraPlanner(GlobalPlanner):
             target = cmd.target_pose
             agent_pos = agent_positions.get(agent_id)
 
-            if agent_pos is None:
-                goals[agent_id] = target
-                continue
-
-            if self._occupancy_grid is None or self._grid_graph is None:
+            if agent_pos is None or not has_grid:
                 goals[agent_id] = target
                 continue
 
@@ -370,26 +275,36 @@ class DijkstraPlanner(GlobalPlanner):
 
             start_rc = self._world_to_grid(agent_pos.x, agent_pos.y)
             goal_rc = self._world_to_grid(target.x, target.y)
+            replan_requests.append((agent_id, agent_pos, target, start_rc, goal_rc))
 
-            raw_path = _dijkstra_path(self._grid_graph, self._occupancy_grid, start_rc, goal_rc)
+        if replan_requests:
+            weights = self._weights
+            grid = self._occupancy_grid
+            futures = {
+                agent_id: self._pool.submit(_astar_path, weights, grid, start_rc, goal_rc)
+                for agent_id, _, _, start_rc, goal_rc in replan_requests
+            }
 
-            if raw_path is None:
-                self._logger.debug(f"No path for agent {agent_id} ({start_rc} -> {goal_rc}), using direct goal")
-                goals[agent_id] = target
-                self._path_cache.pop(agent_id, None)
-                continue
+            for agent_id, agent_pos, target, start_rc, goal_rc in replan_requests:
+                raw_path = futures[agent_id].result()
 
-            waypoints = [self._grid_to_world(r, c) for r, c in raw_path]
-            waypoints[0] = Pose2D(x=agent_pos.x, y=agent_pos.y)
-            waypoints[-1] = Pose2D(x=target.x, y=target.y)
-            waypoints = self._simplify_with_los(waypoints)
-            if self._wall_segments:
-                waypoints = self._push_from_walls(waypoints)
+                if raw_path is None:
+                    self._logger.debug(f"No path for agent {agent_id} ({start_rc} -> {goal_rc}), using direct goal")
+                    goals[agent_id] = target
+                    self._path_cache.pop(agent_id, None)
+                    continue
 
-            goal_key = (round(target.x, 3), round(target.y, 3))
-            idx = self.advance_along_path(agent_pos, waypoints, 0)
-            self._path_cache[agent_id] = (goal_key, waypoints, idx)
-            goals[agent_id] = self._next_waypoint(waypoints, idx)
+                waypoints = [self._grid_to_world(r, c) for r, c in raw_path]
+                waypoints[0] = Pose2D(x=agent_pos.x, y=agent_pos.y)
+                waypoints[-1] = Pose2D(x=target.x, y=target.y)
+                waypoints = self._simplify_with_los(waypoints)
+                if self._wall_segments:
+                    waypoints = self._push_from_walls(waypoints)
+
+                goal_key = (round(target.x, 3), round(target.y, 3))
+                idx = self.advance_along_path(agent_pos, waypoints, 0)
+                self._path_cache[agent_id] = (goal_key, waypoints, idx)
+                goals[agent_id] = self._next_waypoint(waypoints, idx)
 
         self._cached_results = goals
         return goals

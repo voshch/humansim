@@ -1,0 +1,23 @@
+dt: 0.05
+ticks: 200
+warmup: 50
+rounds: 3
+
+stages:
+  - label: open space
+    agents: [10, 25, 50, 100]
+  - label: 10x10 maze
+    agents: [10, 25, 50, 100]
+    walls: maze(10)
+
+candidate:
+  label: astar
+  params_file: pkg://arena_humansim/config/default.yaml
+  params:
+    global_planner: astar
+
+reference:
+  label: dijkstra
+  params_file: pkg://arena_humansim/config/default.yaml
+  params:
+    global_planner: dijkstra
