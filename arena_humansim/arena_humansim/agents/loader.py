@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import attrs
 import yaml
 
 from .types import AgentType
@@ -33,7 +34,8 @@ def load_agent_type_from_file(path: str | Path) -> AgentType:
         raw = {}
     if "name" not in raw:
         raw["name"] = p.stem
-    return converter.structure(raw, AgentType)
+    at = converter.structure(raw, AgentType)
+    return attrs.evolve(at, source_path=p.resolve())
 
 
 def load_agent_types_from_dir(directory: Path) -> dict[str, AgentType]:

@@ -17,6 +17,8 @@ __all__ = [
     "sample_agent_type",
 ]
 
+from pathlib import Path
+
 import attrs
 import numpy as np
 
@@ -136,6 +138,8 @@ class AgentType:
     initial_sequence: str = "default"
     vars: dict[str, VarDef] = attrs.Factory(dict)
     extends: str | None = None
+
+    source_path: Path | None = attrs.field(default=None, eq=False, hash=False, repr=False)
 
 
 @attrs.frozen

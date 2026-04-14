@@ -177,9 +177,13 @@ def resolve_extends(
     agent_types: dict[str, AgentType],
     builtins: dict[str, AgentType],
 ) -> dict[str, AgentType]:
+    _strip_source = attrs.filters.exclude(attrs.fields(AgentType).source_path)
+    source_paths: dict[str, Any] = {
+        name: at.source_path for name, at in agent_types.items()
+    }
     all_types: dict[str, dict[str, Any]] = {}
     for name, at in agent_types.items():
-        all_types[name] = attrs.asdict(at)  # type: ignore[arg-type]
+        all_types[name] = attrs.asdict(at, filter=_strip_source)  # type: ignore[arg-type]
 
     resolved: dict[str, dict[str, Any]] = {}
     in_progress: set[str] = set()
@@ -215,7 +219,11 @@ def resolve_extends(
     result: dict[str, AgentType] = {}
     for name, raw in resolved.items():
         raw["name"] = name
-        result[name] = converter.structure(raw, AgentType)
+        at = converter.structure(raw, AgentType)
+        src = source_paths.get(name)
+        if src is not None:
+            at = attrs.evolve(at, source_path=src)
+        result[name] = at
     return result
 
 

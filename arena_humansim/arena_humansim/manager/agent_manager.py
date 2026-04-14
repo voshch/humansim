@@ -49,7 +49,7 @@ from arena_humansim.agents import (
 )
 from arena_humansim.agents.loader import is_path_agent_type, resolve_agent_type_name
 from arena_humansim.animation import MotionAnimation
-from arena_humansim.behavior.compiler import compile_agent_behavior
+from arena_humansim.behavior.compiler import BehaviorTreeFactory
 from arena_humansim.collision import CollisionResolver
 from arena_humansim.global_planner import GlobalPlanner
 from arena_humansim.local_planner import LocalPlanner
@@ -231,6 +231,7 @@ class AgentManager(Node):
         self._behavior_trees: dict[
             int, object
         ] = {}  # agent_id -> BehaviourTree or None
+        self._bt_factories: dict[tuple, BehaviorTreeFactory] = {}
         self._world_knowledge = WorldKnowledge()
         self._event_bus = EventBus()
         self._event_scripts: list[EventScript] = []
@@ -540,21 +541,30 @@ class AgentManager(Node):
         return self._build_base_agent(aid, agent_msg, list(spawn_req.waypoints))
 
     def _compile_behavior_tree(self, agent: BaseAgent) -> None:
+        aid = agent.state.agent_id
         type_name = agent.params.name
         agent_type = resolve_agent_type_name(type_name, self._agent_types)
-        if agent_type is None:
-            self._behavior_trees[agent.state.agent_id] = None
+        if agent_type is None or agent_type.mode == "simple" or not agent_type.sequences:
+            self._behavior_trees[aid] = None
             return
 
-        bt = compile_agent_behavior(
-            agent_type=agent_type,
+        if agent_type.source_path is not None:
+            key = ("path", str(agent_type.source_path))
+        else:
+            key = ("content", id(agent_type))
+        factory = self._bt_factories.get(key)
+        if factory is None:
+            factory = BehaviorTreeFactory(agent_type)
+            self._bt_factories[key] = factory
+
+        bt = factory.build(
             agent=agent,
             world=self._world_knowledge,
             event_bus=self._event_bus,
-            rng=self._rng.get_agent_substream(agent.state.agent_id, "behavior"),
+            rng=self._rng.get_agent_substream(aid, "behavior"),
             dt=self._dt,
         )
-        self._behavior_trees[agent.state.agent_id] = bt
+        self._behavior_trees[aid] = bt
         if bt is not None:
             agent.movement = BehaviorTreeMovement()
 
