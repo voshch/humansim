@@ -1,3 +1,4 @@
+from .accept import AcceptNode, AcceptNodeSchema
 from .block import BlockNode, BlockNodeSchema
 from .follow import FollowNode, FollowNodeSchema
 from .go_to import GoToNode, GoToNodeSchema
@@ -11,6 +12,8 @@ from .talk_to import TalkToNode, TalkToNodeSchema
 from .wave_at import WaveAtNode, WaveAtNodeSchema
 
 __all__ = [
+    "AcceptNodeSchema",
+    "AcceptNode",
     "BlockNodeSchema",
     "BlockNode",
     "FollowNodeSchema",
@@ -36,6 +39,7 @@ __all__ = [
 ]
 
 schemas = [
+    AcceptNodeSchema,
     BlockNodeSchema,
     FollowNodeSchema,
     GoToNodeSchema,
