@@ -171,6 +171,9 @@ class DefaultPerception(Perception):
         if agent_id not in all_agents:
             return belief
 
+        if self._shared_tree is None or self._shared_ids is None or self._shared_positions is None:
+            return belief
+
         observer = all_agents[agent_id]
         ox, oy = observer.pose.x, observer.pose.y
 

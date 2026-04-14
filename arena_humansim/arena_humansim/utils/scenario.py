@@ -4,7 +4,7 @@ import enum
 import operator
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import attrs
 import yaml
@@ -41,7 +41,7 @@ class ModuleConfig:
     local_planner: str = "sfm"
     animation: str = "noop"
 
-    perception_params: dict[str, object] = attrs.Factory(dict)
+    perception_params: dict[str, Any] = attrs.Factory(dict)
     global_planner_params: dict[str, Any] = attrs.Factory(dict)
     local_planner_params: dict[str, Any] = attrs.Factory(dict)
     animation_params: dict[str, Any] = attrs.Factory(dict)
@@ -55,7 +55,7 @@ class AgentConfig:
     goal_sequence: list[Pose2DModel] = attrs.Factory(list)
     desired_velocity: float = 1.3
     agent_radius: float = 0.35
-    interaction_preferences: dict[str, object] = attrs.Factory(dict)
+    interaction_preferences: dict[str, Any] = attrs.Factory(dict)
 
 
 @attrs.define
@@ -253,11 +253,14 @@ def _deep_merge(
     return merged
 
 
-_SAFE_OPS = {
+_BINARY_OPS = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
     ast.Mult: operator.mul,
     ast.Div: operator.truediv,
+}
+
+_UNARY_OPS = {
     ast.USub: operator.neg,
     ast.UAdd: operator.pos,
 }
@@ -276,17 +279,17 @@ def _safe_eval(node: ast.AST, variables: dict[str, int | float | bool | str]) ->
         raise ValueError(f"Unknown variable: {node.id}")
     if isinstance(node, ast.BinOp):
         op_type = type(node.op)
-        if op_type not in _SAFE_OPS:
+        if op_type not in _BINARY_OPS:
             raise ValueError(f"Unsupported operator: {op_type.__name__}")
         left = _safe_eval(node.left, variables)
         right = _safe_eval(node.right, variables)
-        return _SAFE_OPS[op_type](left, right)
+        return _BINARY_OPS[op_type](left, right)
     if isinstance(node, ast.UnaryOp):
         op_type = type(node.op)
-        if op_type not in _SAFE_OPS:
+        if op_type not in _UNARY_OPS:
             raise ValueError(f"Unsupported unary operator: {op_type.__name__}")
         operand = _safe_eval(node.operand, variables)
-        return _SAFE_OPS[op_type](operand)
+        return _UNARY_OPS[op_type](operand)
     raise ValueError(f"Unsupported AST node: {type(node).__name__}")
 
 
@@ -341,7 +344,7 @@ def resolve_vars(
             if vdef.max is not None and val > vdef.max:
                 raise ValueError(f"Variable '{vname}' value {val} above maximum {vdef.max}")
 
-    return _walk_resolve(raw_dict, variables)
+    return cast(dict[str, Any], _walk_resolve(raw_dict, variables))
 
 
 def _type_check_var(

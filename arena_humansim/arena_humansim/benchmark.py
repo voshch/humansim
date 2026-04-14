@@ -190,7 +190,7 @@ class BenchmarkDriver(Node):
             raise RuntimeError(f"Spawn failed: {resp}")
         return resp.spawned_ids
 
-    def _call_sync(self, client: Any, request: Any, timeout: float = 10.0) -> object:  # noqa: ANN401
+    def _call_sync(self, client: Any, request: Any, timeout: float = 10.0) -> Any:  # noqa: ANN401
         future = client.call_async(request)
         event = threading.Event()
         future.add_done_callback(lambda _: event.set())
@@ -224,7 +224,7 @@ class BenchmarkDriver(Node):
         seed: int = 42,
         radius: float = 20.0,
         warmup: int = 20,
-    ) -> IncrementalResult:
+    ) -> tuple[list[int], IncrementalResult]:
         rng = np.random.default_rng(seed)
         all_ids: list[int] = []
         result = IncrementalResult(dt=0.0, spawn_interval=spawn_interval, total_ticks=total_ticks)
@@ -804,7 +804,7 @@ def main():
                             profile_interval=args.profile_interval,
                         )
                         round_list.append(result)
-                        if csv_writer:
+                        if csv_writer is not None and csv_file is not None:
                             for tick_i, tick_ms in enumerate(result.tick_times_ms):
                                 csv_writer.writerow((label, n_agents, wc, r + 1, tick_i, tick_ms))
                             csv_file.flush()

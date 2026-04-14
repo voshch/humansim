@@ -42,6 +42,7 @@ from rosgraph_msgs.msg import Clock
 
 from arena_humansim.agents import (
     BUILTIN_AGENTS,
+    AgentType,
     BaseAgent,
     SampledParams,
     TickPhase,
@@ -238,7 +239,7 @@ class AgentManager(Node):
             default_name: self._perception_cache[default_name],
         }
 
-        self._behavior_trees: dict[int, object] = {}  # agent_id -> BehaviourTree or None
+        self._behavior_trees: dict[int, BehaviourTree | None] = {}
         self._bt_factories: dict[tuple, BehaviorTreeFactory] = {}
         self._world_knowledge = WorldKnowledge()
         self._event_bus = EventBus()
@@ -255,7 +256,7 @@ class AgentManager(Node):
 
         self._pool = AgentPool()
 
-        self._agent_types: dict[str, object] = dict(BUILTIN_AGENTS)
+        self._agent_types: dict[str, AgentType] = dict(BUILTIN_AGENTS)
         self._agents: dict[int, BaseAgent] = {}
         self._pool_agent_ids: list[int] = []
         self._robots: dict[str, tuple[Pose2D, float]] = {}

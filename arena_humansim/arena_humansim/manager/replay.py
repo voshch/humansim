@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import attrs
 
-from arena_humansim.agents import BaseAgent, SampledParams
+from arena_humansim.agents import SampledParams
 from arena_humansim.agents.types import SampledLocalPlanner, SampledPerception
 from arena_humansim.utils.loggable import Loggable
 from arena_humansim.utils.types import AgentState, HighLevelCommand, Pose2D
@@ -120,35 +120,6 @@ class ReplayManager(Loggable):
             )
         return agents
 
-    def get_base_agents_at_tick(self, n: int) -> dict[int, BaseAgent]:
-        record = self.get_tick(n)
-        if record is None:
-            return {}
-        agents: dict[int, BaseAgent] = {}
-        for aid_str, adata in record.get("agents", {}).items():
-            aid = int(aid_str)
-            pose = adata["pose"]
-            vel = adata["velocity"]
-            state = AgentState(
-                agent_id=aid,
-                pose=Pose2D(x=pose["x"], y=pose["y"], theta=pose["theta"]),
-                velocity=(vel["vx"], vel["vy"]),
-            )
-            params = self.get_spawn_params(aid)
-            if params is None:
-                params = SampledParams(
-                    name="unknown",
-                    desired_velocity=1.3,
-                    agent_radius=0.35,
-                    max_velocity=2.0,
-                    max_acceleration=1.5,
-                    max_deceleration=2.5,
-                    min_turning_radius=0.3,
-                    pivot_angular_velocity=2.0,
-                )
-            agents[aid] = BaseAgent(state=state, params=params)
-        return agents
-
     def get_commands_at_tick(self, n: int) -> dict[int, HighLevelCommand]:
         record = self.get_tick(n)
         if record is None:
@@ -194,7 +165,7 @@ class ReplayManager(Loggable):
                     result.first_divergence = divergence
                     msg = f"Replay divergence at tick {tick_n}: agent {divergence.agent_id} - {divergence.detail}"
                     if logger:
-                        logger.warn(msg)
+                        logger.warning(msg)
                 break
 
         return result

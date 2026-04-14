@@ -237,7 +237,10 @@ class InteractionManager(Loggable):
                 self.accept(cmd.agent_id, target_id)
             else:
                 ads = self.search(cmd.agent_id, cmd.interaction_type)
+                from_agent = cmd.target_agent
                 for ad in ads:
+                    if from_agent >= 0 and ad.agent_id != from_agent:
+                        continue
                     if ad.interaction_id is not None:
                         if self.accept(cmd.agent_id, ad.interaction_id):
                             break

@@ -1,6 +1,7 @@
 """Core data structures for arena_humansim."""
 
 import enum
+from typing import Any
 
 import attrs
 
@@ -108,7 +109,7 @@ class InteractionState:
     type: int = 0
     contract: InteractionContract = attrs.Factory(InteractionContract)
     participants: list[int] = attrs.Factory(list)
-    state: dict[str, object] = attrs.Factory(dict)
+    state: dict[str, Any] = attrs.Factory(dict)
     object_id: str | None = None
     outcome: int = 0  # InteractionOutcome.FORMING
 
