@@ -9,7 +9,7 @@ from typing import Any
 import attrs
 import yaml
 
-from ..agents import BUILTIN_AGENTS, AgentType, VarDef
+from ..agents import AgentType, VarDef
 from .types import converter
 
 
@@ -20,7 +20,7 @@ class Pose2DModel:
     theta: float = 0.0
 
 
-class ExecutionMode(str, enum.Enum):
+class ExecutionMode(enum.StrEnum):
     MASTER = "master"
     SUBSYSTEM = "subsystem"
 
@@ -41,7 +41,7 @@ class ModuleConfig:
     local_planner: str = "sfm"
     animation: str = "noop"
 
-    perception_params: dict[str, Any] = attrs.Factory(dict)
+    perception_params: dict[str, object] = attrs.Factory(dict)
     global_planner_params: dict[str, Any] = attrs.Factory(dict)
     local_planner_params: dict[str, Any] = attrs.Factory(dict)
     animation_params: dict[str, Any] = attrs.Factory(dict)
@@ -55,7 +55,7 @@ class AgentConfig:
     goal_sequence: list[Pose2DModel] = attrs.Factory(list)
     desired_velocity: float = 1.3
     agent_radius: float = 0.35
-    interaction_preferences: dict[str, Any] = attrs.Factory(dict)
+    interaction_preferences: dict[str, object] = attrs.Factory(dict)
 
 
 @attrs.define
@@ -178,9 +178,7 @@ def resolve_extends(
     builtins: dict[str, AgentType],
 ) -> dict[str, AgentType]:
     _strip_source = attrs.filters.exclude(attrs.fields(AgentType).source_path)
-    source_paths: dict[str, Any] = {
-        name: at.source_path for name, at in agent_types.items()
-    }
+    source_paths: dict[str, Any] = {name: at.source_path for name, at in agent_types.items()}
     all_types: dict[str, dict[str, Any]] = {}
     for name, at in agent_types.items():
         all_types[name] = attrs.asdict(at, filter=_strip_source)  # type: ignore[arg-type]
@@ -265,7 +263,7 @@ _SAFE_OPS = {
 }
 
 
-def _safe_eval(node: ast.AST, variables: dict[str, int | float | bool | str]) -> Any:
+def _safe_eval(node: ast.AST, variables: dict[str, int | float | bool | str]) -> int | float | bool | str:
     if isinstance(node, ast.Expression):
         return _safe_eval(node.body, variables)
     if isinstance(node, ast.Constant):
@@ -295,7 +293,7 @@ def _safe_eval(node: ast.AST, variables: dict[str, int | float | bool | str]) ->
 def _resolve_var_string(
     s: str,
     variables: dict[str, int | float | bool | str],
-) -> Any:
+) -> Any:  # noqa: ANN401
     pattern = r"\$\{([^}]+)\}"
     matches = list(re.finditer(pattern, s))
     if not matches:
@@ -348,7 +346,7 @@ def resolve_vars(
 
 def _type_check_var(
     name: str,
-    value: int | float | bool | str,
+    value: float | bool | str,
     vdef: VarDef,
 ) -> None:
     expected = {
@@ -362,9 +360,9 @@ def _type_check_var(
 
 
 def _walk_resolve(
-    obj: Any,
+    obj: object,
     variables: dict[str, int | float | bool | str],
-) -> Any:
+) -> object:
     if isinstance(obj, str):
         return _resolve_var_string(obj, variables)
     if isinstance(obj, dict):
@@ -382,7 +380,7 @@ def load_scenario(
     if not scenario_path.is_file():
         raise FileNotFoundError(f"Scenario file not found: {path}")
 
-    with open(scenario_path, "r") as fh:
+    with open(scenario_path) as fh:
         raw = yaml.safe_load(fh)
 
     if raw is None:

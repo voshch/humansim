@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -95,11 +95,22 @@ class AgentPool:
             swapped_id = int(self.agent_ids[last])
             self._id_to_idx[swapped_id] = idx
             for arr in (
-                self.agent_ids, self.theta, self.desired_vel,
-                self.agent_radius, self.max_velocity, self.max_acceleration,
-                self.max_deceleration, self.min_turning_radius, self.pivot_angular_velocity,
-                self.relaxation_time, self.repulsion_strength, self.repulsion_range,
-                self.anisotropy, self.vision_range, self.vision_fov, self.has_goal,
+                self.agent_ids,
+                self.theta,
+                self.desired_vel,
+                self.agent_radius,
+                self.max_velocity,
+                self.max_acceleration,
+                self.max_deceleration,
+                self.min_turning_radius,
+                self.pivot_angular_velocity,
+                self.relaxation_time,
+                self.repulsion_strength,
+                self.repulsion_range,
+                self.anisotropy,
+                self.vision_range,
+                self.vision_fov,
+                self.has_goal,
             ):
                 arr[idx] = arr[last]
             for arr in (self.pos, self.vel, self.prev_vel, self.goal_pos):
@@ -114,7 +125,6 @@ class AgentPool:
         self._id_to_idx.clear()
 
     def sync_back(self, agents: Iterable[BaseAgent]) -> None:
-        n = self.n
         for i, agent in enumerate(agents):
             agent.state.pose.x = float(self.pos[i, 0])
             agent.state.pose.y = float(self.pos[i, 1])

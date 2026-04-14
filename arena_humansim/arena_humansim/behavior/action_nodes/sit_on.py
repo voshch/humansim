@@ -1,10 +1,8 @@
 import math
 
-from rclpy.logging import get_logger
-
 import py_trees
-
 from pydantic import BaseModel, Field
+from rclpy.logging import get_logger
 
 from arena_humansim.agents.base import BaseAgent
 from arena_humansim.utils.const import DISTANCE_TOLERANCE
@@ -25,9 +23,7 @@ class SitOnNodeSchema(BaseModel):
 
     agent: BaseAgent = Field(description="Agent that will sit on the object")
     object_name: str = Field(description="Object to be sit on")
-    duration: float = Field(
-        description="The duration of time the agent will sit on the object"
-    )
+    duration: float = Field(description="The duration of time the agent will sit on the object")
 
 
 class SitOnNode(py_trees.behaviour.Behaviour):
@@ -44,7 +40,7 @@ class SitOnNode(py_trees.behaviour.Behaviour):
         # TODO: Search for object
         ...
 
-    def at_target(self):
+    def at_target(self) -> bool:
         assert self.object_position is not None
         dx = self.agent.state.pose.x - self.object_position.x
         dy = self.agent.state.pose.y - self.object_position.y
@@ -54,19 +50,13 @@ class SitOnNode(py_trees.behaviour.Behaviour):
     def update(self) -> py_trees.common.Status:
         # Could not find object to sit on
         if self.object_position is None:
-            _bt_logger.info(
-                f"Could not find object {self.object_name} for agent {self.agent.state.agent_id} to sit on it."
-            )
+            _bt_logger.info(f"Could not find object {self.object_name} for agent {self.agent.state.agent_id} to sit on it.")
             return py_trees.common.Status.FAILURE
 
         # Object found, navigating toward it
         elif not self.at_target():
-            _bt_logger.info(
-                f"Agent {self.agent.state.agent_id} is navigating to {self.object_name} to sit on it."
-            )
-            self.agent.movement.command = _nav_command(
-                agent=self.agent, target_pose=self.target_pose
-            )
+            _bt_logger.info(f"Agent {self.agent.state.agent_id} is navigating to {self.object_name} to sit on it.")
+            self.agent.movement.command = _nav_command(agent=self.agent, target_pose=self.target_pose)
             return py_trees.common.Status.RUNNING
 
         # Navigated to object, emit sit on command
@@ -91,6 +81,4 @@ class SitOnNode(py_trees.behaviour.Behaviour):
                     return py_trees.common.Status.FAILURE
 
                 else:
-                    raise ValueError(
-                        f"Invalid of InteractionOutcome for {self.__class__.__name__} of agent {self.agent.state.agent_id}. Received {outcome}"
-                    )
+                    raise ValueError(f"Invalid of InteractionOutcome for {self.__class__.__name__} of agent {self.agent.state.agent_id}. Received {outcome}")

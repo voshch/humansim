@@ -5,8 +5,6 @@ __all__ = [
     "create_agent_from_params",
 ]
 
-from typing import Any
-
 import numpy as np
 
 from arena_humansim.animation import MotionAnimation
@@ -14,8 +12,8 @@ from arena_humansim.global_planner import GlobalPlanner
 from arena_humansim.local_planner import LocalPlanner
 from arena_humansim.utils.types import AgentState, NeedsState, NeedState
 
-from .base import BaseAgent
-from .types import AgentType, SampledNeed, SampledParams, sample_agent_type
+from .base import BaseAgent, Module
+from .types import AgentType, SampledParams, sample_agent_type
 
 _FALLBACK_BASES: dict[str, type] = {
     "global_planner": GlobalPlanner,
@@ -24,7 +22,7 @@ _FALLBACK_BASES: dict[str, type] = {
 }
 
 
-def _pool_lookup(module_pool: dict[str, Any], name: str | None, category: str) -> Any:
+def _pool_lookup(module_pool: dict[str, Module], name: str | None, category: str) -> Module:
     if name is not None and name in module_pool:
         return module_pool[name]
     base = _FALLBACK_BASES.get(category)
@@ -40,8 +38,8 @@ def _resolve_modules(
     local_planner: str,
     global_planner: str,
     animation: str,
-    module_pool: dict[str, Any],
-) -> dict[str, Any]:
+    module_pool: dict[str, Module],
+) -> dict[str, Module | list[Module]]:
     return {
         "perception": [module_pool[name] for name in perception_stack],
         "local_planner": _pool_lookup(module_pool, local_planner, "local_planner"),
@@ -53,7 +51,7 @@ def _resolve_modules(
 def create_agent(
     agent_type: AgentType | str,
     state: AgentState,
-    module_pool: dict[str, Any],
+    module_pool: dict[str, Module],
     rng: np.random.Generator,
 ) -> BaseAgent:
     if isinstance(agent_type, str):
@@ -81,7 +79,7 @@ def create_agent(
 def create_agent_from_params(
     params: SampledParams,
     state: AgentState,
-    module_pool: dict[str, Any],
+    module_pool: dict[str, Module],
 ) -> BaseAgent:
     needs = None
     if params.needs:

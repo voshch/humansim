@@ -1,10 +1,8 @@
 import math
-from os import stat_result
 
 import py_trees
-
 from pydantic import BaseModel, Field
-from arena_humansim import agents
+
 from arena_humansim.agents import BaseAgent
 from arena_humansim.behavior.nodes import _nav_command
 from arena_humansim.manager.interaction_manager import CommandType
@@ -34,9 +32,7 @@ class BlockNode(py_trees.behaviour.Behaviour):
         self.target_agent = config.target_agent
         self.duration = config.duration
         self.reached_target = False  # Flag for reaching the target for the first time
-        self.prev_vel = (
-            self.agent.state.desired_velocity
-        )  # Store the velocity of agent before blocking target agent
+        self.prev_vel = self.agent.state.desired_velocity  # Store the velocity of agent before blocking target agent
 
     def initialise(self) -> None:
         self.reached_target = False
@@ -45,9 +41,7 @@ class BlockNode(py_trees.behaviour.Behaviour):
         self.prev_vel = self.agent.state.velocity
 
         # Make agent to move faster than target agent
-        self.agent.state.desired_velocity = (
-            self.target_agent.state.desired_velocity * 1.5
-        )
+        self.agent.state.desired_velocity = self.target_agent.state.desired_velocity * 1.5
 
     def predict_target_future_pos(self) -> tuple[float, float, float]:
         """
@@ -60,7 +54,7 @@ class BlockNode(py_trees.behaviour.Behaviour):
 
         return (x, y, theta)
 
-    def at_target(self):
+    def at_target(self) -> bool:
         target = self.predict_target_future_pos()
         dx = self.agent.state.pose.x - target[0]
         dy = self.agent.state.pose.y - target[1]
@@ -87,9 +81,7 @@ class BlockNode(py_trees.behaviour.Behaviour):
                 y=target_pose[1],
                 theta=target_pose[2],
             )
-            self.agent.movement.command = _nav_command(
-                agent=self.agent, target_pose=target_pose
-            )
+            self.agent.movement.command = _nav_command(agent=self.agent, target_pose=target_pose)
 
         # Monitor duration via InteractionOutcome
         outcome = self.agent.movement.last_outcome
@@ -103,6 +95,4 @@ class BlockNode(py_trees.behaviour.Behaviour):
             return py_trees.common.Status.FAILURE
 
         else:
-            raise ValueError(
-                f"Invalid InteractionOutcome for node {self.__class__.__name__}. Received {outcome}"
-            )
+            raise ValueError(f"Invalid InteractionOutcome for node {self.__class__.__name__}. Received {outcome}")

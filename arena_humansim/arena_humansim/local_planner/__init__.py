@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any
 
 from arena_humansim.agents import BaseAgent
 from arena_humansim.utils import ModuleRegistry
@@ -12,7 +12,7 @@ from arena_humansim.utils.types import Pose2D, WallAware
 if TYPE_CHECKING:
     from arena_humansim.viz import MarkerPublisher
 
-_registry = ModuleRegistry()
+_registry: ModuleRegistry[LocalPlanner] = ModuleRegistry()
 
 
 class LocalPlanner(WallAware, Loggable, ABC):
@@ -30,11 +30,11 @@ class LocalPlanner(WallAware, Loggable, ABC):
         pass
 
     @classmethod
-    def register(cls, name: str):
+    def register(cls, name: str) -> Callable[[Callable[[], type[LocalPlanner]]], Callable[[], type[LocalPlanner]]]:
         return _registry.register(name)
 
     @classmethod
-    def create(cls, name: str, *args, **kwargs) -> LocalPlanner:
+    def create(cls, name: str, *args: Any, **kwargs: Any) -> LocalPlanner:
         return _registry.get(name)(*args, **kwargs)
 
     @classmethod
@@ -42,13 +42,13 @@ class LocalPlanner(WallAware, Loggable, ABC):
         return _registry.list_available()
 
 
-def _load_sfm():
+def _load_sfm() -> type[LocalPlanner]:
     from .sfm import SFMPlanner
 
     return SFMPlanner
 
 
-def _load_orca():
+def _load_orca() -> type[LocalPlanner]:
     from .orca import ORCAPlanner
 
     return ORCAPlanner

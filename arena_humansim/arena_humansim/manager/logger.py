@@ -1,18 +1,17 @@
 import json
-import os
 import time
 from pathlib import Path
-from typing import Any
 
 import attrs
 import yaml
 
 from arena_humansim.agents import SampledParams
+from arena_humansim.utils.scenario import ScenarioConfig
 from arena_humansim.utils.types import AgentState, HighLevelCommand, InteractionState
 
 
 class SimulationLogger:
-    def __init__(self, log_dir: str, seed: int, config: dict[str, Any] | None = None):
+    def __init__(self, log_dir: str, seed: int, config: ScenarioConfig | None = None) -> None:
         self._log_dir = Path(log_dir)
         self._log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -24,10 +23,10 @@ class SimulationLogger:
         self._log_path = self._log_dir / "session.jsonl"
         self._log_file = open(self._log_path, "w")
 
-    def _write_config_snapshot(self, config: dict[str, Any]):
+    def _write_config_snapshot(self, config: ScenarioConfig) -> None:
         snapshot_path = self._log_dir / "config_snapshot.yaml"
         with open(snapshot_path, "w") as f:
-            f.write(f"# Config snapshot - arena_humansim\n")
+            f.write("# Config snapshot - arena_humansim\n")
             f.write(f"# Generated at: {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n\n")
             yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
 
@@ -71,20 +70,20 @@ class SimulationLogger:
         }
         self._log_file.write(json.dumps(record, separators=(",", ":")) + "\n")
 
-    def close(self):
+    def close(self) -> None:
         if self._log_file and not self._log_file.closed:
             self._log_file.flush()
             self._log_file.close()
 
 
-def _serialize_agent(agent) -> dict[str, Any]:
+def _serialize_agent(agent: AgentState) -> dict[str, object]:
     return {
         "pose": {"x": agent.pose.x, "y": agent.pose.y, "theta": agent.pose.theta},
         "velocity": {"vx": agent.velocity[0], "vy": agent.velocity[1]},
     }
 
 
-def _serialize_interaction(interaction) -> dict[str, Any]:
+def _serialize_interaction(interaction: InteractionState) -> dict[str, object]:
     return {
         "type": int(interaction.type),
         "participants": list(interaction.participants),
@@ -92,7 +91,7 @@ def _serialize_interaction(interaction) -> dict[str, Any]:
     }
 
 
-def _serialize_command(cmd) -> dict[str, Any]:
+def _serialize_command(cmd: HighLevelCommand) -> dict[str, object]:
     return {
         "type": int(cmd.type),
         "target_pose": {

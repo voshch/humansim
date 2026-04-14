@@ -75,7 +75,6 @@ def resolve_agent_type_name(
 
 
 def load_agent_types(scenario_dir: Path | None = None) -> dict[str, AgentType]:
-    from arena_humansim.agents import resolve_agent_type
 
     defaults = load_default_agent_types()
     if scenario_dir is not None:

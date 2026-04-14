@@ -12,8 +12,6 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    import numpy as np
-
     from arena_humansim.animation import MotionAnimation
     from arena_humansim.global_planner import GlobalPlanner
     from arena_humansim.local_planner import LocalPlanner

@@ -168,7 +168,7 @@ class SpawnScheduler(Loggable):
         r = float(self._rng.random()) * total_area
         cumulative = 0.0
         tri = triangles[0]
-        for tri, area in zip(triangles, areas):
+        for tri, area in zip(triangles, areas, strict=True):  # noqa: B007
             cumulative += area
             if cumulative >= r:
                 break

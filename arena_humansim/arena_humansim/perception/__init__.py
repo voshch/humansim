@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from arena_humansim.utils import ModuleRegistry
@@ -11,7 +12,7 @@ if TYPE_CHECKING:
     from arena_humansim.utils.types import AgentState, BeliefState, WorldState
     from arena_humansim.viz import MarkerPublisher
 
-_registry = ModuleRegistry()
+_registry: ModuleRegistry[Perception] = ModuleRegistry()
 
 
 class Perception(Loggable, ABC):
@@ -30,7 +31,7 @@ class Perception(Loggable, ABC):
         pass
 
     @classmethod
-    def get(cls, name: str) -> type:
+    def get(cls, name: str) -> type[Perception]:
         return _registry.get(name)
 
     @classmethod
@@ -38,11 +39,11 @@ class Perception(Loggable, ABC):
         return _registry.list_available()
 
     @classmethod
-    def register(cls, name: str):
+    def register(cls, name: str) -> Callable[[Callable[[], type[Perception]]], Callable[[], type[Perception]]]:
         return _registry.register(name)
 
 
-def _load_default():
+def _load_default() -> type[Perception]:
     from .default import DefaultPerception
 
     return DefaultPerception

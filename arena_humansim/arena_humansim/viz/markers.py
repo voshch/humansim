@@ -5,13 +5,22 @@ import queue
 import threading
 from typing import TYPE_CHECKING
 
+from builtin_interfaces.msg import Time
 from geometry_msgs.msg import Point
 from rclpy.node import Node
 from std_msgs.msg import ColorRGBA
 from visualization_msgs.msg import Marker, MarkerArray
 
 if TYPE_CHECKING:
-    from arena_humansim.utils.types import Pose2D
+    from collections.abc import Iterable
+
+    from arena_humansim.agents import BaseAgent
+    from arena_humansim.global_planner import GlobalPlanner
+    from arena_humansim.local_planner import LocalPlanner
+    from arena_humansim.manager.agent_manager import ObstacleData
+    from arena_humansim.manager.world_knowledge import WorldObject
+    from arena_humansim.perception import Perception
+    from arena_humansim.utils.types import HighLevelCommand, InteractionState, Pose2D, Shape, SinkConfig, SourceConfig
 
 _FRAME = "map"
 
@@ -20,7 +29,7 @@ def rgba(r: float, g: float, b: float, a: float = 1.0) -> ColorRGBA:
     return ColorRGBA(r=r, g=g, b=b, a=a)
 
 
-def mk(ns: str, mid: int, mtype: int, stamp) -> Marker:
+def mk(ns: str, mid: int, mtype: int, stamp: Time) -> Marker:
     m = Marker()
     m.header.frame_id = _FRAME
     m.header.stamp = stamp
@@ -32,7 +41,7 @@ def mk(ns: str, mid: int, mtype: int, stamp) -> Marker:
     return m
 
 
-def arrow(ns, mid, stamp, ox, oy, dx, dy, color, shaft=0.03, head_d=0.06, head_l=0.06, z=0.1):
+def arrow(ns: str, mid: int, stamp: Time, ox: float, oy: float, dx: float, dy: float, color: ColorRGBA, shaft: float = 0.03, head_d: float = 0.06, head_l: float = 0.06, z: float = 0.1) -> Marker:
     m = mk(ns, mid, Marker.ARROW, stamp)
     m.points = [Point(x=ox, y=oy, z=z), Point(x=ox + dx, y=oy + dy, z=z)]
     m.scale.x, m.scale.y, m.scale.z = shaft, head_d, head_l
@@ -40,7 +49,7 @@ def arrow(ns, mid, stamp, ox, oy, dx, dy, color, shaft=0.03, head_d=0.06, head_l
     return m
 
 
-def text(ns, mid, stamp, x, y, text, color, size=0.2, z=0.8):
+def text(ns: str, mid: int, stamp: Time, x: float, y: float, text: str, color: ColorRGBA, size: float = 0.2, z: float = 0.8) -> Marker:
     m = mk(ns, mid, Marker.TEXT_VIEW_FACING, stamp)
     m.pose.position.x, m.pose.position.y, m.pose.position.z = x, y, z
     m.scale.z = size
@@ -49,7 +58,7 @@ def text(ns, mid, stamp, x, y, text, color, size=0.2, z=0.8):
     return m
 
 
-def line_strip(ns, mid, stamp, pts, color, width=0.02, z=0.05):
+def line_strip(ns: str, mid: int, stamp: Time, pts: Iterable[tuple[float, float]], color: ColorRGBA, width: float = 0.02, z: float = 0.05) -> Marker:
     m = mk(ns, mid, Marker.LINE_STRIP, stamp)
     m.scale.x = width
     m.color = color
@@ -57,7 +66,7 @@ def line_strip(ns, mid, stamp, pts, color, width=0.02, z=0.05):
     return m
 
 
-def sphere(ns, mid, stamp, x, y, color, radius=0.08, z=0.1):
+def sphere(ns: str, mid: int, stamp: Time, x: float, y: float, color: ColorRGBA, radius: float = 0.08, z: float = 0.1) -> Marker:
     m = mk(ns, mid, Marker.SPHERE, stamp)
     m.pose.position.x, m.pose.position.y, m.pose.position.z = x, y, z
     m.scale.x = m.scale.y = m.scale.z = radius * 2.0
@@ -65,7 +74,7 @@ def sphere(ns, mid, stamp, x, y, color, radius=0.08, z=0.1):
     return m
 
 
-def cylinder(ns, mid, stamp, x, y, color, radius=0.5, height=0.02, z=0.0):
+def cylinder(ns: str, mid: int, stamp: Time, x: float, y: float, color: ColorRGBA, radius: float = 0.5, height: float = 0.02, z: float = 0.0) -> Marker:
     m = mk(ns, mid, Marker.CYLINDER, stamp)
     m.pose.position.x, m.pose.position.y = x, y
     m.pose.position.z = z + height / 2.0
@@ -75,7 +84,7 @@ def cylinder(ns, mid, stamp, x, y, color, radius=0.5, height=0.02, z=0.0):
     return m
 
 
-def cube(ns, mid, stamp, x, y, z, sx, sy, sz, yaw, color):
+def cube(ns: str, mid: int, stamp: Time, x: float, y: float, z: float, sx: float, sy: float, sz: float, yaw: float, color: ColorRGBA) -> Marker:
     m = mk(ns, mid, Marker.CUBE, stamp)
     m.pose.position.x, m.pose.position.y, m.pose.position.z = x, y, z
     m.scale.x, m.scale.y, m.scale.z = sx, sy, sz
@@ -112,7 +121,7 @@ _NEED_COLORS = [
 ]
 
 
-def _shape_outline(pose, shape) -> list[tuple[float, float]]:
+def _shape_outline(pose: Pose2D, shape: Shape) -> list[tuple[float, float]]:
     from arena_humansim.utils.types import ShapeType
 
     cx, cy, th = pose.x, pose.y, pose.theta
@@ -130,27 +139,6 @@ def _shape_outline(pose, shape) -> list[tuple[float, float]]:
         pts.append(pts[0])
         return pts
     return []
-
-
-def _shape_area_marker(ns, mid, stamp, pose, shape, color, z=0.01):
-    from arena_humansim.utils.types import ShapeType
-
-    if shape.type == ShapeType.CIRCLE and shape.radius > 0:
-        return cylinder(ns, mid, stamp, pose.x, pose.y, color, radius=shape.radius, height=0.01, z=z)
-    if shape.vertices:
-        cx, cy, th = pose.x, pose.y, pose.theta
-        cos_t, sin_t = math.cos(th), math.sin(th)
-        world = [(cx + cos_t * v.x - sin_t * v.y, cy + sin_t * v.x + cos_t * v.y) for v in shape.vertices]
-        m = mk(ns, mid, Marker.TRIANGLE_LIST, stamp)
-        m.scale.x = m.scale.y = m.scale.z = 1.0
-        m.color = color
-        ox, oy = world[0]
-        for i in range(1, len(world) - 1):
-            m.points.append(Point(x=ox, y=oy, z=z))
-            m.points.append(Point(x=world[i][0], y=world[i][1], z=z))
-            m.points.append(Point(x=world[i + 1][0], y=world[i + 1][1], z=z))
-        return m
-    return None
 
 
 _CMD_NAMES = {0: "NAV", 1: "ADV", 2: "SRCH", 3: "ACC", 4: "DEC", 5: "STOP"}
@@ -212,7 +200,7 @@ class MarkerPublisher:
             for ma in batch:
                 self._pub.publish(ma)
 
-    def _stamp(self):
+    def _stamp(self) -> Time:
         return self._node.get_clock().now().to_msg()
 
     def view(self, ns: str, mtype: int, count: int = 0, dirty: bool = True) -> MarkerView:
@@ -300,7 +288,7 @@ class MarkerPublisher:
         self._thread.join(timeout=1.0)
 
 
-def publish_behavior(pub: MarkerPublisher, agents, cmds) -> None:
+def publish_behavior(pub: MarkerPublisher, agents: Iterable[BaseAgent], cmds: dict[int, HighLevelCommand]) -> None:
     cmd_view = pub.view("cmd", Marker.TEXT_VIEW_FACING)
     for agent in agents:
         aid = agent.state.agent_id
@@ -339,7 +327,7 @@ def publish_behavior(pub: MarkerPublisher, agents, cmds) -> None:
                 m.text = f"{name}:{need.value:.0f}"
 
 
-def publish_interaction(pub: MarkerPublisher, agents, interactions) -> None:
+def publish_interaction(pub: MarkerPublisher, agents: Iterable[BaseAgent], interactions: dict[int, InteractionState]) -> None:
     amap = {a.state.agent_id: a for a in agents}
     links_view = pub.view("interaction_links", Marker.LINE_LIST)
     label_view = pub.view("interaction_label", Marker.TEXT_VIEW_FACING)
@@ -374,9 +362,17 @@ def publish_interaction(pub: MarkerPublisher, agents, interactions) -> None:
             m.text = lbl
 
 
-def publish_infrastructure(pub: MarkerPublisher, sources, sinks, walls, world_objects, obstacles=None) -> None:
+def publish_infrastructure(
+    pub: MarkerPublisher,
+    sources: dict[str, SourceConfig],
+    sinks: dict[str, SinkConfig],
+    walls: dict[str, tuple[tuple[float, float], tuple[float, float]]],
+    world_objects: dict[str, WorldObject],
+    obstacles: dict[str, ObstacleData] | None = None,
+) -> None:
     for i, (name, src) in enumerate(sources.items()):
         from arena_humansim.utils.types import ShapeType
+
         if src.shape.type == ShapeType.CIRCLE and src.shape.radius > 0:
             m, new = pub.get("sources", i, Marker.CYLINDER, dirty=False)
             if new:
@@ -413,6 +409,7 @@ def publish_infrastructure(pub: MarkerPublisher, sources, sinks, walls, world_ob
 
     for i, (name, sink) in enumerate(sinks.items()):
         from arena_humansim.utils.types import ShapeType
+
         if sink.shape.type == ShapeType.CIRCLE and sink.shape.radius > 0:
             m, new = pub.get("sinks", i, Marker.CYLINDER, dirty=False)
             if new:
@@ -503,7 +500,7 @@ def publish_infrastructure(pub: MarkerPublisher, sources, sinks, walls, world_ob
                 m.text = label
 
 
-def publish_perception(pub: MarkerPublisher, agents) -> None:
+def publish_perception(pub: MarkerPublisher, agents: Iterable[BaseAgent]) -> None:
     cone_view = pub.view("vision_cone", Marker.TRIANGLE_LIST)
     obs_view = pub.view("observed", Marker.ARROW)
     for agent in agents:
@@ -538,7 +535,7 @@ def publish_perception(pub: MarkerPublisher, agents) -> None:
                 m.points[1].z = 0.1
 
 
-def publish_global_plan(pub: MarkerPublisher, agents, cmds, intermediate_goals: dict[int, Pose2D]) -> None:
+def publish_global_plan(pub: MarkerPublisher, agents: Iterable[BaseAgent], cmds: dict[int, HighLevelCommand], intermediate_goals: dict[int, Pose2D]) -> None:
     path_view = pub.view("path", Marker.LINE_STRIP)
     igoal_view = pub.view("igoal", Marker.SPHERE)
     goal_view = pub.view("goal", Marker.ARROW)
@@ -585,7 +582,7 @@ def publish_global_plan(pub: MarkerPublisher, agents, cmds, intermediate_goals: 
             m.points[1].z = 0.1
 
 
-def publish_local_plan(pub: MarkerPublisher, agents, velocities) -> None:
+def publish_local_plan(pub: MarkerPublisher, agents: Iterable[BaseAgent], velocities: dict[int, tuple[float, float]]) -> None:
     vel_view = pub.view("vel", Marker.ARROW)
     for agent in agents:
         aid = agent.state.agent_id
@@ -606,7 +603,7 @@ def publish_local_plan(pub: MarkerPublisher, agents, velocities) -> None:
         m.points[1].z = 0.1
 
 
-def publish_waypoints(pub: MarkerPublisher, agents) -> None:
+def publish_waypoints(pub: MarkerPublisher, agents: Iterable[BaseAgent]) -> None:
     from arena_humansim.utils.types import WaypointMovement
 
     wp_path_view = pub.view("wp_path", Marker.LINE_STRIP)
@@ -645,7 +642,7 @@ def publish_waypoints(pub: MarkerPublisher, agents) -> None:
             m.scale.z = 0.02
 
 
-def publish_module_markers(pub: MarkerPublisher, modules) -> None:
+def publish_module_markers(pub: MarkerPublisher, modules: Iterable[Perception | GlobalPlanner | LocalPlanner]) -> None:
     seen: set[int] = set()
     for mod in modules:
         mid = id(mod)
@@ -655,7 +652,7 @@ def publish_module_markers(pub: MarkerPublisher, modules) -> None:
         mod.publish_markers(pub)
 
 
-def vision_cone(aid, stamp, pose, vision_range, vision_fov):
+def vision_cone(aid: int, stamp: Time, pose: Pose2D, vision_range: float, vision_fov: float) -> Marker:
     m = mk("vision_cone", aid, Marker.TRIANGLE_LIST, stamp)
     m.scale.x = m.scale.y = m.scale.z = 1.0
     m.color = _C_CONE

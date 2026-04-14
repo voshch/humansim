@@ -1,18 +1,18 @@
 import math
 
-from pydantic import BaseModel, Field
 import py_trees
+from pydantic import BaseModel, Field
 
 from arena_humansim.agents import BaseAgent
+from arena_humansim.behavior.nodes import _nav_command
 from arena_humansim.manager.interaction_manager import CommandType
+from arena_humansim.utils import DISTANCE_TOLERANCE
 from arena_humansim.utils.types import (
     AgentState,
     HighLevelCommand,
     InteractionOutcome,
     Pose2D,
 )
-from arena_humansim.behavior.nodes import _nav_command
-from arena_humansim.utils import DISTANCE_TOLERANCE
 
 
 class QueueNodeSchema(BaseModel):
@@ -21,18 +21,10 @@ class QueueNodeSchema(BaseModel):
     """
 
     agent: BaseAgent = Field(description="The agent joining the queue")
-    service_duration: float = Field(
-        description="Time spent at the very front of the queue (e.g., at the counter)"
-    )
-    front_pose: Pose2D = Field(
-        description="The head of the queue. Yaw determines the direction the line forms."
-    )
-    post_queue_pose: Pose2D = Field(
-        description="Where the agent goes after finishing the service."
-    )
-    step_distance: float = Field(
-        default=1.0, description="Distance between people in the queue"
-    )
+    service_duration: float = Field(description="Time spent at the very front of the queue (e.g., at the counter)")
+    front_pose: Pose2D = Field(description="The head of the queue. Yaw determines the direction the line forms.")
+    post_queue_pose: Pose2D = Field(description="Where the agent goes after finishing the service.")
+    step_distance: float = Field(default=1.0, description="Distance between people in the queue")
     chaos_mode: bool = Field(
         default=False,
         description="If True, agent ignores strict ordering and rushes for the gap",
@@ -103,7 +95,7 @@ class QueueNode(py_trees.behaviour.Behaviour):
 
         return math.hypot(dx, dy) < DISTANCE_TOLERANCE
 
-    def someone_too_close(self):
+    def someone_too_close(self) -> bool:
         """Check if someone is too close in the direction of the queue."""
         state = self.agent.state
         for oa in self.agent.belief.observed_agents:
@@ -114,9 +106,7 @@ class QueueNode(py_trees.behaviour.Behaviour):
 
     def update(self) -> py_trees.common.Status:
         # 1. Check if we are at the front and need to perform Idle
-        if self.current_index == 0 and self.is_at_pose(
-            self.agent.state, self.front_pose
-        ):
+        if self.current_index == 0 and self.is_at_pose(self.agent.state, self.front_pose):
             if not self.service_started:
                 # Emit IDLE command once to represent waiting to be served at the counter
                 self.agent.movement.command = HighLevelCommand(
@@ -131,9 +121,7 @@ class QueueNode(py_trees.behaviour.Behaviour):
             outcome = self.agent.movement.last_outcome
             if outcome == InteractionOutcome.COMPLETED:
                 # Once served, move to the final destination
-                self.agent.movement.command = _nav_command(
-                    self.agent, self.post_queue_pose
-                )
+                self.agent.movement.command = _nav_command(self.agent, self.post_queue_pose)
                 if self.is_at_pose(self.agent.state, self.post_queue_pose):
                     return py_trees.common.Status.SUCCESS
                 return py_trees.common.Status.RUNNING
@@ -153,9 +141,7 @@ class QueueNode(py_trees.behaviour.Behaviour):
         # This prevents "stacking" if the target index is empty but someone is standing nearby
         if self.someone_too_close() and not self.chaos_mode:
             # Command agent to stay where he's at
-            self.agent.movement.command = _nav_command(
-                self.agent, self.agent.state.pose
-            )
+            self.agent.movement.command = _nav_command(self.agent, self.agent.state.pose)
         else:
             # Move to the currently assigned spot in line
             assert self.assigned_pose is not None

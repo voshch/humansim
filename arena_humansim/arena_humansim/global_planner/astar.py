@@ -4,7 +4,6 @@ import math
 import os
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
 
 import numpy as np
 import pyastar2d
@@ -13,7 +12,7 @@ from scipy.ndimage import binary_dilation
 from arena_humansim.agents import BaseAgent
 from arena_humansim.utils.types import HighLevelCommand, Pose2D, Segment, Segments
 
-from . import GlobalPlanner, simplify_path
+from . import GlobalPlanner
 
 _SQRT2 = math.sqrt(2)
 
@@ -23,7 +22,7 @@ def _nearest_free_cell(
     row: int,
     col: int,
     max_radius: int = 200,
-) -> Optional[tuple[int, int]]:
+) -> tuple[int, int] | None:
     rows, cols = grid.shape
     if 0 <= row < rows and 0 <= col < cols and grid[row, col] == 0:
         return (row, col)
@@ -43,7 +42,7 @@ def _astar_path(
     grid: np.ndarray,
     start: tuple[int, int],
     goal: tuple[int, int],
-) -> Optional[list[tuple[int, int]]]:
+) -> list[tuple[int, int]] | None:
     actual_start = _nearest_free_cell(grid, start[0], start[1])
     actual_goal = _nearest_free_cell(grid, goal[0], goal[1])
     if actual_start is None or actual_goal is None:
@@ -81,8 +80,8 @@ class AStarPlanner(GlobalPlanner):
         self._replan_distance = replan_distance
         self._inflation_radius = inflation_radius
 
-        self._occupancy_grid: Optional[np.ndarray] = None
-        self._weights: Optional[np.ndarray] = None
+        self._occupancy_grid: np.ndarray | None = None
+        self._weights: np.ndarray | None = None
         self._resolution: float = 0.2
         self._origin: Pose2D = Pose2D()
         self._wall_segments: list[Segment] = []
@@ -131,10 +130,7 @@ class AStarPlanner(GlobalPlanner):
 
         self._occupancy_grid = grid
         self._weights = np.where(grid == 0, 1.0, np.inf).astype(np.float32)
-        self._logger.info(
-            f"Walls rasterized: {cols}x{rows} ({cols * rows} cells), res={res}m, "
-            f"{len(segments)} segment(s), inflation={self._inflation_radius}m ({radius_cells} cells)"
-        )
+        self._logger.info(f"Walls rasterized: {cols}x{rows} ({cols * rows} cells), res={res}m, {len(segments)} segment(s), inflation={self._inflation_radius}m ({radius_cells} cells)")
 
     def get_cached_goals(self) -> dict[int, Pose2D]:
         return dict(self._cached_results)
@@ -280,10 +276,7 @@ class AStarPlanner(GlobalPlanner):
         if replan_requests:
             weights = self._weights
             grid = self._occupancy_grid
-            futures = {
-                agent_id: self._pool.submit(_astar_path, weights, grid, start_rc, goal_rc)
-                for agent_id, _, _, start_rc, goal_rc in replan_requests
-            }
+            futures = {agent_id: self._pool.submit(_astar_path, weights, grid, start_rc, goal_rc) for agent_id, _, _, start_rc, goal_rc in replan_requests}
 
             for agent_id, agent_pos, target, start_rc, goal_rc in replan_requests:
                 raw_path = futures[agent_id].result()

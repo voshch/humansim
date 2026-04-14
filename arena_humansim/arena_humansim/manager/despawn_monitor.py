@@ -1,9 +1,9 @@
 import math
-from typing import Callable
+from collections.abc import Callable, Sequence
 
 from arena_humansim.agents import BaseAgent
 from arena_humansim.utils.loggable import Loggable
-from arena_humansim.utils.types import AgentLifetime, DespawnRequest, ShapeType, SinkConfig
+from arena_humansim.utils.types import AgentLifetime, AgentState, DespawnRequest, Pose2D, ShapeType, SinkConfig
 
 
 class DespawnMonitor(Loggable):
@@ -79,7 +79,7 @@ class DespawnMonitor(Loggable):
         self._sinks = dict(sinks)
         self._sink_occupancy = {name: 0 for name in sinks}
 
-    def _check_sink_proximity(self, agent_state, target_sink_name: str) -> bool:
+    def _check_sink_proximity(self, agent_state: AgentState, target_sink_name: str) -> bool:
         if not target_sink_name or target_sink_name not in self._sinks:
             return False
 
@@ -101,7 +101,7 @@ class DespawnMonitor(Loggable):
         return dist < sink.absorption_radius
 
     @staticmethod
-    def _point_in_polygon(px: float, py: float, vertices) -> bool:
+    def _point_in_polygon(px: float, py: float, vertices: Sequence[Pose2D]) -> bool:
         n = len(vertices)
         inside = False
         j = n - 1

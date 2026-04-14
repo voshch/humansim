@@ -1,19 +1,21 @@
+from __future__ import annotations
+
 import math
 import queue
 import threading
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Hashable, Iterable
 from typing import Any
 
 import attrs
 import numpy as np
 import rclpy
-
-from py_trees.trees import BehaviourTree
-
+import rclpy.publisher
 from arena_humansim_msgs.msg import AgentState as AgentStateMsg
 from arena_humansim_msgs.msg import AgentStates as AgentStatesMsg
-from arena_humansim_msgs.msg import ObstacleConfig as ObstacleConfigMsg
+from arena_humansim_msgs.msg import Shape as ShapeMsg
+from arena_humansim_msgs.msg import SinkConfig as SinkConfigMsg
+from arena_humansim_msgs.msg import SourceConfig as SourceConfigMsg
 from arena_humansim_msgs.srv import (
     AddObstacles,
     AddSink,
@@ -33,6 +35,7 @@ from arena_humansim_msgs.srv import (
 )
 from geometry_msgs.msg import Pose2D as Pose2DMsg
 from geometry_msgs.msg import Vector3
+from py_trees.trees import BehaviourTree
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from rosgraph_msgs.msg import Clock
@@ -44,10 +47,9 @@ from arena_humansim.agents import (
     TickPhase,
     create_agent,
     create_agent_from_params,
-    load_agent_types,
     resolve_agent_type,
 )
-from arena_humansim.agents.loader import is_path_agent_type, resolve_agent_type_name
+from arena_humansim.agents.loader import resolve_agent_type_name
 from arena_humansim.animation import MotionAnimation
 from arena_humansim.behavior.compiler import BehaviorTreeFactory
 from arena_humansim.collision import CollisionResolver
@@ -56,7 +58,7 @@ from arena_humansim.local_planner import LocalPlanner
 from arena_humansim.manager.despawn_monitor import DespawnMonitor
 from arena_humansim.manager.interaction_manager import CommandType, InteractionManager
 from arena_humansim.manager.logger import SimulationLogger
-from arena_humansim.manager.replay import ReplayManager
+from arena_humansim.manager.replay import ReplayManager, ReplayResult
 from arena_humansim.manager.spawn_scheduler import SpawnScheduler
 from arena_humansim.manager.world_knowledge import WorldKnowledge, WorldObject
 from arena_humansim.perception import Perception
@@ -64,7 +66,7 @@ from arena_humansim.pool import AgentPool
 from arena_humansim.utils import RNG
 from arena_humansim.utils.event_bus import EventBus
 from arena_humansim.utils.loggable import Loggable
-from arena_humansim.utils.scenario import EventScript, ScenarioConfig, WorldObjectConfig
+from arena_humansim.utils.scenario import EventScript, ScenarioConfig
 from arena_humansim.utils.types import (
     AgentState,
     BehaviorTreeMovement,
@@ -73,6 +75,9 @@ from arena_humansim.utils.types import (
     InteractionOutcome,
     Pose2D,
     Segments,
+    Shape,
+    SinkConfig,
+    SourceConfig,
     SpawnRequest,
     WallAware,
     WaypointMode,
@@ -87,9 +92,7 @@ from arena_humansim.viz import MarkerPublisher, publish_behavior, publish_global
 class ObstacleData:
     name: str
     pose: Pose2D
-    bb: tuple[
-        float, float, float, float, float, float
-    ]  # x_min, x_max, y_min, y_max, z_min, z_max
+    bb: tuple[float, float, float, float, float, float]  # x_min, x_max, y_min, y_max, z_min, z_max
     interaction_types: tuple[str, ...]
     obstacle_type: str
     wall_segments: tuple[tuple[tuple[float, float], tuple[float, float]], ...]
@@ -99,7 +102,7 @@ _MSG_BLOCK = 16
 
 
 class _AgentStateMsgPool:
-    def __init__(self):
+    def __init__(self) -> None:
         self._pools = ([AgentStateMsg() for _ in range(_MSG_BLOCK)], [AgentStateMsg() for _ in range(_MSG_BLOCK)])
         self._msgs = (AgentStatesMsg(), AgentStatesMsg())
         self._msgs[0].header.frame_id = "map"
@@ -117,13 +120,13 @@ class _AgentStateMsgPool:
 
 
 class _BackgroundPublisher:
-    def __init__(self, publisher):
+    def __init__(self, publisher: rclpy.publisher.Publisher) -> None:
         self._publisher = publisher
         self._queue: queue.SimpleQueue = queue.SimpleQueue()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
-    def _loop(self):
+    def _loop(self) -> None:
         while True:
             msg = self._queue.get()
             if msg is None:
@@ -135,16 +138,16 @@ class _BackgroundPublisher:
                 msg = next_msg
             self._publisher.publish(msg)
 
-    def publish(self, msg):
+    def publish(self, msg: AgentStatesMsg) -> None:
         self._queue.put(msg)
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         self._queue.put(None)
         self._thread.join(timeout=1.0)
 
 
-def _group_by(agents, key):
-    groups = {}
+def _group_by[K: Hashable](agents: Iterable[BaseAgent], key: Callable[[BaseAgent], K]) -> Iterable[tuple[K, list[BaseAgent]]]:
+    groups: dict[K, list[BaseAgent]] = {}
     for agent in agents:
         k = key(agent)
         groups.setdefault(k, []).append(agent)
@@ -235,9 +238,7 @@ class AgentManager(Node):
             default_name: self._perception_cache[default_name],
         }
 
-        self._behavior_trees: dict[
-            int, object
-        ] = {}  # agent_id -> BehaviourTree or None
+        self._behavior_trees: dict[int, object] = {}  # agent_id -> BehaviourTree or None
         self._bt_factories: dict[tuple, BehaviorTreeFactory] = {}
         self._world_knowledge = WorldKnowledge()
         self._event_bus = EventBus()
@@ -366,9 +367,7 @@ class AgentManager(Node):
         elif self._mode == self.MODE_BENCHMARK:
             self._setup_benchmark_mode()
         else:
-            raise ValueError(
-                f"Unknown mode '{self._mode}'. Use '{self.MODE_MASTER}', '{self.MODE_SUBSYSTEM}', or '{self.MODE_BENCHMARK}'."
-            )
+            raise ValueError(f"Unknown mode '{self._mode}'. Use '{self.MODE_MASTER}', '{self.MODE_SUBSYSTEM}', or '{self.MODE_BENCHMARK}'.")
 
         self._sim_logger = None
         if log_dir:
@@ -386,13 +385,9 @@ class AgentManager(Node):
         if replay_mode:
             self._replay = ReplayManager()
             self._replay.load(replay_mode)
-            self._logger.info(
-                f"Replay mode: loaded {self._replay.tick_count} ticks from {replay_mode}"
-            )
+            self._logger.info(f"Replay mode: loaded {self._replay.tick_count} ticks from {replay_mode}")
 
-        self._logger.info(
-            f"AgentManager initialized (seed={seed}, dt={self._dt}, mode={self._mode})"
-        )
+        self._logger.info(f"AgentManager initialized (seed={seed}, dt={self._dt}, mode={self._mode})")
 
     def _collect_ros_parameters(self) -> dict[str, Any]:
         params = {}
@@ -457,9 +452,7 @@ class AgentManager(Node):
                 theta=agent_msg.pose.theta,
             ),
             velocity=(agent_msg.velocity.x, agent_msg.velocity.y),
-            desired_velocity=agent_msg.desired_velocity
-            if agent_msg.desired_velocity > 0
-            else 1.3,
+            desired_velocity=agent_msg.desired_velocity if agent_msg.desired_velocity > 0 else 1.3,
         )
 
         agent_type = resolve_agent_type_name(type_name, self._agent_types)
@@ -592,7 +585,7 @@ class AgentManager(Node):
     def _phase_end(self, name: str, t0: float):
         self._tick_phases[name] = (time.perf_counter() - t0) * 1000.0
 
-    def _get_profile_callback(self, request, response):
+    def _get_profile_callback(self, request: GetProfile.Request, response: GetProfile.Response) -> GetProfile.Response:
         for name, times in self._phase_accum.items():
             response.phase_names.append(name)
             response.phase_means_ms.append(float(np.mean(times)))
@@ -697,17 +690,13 @@ class AgentManager(Node):
             indptr = pool.neighbor_indptr
             indices = pool.neighbor_indices
             any_extra = any(len(a.perception) > 1 for a in agents)
-            agent_states = (
-                {aid: agent.state for aid, agent in self._agents.items()}
-                if any_extra
-                else None
-            )
+            agent_states = {aid: agent.state for aid, agent in self._agents.items()} if any_extra else None
             for i, agent in enumerate(agents):
                 has_bt = self._behavior_trees.get(agent.state.agent_id) is not None
                 has_extra = len(agent.perception) > 1
                 if has_bt or has_extra:
                     belief = BeliefState(agent_id=agent.state.agent_id)
-                    nbr_idxs = indices[indptr[i]: indptr[i + 1]].tolist()
+                    nbr_idxs = indices[indptr[i] : indptr[i + 1]].tolist()
                     belief.observed_agents = [agents[j].state for j in nbr_idxs]
                     for layer in agent.perception[1:]:
                         belief = layer.compute(agent, agent_states, world_state, belief)
@@ -753,9 +742,7 @@ class AgentManager(Node):
         t0 = time.perf_counter()
         pool.store_prev_vel()
         if self._local_planner.supports_pool:
-            self._local_planner.compute_pool(
-                pool, store_forces=self._publish_markers >= 2, dt=self._dt
-            )
+            self._local_planner.compute_pool(pool, store_forces=self._publish_markers >= 2, dt=self._dt)
         else:
             self._local_plan_fallback(agents, self._cached_intermediate_goals, pool)
 
@@ -773,9 +760,7 @@ class AgentManager(Node):
             if interaction.outcome != InteractionOutcome.ACTIVE:
                 for pid in interaction.participants:
                     agent = self._agents.get(pid)
-                    if agent is not None and isinstance(
-                        agent.movement, BehaviorTreeMovement
-                    ):
+                    if agent is not None and isinstance(agent.movement, BehaviorTreeMovement):
                         agent.movement.last_outcome = interaction.outcome
             if interaction.object_id:
                 self._world_knowledge.set_queue_length(
@@ -791,7 +776,7 @@ class AgentManager(Node):
 
         # --- ANIMATION ---
         t0 = time.perf_counter()
-        for anim, group in _group_by(agents, key=lambda a: a.animation):
+        for anim, _ in _group_by(agents, key=lambda a: a.animation):
             anim.compute_batch_pool(pool, interactions, self._dt)
 
         self._run_extra_modules(agents, TickPhase.ACT)
@@ -827,10 +812,7 @@ class AgentManager(Node):
                 self._obstacles,
             )
             if mlvl >= 2:
-                velocities = {
-                    int(pool.agent_ids[i]): (float(pool.vel[i, 0]), float(pool.vel[i, 1]))
-                    for i in range(n)
-                }
+                velocities = {int(pool.agent_ids[i]): (float(pool.vel[i, 0]), float(pool.vel[i, 1])) for i in range(n)}
                 publish_perception(self._marker_pub, agents)
                 publish_global_plan(
                     self._marker_pub,
@@ -1056,19 +1038,15 @@ class AgentManager(Node):
             else:
                 self._event_bus.fire(script.event, script.target_agent)
 
-    def run_replay(self) -> dict[str, Any]:
+    def run_replay(self) -> ReplayResult | None:
         if self._replay is None:
-            return {}
+            return None
         result = self._replay.replay(self, logger=self._logger)
-        if result["success"]:
-            self._logger.info(
-                f"Replay verification passed: {result['total_ticks']} ticks"
-            )
+        if result.success:
+            self._logger.info(f"Replay verification passed: {result.total_ticks} ticks")
         else:
-            div = result["first_divergence"]
-            self._logger.warn(
-                f"Replay DIVERGED at tick {div['tick']}, agent {div['agent_id']}: {div['detail']}"
-            )
+            div = result.first_divergence
+            self._logger.warn(f"Replay DIVERGED at tick {div.tick}, agent {div.agent_id}: {div.detail}")
         return result
 
     def _setup_master_mode(self):
@@ -1102,11 +1080,7 @@ class AgentManager(Node):
         self._last_overrun_log = now
         phases = self._tick_phases
         breakdown = ", ".join(f"{name}={ms:.1f}ms" for name, ms in phases.items() if ms > 0.5)
-        self._logger.warn(
-            f"sim cannot keep up: tick took {elapsed * 1000:.1f}ms (budget {self._dt * 1000:.1f}ms), "
-            f"{self._overrun_count} overrun(s) since last report, {self._pool.n} agents"
-            + (f" [{breakdown}]" if breakdown else "")
-        )
+        self._logger.warn(f"sim cannot keep up: tick took {elapsed * 1000:.1f}ms (budget {self._dt * 1000:.1f}ms), {self._overrun_count} overrun(s) since last report, {self._pool.n} agents" + (f" [{breakdown}]" if breakdown else ""))
         self._overrun_count = 0
 
     def _master_timer_callback(self):
@@ -1148,7 +1122,7 @@ class AgentManager(Node):
         self,
         request: Feedback.Request,
         response: Feedback.Response,
-    ):
+    ) -> Feedback.Response:
         for robot in request.robots:
             name = robot.name or "robot"
             pose = Pose2D(
@@ -1164,9 +1138,7 @@ class AgentManager(Node):
         response.despawned_ids = self._accumulated_despawned
         self._accumulated_spawned = []
         self._accumulated_despawned = []
-        self._logger.debug(
-            f"feedback: {len(request.robots)} robots, spawned={len(response.spawned_ids)}, despawned={len(response.despawned_ids)}"
-        )
+        self._logger.debug(f"feedback: {len(request.robots)} robots, spawned={len(response.spawned_ids)}, despawned={len(response.despawned_ids)}")
         return response
 
     def _world_state_callback(self, msg: AgentStatesMsg):
@@ -1212,7 +1184,7 @@ class AgentManager(Node):
         self,
         request: SpawnAgents.Request,
         response: SpawnAgents.Response,
-    ):
+    ) -> SpawnAgents.Response:
         spawned_ids = []
         for agent_msg in request.agents:
             aid = agent_msg.agent_id
@@ -1220,10 +1192,7 @@ class AgentManager(Node):
                 aid = self._next_agent_id
                 self._next_agent_id += 1
 
-            waypoints = [
-                Pose2D(x=pt.pose.x, y=pt.pose.y, theta=pt.pose.theta)
-                for pt in agent_msg.waypoints.points
-            ]
+            waypoints = [Pose2D(x=pt.pose.x, y=pt.pose.y, theta=pt.pose.theta) for pt in agent_msg.waypoints.points]
             radii = [pt.radius for pt in agent_msg.waypoints.points]
 
             agent = self._build_base_agent(aid, agent_msg, waypoints)
@@ -1266,7 +1235,7 @@ class AgentManager(Node):
         self,
         request: RemoveAgents.Request,
         response: RemoveAgents.Response,
-    ):
+    ) -> RemoveAgents.Response:
         if not request.agent_ids or -1 in request.agent_ids:
             count = len(self._agents)
             self._agents.clear()
@@ -1299,7 +1268,7 @@ class AgentManager(Node):
         self,
         request: ResetSimulation.Request,
         response: ResetSimulation.Response,
-    ):
+    ) -> ResetSimulation.Response:
         self._agents.clear()
         self._pool_agent_ids.clear()
         self._pool.reset()
@@ -1332,7 +1301,7 @@ class AgentManager(Node):
         self,
         request: UpdateRobot.Request,
         response: UpdateRobot.Response,
-    ):
+    ) -> UpdateRobot.Response:
         name = request.name or "robot"
         pose = Pose2D(
             x=request.pose.x,
@@ -1342,14 +1311,12 @@ class AgentManager(Node):
         radius = request.radius if request.radius > 0 else 0.3
         self._robots[name] = (pose, radius)
         response.success = True
-        self._logger.debug(
-            f"update_robot: {name} at ({pose.x:.2f}, {pose.y:.2f}), r={radius:.2f}"
-        )
+        self._logger.debug(f"update_robot: {name} at ({pose.x:.2f}, {pose.y:.2f}), r={radius:.2f}")
         return response
 
     @staticmethod
-    def _shape_msg_to_shape(shape_msg) -> "Shape":
-        from arena_humansim.utils.types import Shape, ShapeType
+    def _shape_msg_to_shape(shape_msg: ShapeMsg) -> Shape:
+        from arena_humansim.utils.types import ShapeType
 
         _RECT = 0
         _shape_type_map = {1: ShapeType.CIRCLE, 2: ShapeType.POLYGON}
@@ -1366,21 +1333,14 @@ class AgentManager(Node):
         return Shape(type=stype, radius=shape_msg.radius, vertices=vertices)
 
     @staticmethod
-    def _source_msg_to_config(src_msg) -> "SourceConfig":
-        from arena_humansim.utils.types import (
-            AgentTemplate,
-            RateKeyframe,
-            SinkAffinity,
-            SourceConfig,
-        )
+    def _source_msg_to_config(src_msg: SourceConfigMsg) -> SourceConfig:
+        from arena_humansim.utils.types import AgentTemplate, RateKeyframe, SinkAffinity
 
         return SourceConfig(
             name=src_msg.name,
             pose=Pose2D(x=src_msg.pose.x, y=src_msg.pose.y, theta=src_msg.pose.theta),
             shape=AgentManager._shape_msg_to_shape(src_msg.shape),
-            rate_profile=[
-                RateKeyframe(t=kf.t, rate=kf.rate) for kf in src_msg.rate_profile
-            ],
+            rate_profile=[RateKeyframe(t=kf.t, rate=kf.rate) for kf in src_msg.rate_profile],
             max_concurrent=src_msg.max_concurrent,
             max_total=src_msg.max_total,
             agent=AgentTemplate(
@@ -1388,28 +1348,21 @@ class AgentManager(Node):
                 desired_velocity_max=src_msg.agent.desired_velocity_max,
                 agent_radius=src_msg.agent.agent_radius,
                 agent_type=src_msg.agent.agent_type,
-                sink_affinity=[
-                    SinkAffinity(sink_name=sa.sink_name, weight=sa.weight)
-                    for sa in src_msg.agent.sink_affinity
-                ],
+                sink_affinity=[SinkAffinity(sink_name=sa.sink_name, weight=sa.weight) for sa in src_msg.agent.sink_affinity],
             ),
         )
 
     @staticmethod
-    def _sink_msg_to_config(sink_msg) -> "SinkConfig":
-        from arena_humansim.utils.types import SinkConfig
-
+    def _sink_msg_to_config(sink_msg: SinkConfigMsg) -> SinkConfig:
         return SinkConfig(
             name=sink_msg.name,
-            pose=Pose2D(
-                x=sink_msg.pose.x, y=sink_msg.pose.y, theta=sink_msg.pose.theta
-            ),
+            pose=Pose2D(x=sink_msg.pose.x, y=sink_msg.pose.y, theta=sink_msg.pose.theta),
             shape=AgentManager._shape_msg_to_shape(sink_msg.shape),
             absorption_radius=sink_msg.absorption_radius,
             capacity=sink_msg.capacity,
         )
 
-    def _set_flow_callback(self, request, response):
+    def _set_flow_callback(self, request: SetFlow.Request, response: SetFlow.Response) -> SetFlow.Response:
         self._spawn_scheduler.clear_sources()
         self._despawn_monitor.clear_sinks()
 
@@ -1432,7 +1385,7 @@ class AgentManager(Node):
         self._logger.info(response.message)
         return response
 
-    def _add_source_callback(self, request, response):
+    def _add_source_callback(self, request: AddSource.Request, response: AddSource.Response) -> AddSource.Response:
         src = self._source_msg_to_config(request.source)
         self._spawn_scheduler.add_source(src)
         response.success = True
@@ -1441,7 +1394,7 @@ class AgentManager(Node):
         self._logger.debug(response.message)
         return response
 
-    def _remove_source_callback(self, request, response):
+    def _remove_source_callback(self, request: RemoveSource.Request, response: RemoveSource.Response) -> RemoveSource.Response:
         if not request.name:
             self._spawn_scheduler.clear_sources()
             response.message = "Removed all sources"
@@ -1452,7 +1405,7 @@ class AgentManager(Node):
         self._logger.debug(response.message)
         return response
 
-    def _add_sink_callback(self, request, response):
+    def _add_sink_callback(self, request: AddSink.Request, response: AddSink.Response) -> AddSink.Response:
         sink = self._sink_msg_to_config(request.sink)
         self._despawn_monitor.add_sink(sink)
         self._spawn_scheduler.set_sinks(self._despawn_monitor.sinks)
@@ -1462,7 +1415,7 @@ class AgentManager(Node):
         self._logger.debug(response.message)
         return response
 
-    def _remove_sink_callback(self, request, response):
+    def _remove_sink_callback(self, request: RemoveSink.Request, response: RemoveSink.Response) -> RemoveSink.Response:
         if not request.name:
             self._despawn_monitor.clear_sinks()
             self._spawn_scheduler.set_sinks({})
@@ -1488,27 +1441,23 @@ class AgentManager(Node):
         for subsystem in self._wall_aware:
             subsystem.set_walls(segments)
 
-    def _add_walls_callback(self, request, response):
-        for name, start, end in zip(request.names, request.starts, request.ends):
+    def _add_walls_callback(self, request: AddWalls.Request, response: AddWalls.Response) -> AddWalls.Response:
+        for name, start, end in zip(request.names, request.starts, request.ends, strict=True):
             self._walls[name] = ((start.x, start.y), (end.x, end.y))
         self._refresh_planners()
         response.success = True
-        response.message = (
-            f"Added {len(request.names)} wall(s), total {len(self._walls)}"
-        )
+        response.message = f"Added {len(request.names)} wall(s), total {len(self._walls)}"
         self._logger.debug(response.message)
         return response
 
-    def _remove_walls_callback(self, request, response):
+    def _remove_walls_callback(self, request: RemoveWalls.Request, response: RemoveWalls.Response) -> RemoveWalls.Response:
         if not request.names:
             self._walls.clear()
             response.message = "Removed all walls"
         else:
             for name in request.names:
                 self._walls.pop(name, None)
-            response.message = (
-                f"Removed {len(request.names)} wall(s), remaining {len(self._walls)}"
-            )
+            response.message = f"Removed {len(request.names)} wall(s), remaining {len(self._walls)}"
         self._refresh_planners()
         response.success = True
         self._logger.debug(response.message)
@@ -1542,7 +1491,7 @@ class AgentManager(Node):
             segments.append((corners_world[i], corners_world[j]))
         return segments
 
-    def _add_obstacles_callback(self, request, response):
+    def _add_obstacles_callback(self, request: AddObstacles.Request, response: AddObstacles.Response) -> AddObstacles.Response:
         added = 0
         for obs_msg in request.obstacles:
             if obs_msg.name in self._obstacles:
@@ -1578,7 +1527,7 @@ class AgentManager(Node):
         self._logger.debug(response.message)
         return response
 
-    def _remove_obstacles_callback(self, request, response):
+    def _remove_obstacles_callback(self, request: RemoveObstacles.Request, response: RemoveObstacles.Response) -> RemoveObstacles.Response:
         if not request.names:
             self._obstacles.clear()
             response.message = "Removed all obstacles"
@@ -1601,7 +1550,7 @@ class AgentManager(Node):
         super().destroy_node()
 
 
-def main(args=None):
+def main(args: list[str] | None = None) -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="arena_humansim node")

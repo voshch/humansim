@@ -1,5 +1,5 @@
-from pathlib import Path
 import json
+from pathlib import Path
 
 from pydantic import BaseModel
 
@@ -12,9 +12,7 @@ def document_nodes_descriptions(output_path: str | Path):
     behavior_library = {}
 
     for schema in schemas:
-        node_description = (
-            schema.__doc__.strip() if schema.__doc__ else "No description"
-        )
+        node_description = schema.__doc__.strip() if schema.__doc__ else "No description"
 
         params = {}
         for field_name, field_info in schema.model_fields.items():
@@ -55,6 +53,4 @@ def document_nodes_descriptions(output_path: str | Path):
 
 
 if __name__ == "__main__":
-    document_nodes_descriptions(
-        "/opt/arena_ws/src/deps/humansim/arena_humansim/arena_humansim/behavior/behavior_nodes_library.json"
-    )
+    document_nodes_descriptions("/opt/arena_ws/src/deps/humansim/arena_humansim/arena_humansim/behavior/behavior_nodes_library.json")

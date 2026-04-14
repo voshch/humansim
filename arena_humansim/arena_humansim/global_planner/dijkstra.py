@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Sequence
-from typing import Optional
 
-import attrs
 import numpy as np
 from scipy.ndimage import binary_dilation
 from scipy.sparse import csr_matrix
@@ -13,7 +11,7 @@ from scipy.sparse.csgraph import dijkstra
 from arena_humansim.agents import BaseAgent
 from arena_humansim.utils.types import HighLevelCommand, Pose2D, Segment, Segments
 
-from . import GlobalPlanner, simplify_path
+from . import GlobalPlanner
 
 _SQRT2 = math.sqrt(2)
 
@@ -23,7 +21,7 @@ def _nearest_free_cell(
     row: int,
     col: int,
     max_radius: int = 200,
-) -> Optional[tuple[int, int]]:
+) -> tuple[int, int] | None:
     rows, cols = grid.shape
     if 0 <= row < rows and 0 <= col < cols and grid[row, col] == 0:
         return (row, col)
@@ -41,7 +39,6 @@ def _nearest_free_cell(
 def _build_grid_graph(grid: np.ndarray) -> csr_matrix:
     rows, cols = grid.shape
     free = grid == 0
-    free_flat = free.ravel()
     n_cells = rows * cols
 
     src = []
@@ -49,8 +46,14 @@ def _build_grid_graph(grid: np.ndarray) -> csr_matrix:
     weights = []
 
     for dr, dc, cost in (
-        (-1, 0, 1.0), (1, 0, 1.0), (0, -1, 1.0), (0, 1, 1.0),
-        (-1, -1, _SQRT2), (-1, 1, _SQRT2), (1, -1, _SQRT2), (1, 1, _SQRT2),
+        (-1, 0, 1.0),
+        (1, 0, 1.0),
+        (0, -1, 1.0),
+        (0, 1, 1.0),
+        (-1, -1, _SQRT2),
+        (-1, 1, _SQRT2),
+        (1, -1, _SQRT2),
+        (1, 1, _SQRT2),
     ):
         # build index arrays for the valid region of the shift
         r_src = slice(max(-dr, 0), rows + min(-dr, 0))
@@ -88,7 +91,7 @@ def _dijkstra_path(
     grid: np.ndarray,
     start: tuple[int, int],
     goal: tuple[int, int],
-) -> Optional[list[tuple[int, int]]]:
+) -> list[tuple[int, int]] | None:
     rows, cols = grid.shape
 
     actual_start = _nearest_free_cell(grid, start[0], start[1])
@@ -117,14 +120,19 @@ def _dijkstra_path(
     limit = max(straight * 4.0, 200.0)
 
     dist, predecessors = dijkstra(
-        graph, directed=False, indices=goal_flat,
-        return_predecessors=True, limit=limit,
+        graph,
+        directed=False,
+        indices=goal_flat,
+        return_predecessors=True,
+        limit=limit,
     )
 
     if np.isinf(dist[start_flat]):
         # retry without limit in case path requires long detour
         dist, predecessors = dijkstra(
-            graph, directed=False, indices=goal_flat,
+            graph,
+            directed=False,
+            indices=goal_flat,
             return_predecessors=True,
         )
 
@@ -159,8 +167,8 @@ class DijkstraPlanner(GlobalPlanner):
         self._replan_distance = replan_distance
         self._inflation_radius = inflation_radius
 
-        self._occupancy_grid: Optional[np.ndarray] = None
-        self._grid_graph: Optional[csr_matrix] = None
+        self._occupancy_grid: np.ndarray | None = None
+        self._grid_graph: csr_matrix | None = None
         self._resolution: float = 0.2
         self._origin: Pose2D = Pose2D()
         self._wall_segments: list[Segment] = []
@@ -209,11 +217,7 @@ class DijkstraPlanner(GlobalPlanner):
 
         self._occupancy_grid = grid
         self._grid_graph = _build_grid_graph(grid)
-        self._logger.info(
-            f"Walls rasterized: {cols}x{rows} ({cols * rows} cells), res={res}m, "
-            f"{len(segments)} segment(s), inflation={self._inflation_radius}m ({radius_cells} cells), "
-            f"graph edges={self._grid_graph.nnz}"
-        )
+        self._logger.info(f"Walls rasterized: {cols}x{rows} ({cols * rows} cells), res={res}m, {len(segments)} segment(s), inflation={self._inflation_radius}m ({radius_cells} cells), graph edges={self._grid_graph.nnz}")
 
     def get_cached_goals(self) -> dict[int, Pose2D]:
         return dict(self._cached_results)

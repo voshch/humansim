@@ -1,21 +1,18 @@
 import math
 
-from typing import List
-
+import py_trees
 from pydantic import BaseModel, Field
 
-import py_trees
-
 from arena_humansim.agents import BaseAgent
+from arena_humansim.behavior.nodes import _nav_command
 from arena_humansim.manager.interaction_manager import CommandType
+from arena_humansim.utils import DISTANCE_TOLERANCE
 from arena_humansim.utils.types import (
     HighLevelCommand,
     InteractionOutcome,
     InteractionType,
     Pose2D,
 )
-from arena_humansim.behavior.nodes import _nav_command
-from arena_humansim.utils import DISTANCE_TOLERANCE
 
 
 class GroupTalkNodeSchema(BaseModel):
@@ -23,19 +20,10 @@ class GroupTalkNodeSchema(BaseModel):
     Orchestrates a social gathering by first navigating the agent to a focal point and then transitioning into a synchronized group conversation state.
     """
 
-    agent: BaseAgent = Field(
-        description="The local agent instance controlled by this specific behavior tree node."
-    )
-    participant_agents: List[BaseAgent] = Field(
-        description="The full roster of agents participating in the talk. "
-        "The first agent in this list is designated as the 'initiator' or 'leader' for synchronization purposes."
-    )
-    group_center: Pose2D = Field(
-        description="The spatial coordinates (target) where the agents gather to form the conversation circle."
-    )
-    duration: float = Field(
-        description="The total time in seconds the group should remain in the ACTIVE conversation state."
-    )
+    agent: BaseAgent = Field(description="The local agent instance controlled by this specific behavior tree node.")
+    participant_agents: list[BaseAgent] = Field(description="The full roster of agents participating in the talk. The first agent in this list is designated as the 'initiator' or 'leader' for synchronization purposes.")
+    group_center: Pose2D = Field(description="The spatial coordinates (target) where the agents gather to form the conversation circle.")
+    duration: float = Field(description="The total time in seconds the group should remain in the ACTIVE conversation state.")
 
 
 class GroupTalkNode(py_trees.behaviour.Behaviour):
@@ -61,7 +49,7 @@ class GroupTalkNode(py_trees.behaviour.Behaviour):
         if self.agent.state.agent_id == self.agents[0].state.agent_id:
             self.is_leading_agent = True
 
-    def at_target(self, agent: BaseAgent):
+    def at_target(self, agent: BaseAgent) -> bool:
         dx = agent.state.pose.x - self.group_center.x
         dy = agent.state.pose.y - self.group_center.y
         return math.hypot(dx, dy) < DISTANCE_TOLERANCE
@@ -117,6 +105,4 @@ class GroupTalkNode(py_trees.behaviour.Behaviour):
                 return py_trees.common.Status.FAILURE
 
             else:
-                raise ValueError(
-                    f"Invalid InteractionOutcome. Received {self.agent.movement.last_outcome}"
-                )
+                raise ValueError(f"Invalid InteractionOutcome. Received {self.agent.movement.last_outcome}")

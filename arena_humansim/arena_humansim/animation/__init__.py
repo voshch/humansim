@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Iterable
+from typing import TYPE_CHECKING, Any
 
 from arena_humansim.agents import BaseAgent
 from arena_humansim.utils import ModuleRegistry
@@ -12,7 +12,7 @@ from arena_humansim.utils.types import InteractionState, Pose2D
 if TYPE_CHECKING:
     from arena_humansim.pool import AgentPool
 
-_registry = ModuleRegistry()
+_registry: ModuleRegistry[MotionAnimation] = ModuleRegistry()
 
 
 class MotionAnimation(Loggable, ABC):
@@ -34,11 +34,11 @@ class MotionAnimation(Loggable, ABC):
         pass
 
     @classmethod
-    def register(cls, name: str):
+    def register(cls, name: str) -> Callable[[Callable[[], type[MotionAnimation]]], Callable[[], type[MotionAnimation]]]:
         return _registry.register(name)
 
     @classmethod
-    def create(cls, name: str, *args, **kwargs) -> MotionAnimation:
+    def create(cls, name: str, *args: Any, **kwargs: Any) -> MotionAnimation:
         return _registry.get(name)(*args, **kwargs)
 
     @classmethod
@@ -46,13 +46,13 @@ class MotionAnimation(Loggable, ABC):
         return _registry.list_available()
 
 
-def _load_noop():
+def _load_noop() -> type[MotionAnimation]:
     from .noop import NoopAnimation
 
     return NoopAnimation
 
 
-def _load_kinematic():
+def _load_kinematic() -> type[MotionAnimation]:
     from .kinematic import KinematicAnimation
 
     return KinematicAnimation

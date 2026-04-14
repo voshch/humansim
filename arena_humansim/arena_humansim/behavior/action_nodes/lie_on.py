@@ -1,10 +1,8 @@
 import math
 
-from rclpy.logging import get_logger
-
 import py_trees
-
 from pydantic import BaseModel, Field
+from rclpy.logging import get_logger
 
 from arena_humansim.agents.base import BaseAgent
 from arena_humansim.utils.const import DISTANCE_TOLERANCE
@@ -25,9 +23,7 @@ class LieOnNodeSchema(BaseModel):
 
     agent: BaseAgent = Field(description="Agent that will lie on the object")
     object_name: str = Field(description="Object to be lied on")
-    duration: float = Field(
-        description="The duration of time the agent will lie on the object"
-    )
+    duration: float = Field(description="The duration of time the agent will lie on the object")
 
 
 class LieOnNode(py_trees.behaviour.Behaviour):
@@ -46,7 +42,7 @@ class LieOnNode(py_trees.behaviour.Behaviour):
         """
         # TODO: Search for object
 
-    def at_target(self):
+    def at_target(self) -> bool:
         assert self.object_position is not None
         dx = self.agent.state.pose.x - self.object_position.x
         dy = self.agent.state.pose.y - self.object_position.y
@@ -56,19 +52,13 @@ class LieOnNode(py_trees.behaviour.Behaviour):
     def update(self) -> py_trees.common.Status:
         # Could not find object to lie on
         if self.object_position is None:
-            _bt_logger.info(
-                f"Could not find object {self.object_name} for agent {self.agent.state.agent_id} to lie on it."
-            )
+            _bt_logger.info(f"Could not find object {self.object_name} for agent {self.agent.state.agent_id} to lie on it.")
             return py_trees.common.Status.FAILURE
 
         # Object found, navigating toward it
         elif not self.at_target():
-            _bt_logger.info(
-                f"Agent {self.agent.state.agent_id} is navigating to {self.object_name} to lie on it."
-            )
-            self.agent.movement.command = _nav_command(
-                agent=self.agent, target_pose=self.target_pose
-            )
+            _bt_logger.info(f"Agent {self.agent.state.agent_id} is navigating to {self.object_name} to lie on it.")
+            self.agent.movement.command = _nav_command(agent=self.agent, target_pose=self.target_pose)
             return py_trees.common.Status.RUNNING
 
         # Navigated to object, emit lie on command
@@ -93,6 +83,4 @@ class LieOnNode(py_trees.behaviour.Behaviour):
                     return py_trees.common.Status.FAILURE
 
                 else:
-                    raise ValueError(
-                        f"Invalid of InteractionOutcome for {self.__class__.__name__} of agent {self.agent.state.agent_id}. Received {outcome}"
-                    )
+                    raise ValueError(f"Invalid of InteractionOutcome for {self.__class__.__name__} of agent {self.agent.state.agent_id}. Received {outcome}")

@@ -3,10 +3,8 @@ from __future__ import annotations
 import heapq
 import math
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Sequence
-from typing import TYPE_CHECKING
-
-import numpy as np
+from collections.abc import Callable, Iterable, Sequence
+from typing import TYPE_CHECKING, Any
 
 from arena_humansim.agents import BaseAgent
 from arena_humansim.utils import ModuleRegistry
@@ -16,7 +14,7 @@ from arena_humansim.utils.types import HighLevelCommand, Pose2D, WallAware
 if TYPE_CHECKING:
     from arena_humansim.viz import MarkerPublisher
 
-_registry = ModuleRegistry()
+_registry: ModuleRegistry[GlobalPlanner] = ModuleRegistry()
 
 
 def simplify_path(
@@ -38,10 +36,7 @@ def simplify_path(
 
     def _area(i: int) -> float:
         p, nx = prev_idx[i], next_idx[i]
-        return 0.5 * abs(
-            (xs[i] - xs[p]) * (ys[nx] - ys[p])
-            - (xs[nx] - xs[p]) * (ys[i] - ys[p])
-        )
+        return 0.5 * abs((xs[i] - xs[p]) * (ys[nx] - ys[p]) - (xs[nx] - xs[p]) * (ys[i] - ys[p]))
 
     areas = [_inf] + [_area(i) for i in range(1, n - 1)] + [_inf]
     heap = [(areas[i], i) for i in range(1, n - 1)]
@@ -108,11 +103,11 @@ class GlobalPlanner(WallAware, Loggable, ABC):
         return idx
 
     @classmethod
-    def register(cls, name: str):
+    def register(cls, name: str) -> Callable[[Callable[[], type[GlobalPlanner]]], Callable[[], type[GlobalPlanner]]]:
         return _registry.register(name)
 
     @classmethod
-    def create(cls, name: str, *args, **kwargs) -> GlobalPlanner:
+    def create(cls, name: str, *args: Any, **kwargs: Any) -> GlobalPlanner:
         return _registry.get(name)(*args, **kwargs)
 
     @classmethod
@@ -120,13 +115,13 @@ class GlobalPlanner(WallAware, Loggable, ABC):
         return _registry.list_available()
 
 
-def _load_dijkstra():
+def _load_dijkstra() -> type[GlobalPlanner]:
     from .dijkstra import DijkstraPlanner
 
     return DijkstraPlanner
 
 
-def _load_astar():
+def _load_astar() -> type[GlobalPlanner]:
     from .astar import AStarPlanner
 
     return AStarPlanner

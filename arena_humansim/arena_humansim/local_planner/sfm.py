@@ -11,8 +11,11 @@ from arena_humansim.utils.types import Pose2D, Segments
 from . import LocalPlanner
 
 if TYPE_CHECKING:
+    from std_msgs.msg import ColorRGBA
+
     from arena_humansim.pool import AgentPool
     from arena_humansim.viz import MarkerPublisher
+    from arena_humansim.viz.markers import MarkerView
 
 _EPS = 1e-6
 
@@ -44,7 +47,7 @@ class SFMPlanner(LocalPlanner):
             self._wall_segments_np = np.empty((0, 2, 2), dtype=np.float64)
         self._wall_p1 = self._wall_segments_np[:, 0, :]
         self._wall_d = self._wall_segments_np[:, 1, :] - self._wall_p1
-        self._wall_len_sq = np.sum(self._wall_d ** 2, axis=1)
+        self._wall_len_sq = np.sum(self._wall_d**2, axis=1)
         self._logger.info(f"Loaded {len(segments)} wall segment(s)")
 
     def compute_pool(self, pool: AgentPool, store_forces: bool = False, dt: float = 1.0) -> None:
@@ -232,7 +235,7 @@ class SFMPlanner(LocalPlanner):
                 r_ij = 2.0 * agent_radius
                 magnitudes = repulsion_strength * np.exp((r_ij - dists) / repulsion_range)
 
-                cos_phi = (-normals[:, 0] * e_goal_x + -normals[:, 1] * e_goal_y)
+                cos_phi = -normals[:, 0] * e_goal_x + -normals[:, 1] * e_goal_y
                 w = anisotropy + (1.0 - anisotropy) * 0.5 * (1.0 + cos_phi)
                 magnitudes *= w
 
@@ -268,9 +271,9 @@ class SFMPlanner(LocalPlanner):
         return velocities
 
     def publish_markers(self, pub: MarkerPublisher) -> None:
-        from arena_humansim.viz import rgba
-        from geometry_msgs.msg import Point
         from visualization_msgs.msg import Marker
+
+        from arena_humansim.viz import rgba
 
         c_goal = rgba(0.2, 0.9, 0.2, 0.7)
         c_social = rgba(1.0, 0.2, 0.2, 0.7)
@@ -305,7 +308,7 @@ class SFMPlanner(LocalPlanner):
                 self._emit_force(obstacle_view, aid, x, y, fo, scale, c_obstacle)
 
     @staticmethod
-    def _emit_force(view, aid, x, y, f, scale, color):
+    def _emit_force(view: MarkerView, aid: int, x: float, y: float, f: tuple[float, float], scale: float, color: ColorRGBA) -> None:
         from geometry_msgs.msg import Point
 
         if abs(f[0]) < 1e-4 and abs(f[1]) < 1e-4:

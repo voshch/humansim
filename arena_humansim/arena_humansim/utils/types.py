@@ -1,10 +1,8 @@
 """Core data structures for arena_humansim."""
 
 import enum
-from typing import Any
 
 import attrs
-
 
 Segment = tuple[tuple[float, float], tuple[float, float]]
 Segments = list[Segment]
@@ -74,7 +72,7 @@ class BeliefState:
 
     agent_id: int = 0
     observed_agents: list[AgentState] = attrs.Factory(list)
-    extra: dict[str, Any] = attrs.Factory(dict)
+    extra: dict[str, object] = attrs.Factory(dict)
 
 
 @attrs.define
@@ -101,10 +99,7 @@ class InteractionContract:
 
     @property
     def is_full(self) -> bool:
-        return (
-            self.max_participants != -1
-            and len(self.current_participants) >= self.max_participants
-        )
+        return self.max_participants != -1 and len(self.current_participants) >= self.max_participants
 
 
 @attrs.define
@@ -113,7 +108,7 @@ class InteractionState:
     type: int = 0
     contract: InteractionContract = attrs.Factory(InteractionContract)
     participants: list[int] = attrs.Factory(list)
-    state: dict[str, Any] = attrs.Factory(dict)
+    state: dict[str, object] = attrs.Factory(dict)
     object_id: str | None = None
     outcome: int = 0  # InteractionOutcome.FORMING
 
@@ -142,9 +137,7 @@ class WaypointMovement:
 @attrs.define
 class BehaviorTreeMovement:
     command: HighLevelCommand | None = None
-    last_outcome: int | None = (
-        None  # InteractionOutcome from most recently ended interaction
-    )
+    last_outcome: int | None = None  # InteractionOutcome from most recently ended interaction
 
 
 class ShapeType(enum.Enum):
@@ -276,8 +269,6 @@ from arena_humansim.agents.types import (
     NeedDist,
     ParamDist,
     PerceptionDist,
-    SampledNeed,
-    SampledParams,
     SequenceDef,
     StepDef,
     TransitionDef,
@@ -287,7 +278,7 @@ from arena_humansim.agents.types import (
 converter = cattrs.Converter()
 
 
-def _structure_param_dist(val, _):
+def _structure_param_dist(val: object, _: type) -> ParamDist:
     if isinstance(val, (int, float)):
         return ParamDist(mean=float(val))
     if isinstance(val, ParamDist):
@@ -298,7 +289,7 @@ def _structure_param_dist(val, _):
 converter.register_structure_hook(ParamDist, _structure_param_dist)
 
 
-def _structure_need_dist(val, _):
+def _structure_need_dist(val: object, _: type) -> NeedDist:
     if isinstance(val, (int, float)):
         return NeedDist(initial=ParamDist(mean=float(val)))
     if isinstance(val, NeedDist):
@@ -314,7 +305,7 @@ def _structure_need_dist(val, _):
 converter.register_structure_hook(NeedDist, _structure_need_dist)
 
 
-def _structure_need_condition(val, _):
+def _structure_need_condition(val: object, _: type) -> NeedCondition:
     if isinstance(val, NeedCondition):
         return val
     return NeedCondition(**val)
@@ -323,14 +314,12 @@ def _structure_need_condition(val, _):
 converter.register_structure_hook(NeedCondition, _structure_need_condition)
 
 
-def _structure_action_def(val, _):
+def _structure_action_def(val: object, _: type) -> ActionDef:
     if isinstance(val, ActionDef):
         return val
     d = dict(val)
     if "when" in d and isinstance(d["when"], dict):
-        d["when"] = {
-            k: converter.structure(v, NeedCondition) for k, v in d["when"].items()
-        }
+        d["when"] = {k: converter.structure(v, NeedCondition) for k, v in d["when"].items()}
     if "duration" in d and d["duration"] is not None:
         d["duration"] = converter.structure(d["duration"], ParamDist)
     if "patience" in d and d["patience"] is not None:
@@ -341,7 +330,7 @@ def _structure_action_def(val, _):
 converter.register_structure_hook(ActionDef, _structure_action_def)
 
 
-def _structure_step_def(val, _):
+def _structure_step_def(val: object, _: type) -> StepDef:
     if isinstance(val, StepDef):
         return val
     d = dict(val)
@@ -350,9 +339,7 @@ def _structure_step_def(val, _):
     if "patience" in d and d["patience"] is not None:
         d["patience"] = converter.structure(d["patience"], ParamDist)
     if "until_need" in d and isinstance(d["until_need"], dict):
-        d["until_need"] = {
-            k: converter.structure(v, NeedCondition) for k, v in d["until_need"].items()
-        }
+        d["until_need"] = {k: converter.structure(v, NeedCondition) for k, v in d["until_need"].items()}
     if "allowed_actions" in d and d["allowed_actions"] is not None:
         d["allowed_actions"] = tuple(d["allowed_actions"])
     if "blocked_actions" in d and d["blocked_actions"] is not None:
@@ -363,15 +350,13 @@ def _structure_step_def(val, _):
 converter.register_structure_hook(StepDef, _structure_step_def)
 
 
-def _structure_transition_def(val, _):
+def _structure_transition_def(val: object, _: type) -> TransitionDef:
     if isinstance(val, TransitionDef):
         return val
     d = dict(val)
     when = d["when"]
     if isinstance(when, str):
-        raise ValueError(
-            f"String-based transition condition '{when}' is not supported. Use dict[str, NeedCondition] instead."
-        )
+        raise ValueError(f"String-based transition condition '{when}' is not supported. Use dict[str, NeedCondition] instead.")
     d["when"] = {k: converter.structure(v, NeedCondition) for k, v in when.items()}
     return TransitionDef(**d)
 
@@ -379,16 +364,14 @@ def _structure_transition_def(val, _):
 converter.register_structure_hook(TransitionDef, _structure_transition_def)
 
 
-def _structure_sequence_def(val, _):
+def _structure_sequence_def(val: object, _: type) -> SequenceDef:
     if isinstance(val, SequenceDef):
         return val
     d = dict(val)
     if "steps" in d:
         d["steps"] = {k: converter.structure(v, StepDef) for k, v in d["steps"].items()}
     if "transitions" in d:
-        d["transitions"] = tuple(
-            converter.structure(t, TransitionDef) for t in d["transitions"]
-        )
+        d["transitions"] = tuple(converter.structure(t, TransitionDef) for t in d["transitions"])
     else:
         d["transitions"] = ()
     return SequenceDef(**d)
@@ -397,7 +380,7 @@ def _structure_sequence_def(val, _):
 converter.register_structure_hook(SequenceDef, _structure_sequence_def)
 
 
-def _structure_perception_dist(val, _):
+def _structure_perception_dist(val: object, _: type) -> PerceptionDist:
     if isinstance(val, PerceptionDist):
         return val
     d = dict(val)
@@ -409,7 +392,7 @@ def _structure_perception_dist(val, _):
 converter.register_structure_hook(PerceptionDist, _structure_perception_dist)
 
 
-def _structure_local_planner_dist(val, _):
+def _structure_local_planner_dist(val: object, _: type) -> LocalPlannerDist:
     if isinstance(val, LocalPlannerDist):
         return val
     d = dict(val)
@@ -421,12 +404,10 @@ def _structure_local_planner_dist(val, _):
 converter.register_structure_hook(LocalPlannerDist, _structure_local_planner_dist)
 
 
-_PARAM_DIST_FIELDS = frozenset(
-    f.name for f in attrs.fields(AgentType) if f.type is ParamDist
-)
+_PARAM_DIST_FIELDS = frozenset(f.name for f in attrs.fields(AgentType) if f.type is ParamDist)
 
 
-def _structure_agent_type(val, _):
+def _structure_agent_type(val: object, _: type) -> AgentType:
     if isinstance(val, AgentType):
         return val
     d = dict(val)
@@ -436,25 +417,15 @@ def _structure_agent_type(val, _):
     if "perception" in d and isinstance(d["perception"], dict):
         d["perception"] = converter.structure(d["perception"], PerceptionDist)
     if "local_planner_params" in d and isinstance(d["local_planner_params"], dict):
-        d["local_planner_params"] = converter.structure(
-            d["local_planner_params"], LocalPlannerDist
-        )
+        d["local_planner_params"] = converter.structure(d["local_planner_params"], LocalPlannerDist)
     if "needs" in d and isinstance(d["needs"], dict):
-        d["needs"] = {
-            k: converter.structure(v, NeedDist) for k, v in d["needs"].items()
-        }
+        d["needs"] = {k: converter.structure(v, NeedDist) for k, v in d["needs"].items()}
     if "actions" in d and isinstance(d["actions"], dict):
-        d["actions"] = {
-            k: converter.structure(v, ActionDef) for k, v in d["actions"].items()
-        }
+        d["actions"] = {k: converter.structure(v, ActionDef) for k, v in d["actions"].items()}
     if "sequences" in d and isinstance(d["sequences"], dict):
-        d["sequences"] = {
-            k: converter.structure(v, SequenceDef) for k, v in d["sequences"].items()
-        }
+        d["sequences"] = {k: converter.structure(v, SequenceDef) for k, v in d["sequences"].items()}
     if "vars" in d and isinstance(d["vars"], dict):
-        d["vars"] = {
-            k: VarDef(**v) if isinstance(v, dict) else v for k, v in d["vars"].items()
-        }
+        d["vars"] = {k: VarDef(**v) if isinstance(v, dict) else v for k, v in d["vars"].items()}
     if "perception_stack" in d and isinstance(d["perception_stack"], list):
         d["perception_stack"] = tuple(d["perception_stack"])
     return AgentType(**d)
@@ -463,7 +434,7 @@ def _structure_agent_type(val, _):
 converter.register_structure_hook(AgentType, _structure_agent_type)
 
 
-def _structure_var_def(val, _):
+def _structure_var_def(val: object, _: type) -> VarDef:
     if isinstance(val, VarDef):
         return val
     return VarDef(**val)

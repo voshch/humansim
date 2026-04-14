@@ -1,8 +1,11 @@
+from collections.abc import Mapping
+
 import numpy as np
 import py_trees
 from rclpy.logging import get_logger
 
 from arena_humansim.agents import AgentType, BaseAgent
+from arena_humansim.agents.types import ActionDef, StepDef
 from arena_humansim.manager.world_knowledge import WorldKnowledge
 from arena_humansim.utils.event_bus import EventBus
 
@@ -14,14 +17,14 @@ from .nodes import AutonomousNode, ConcreteStepNode, NeedsDecayNode, SequenceSta
 class _StepRecipe:
     __slots__ = ("autonomous", "node_name", "step_def", "action_defs", "utility_weights")
 
-    def __init__(self, autonomous, node_name, step_def, action_defs, utility_weights):
+    def __init__(self, autonomous: bool, node_name: str, step_def: StepDef, action_defs: Mapping[str, ActionDef], utility_weights: Mapping[str, float]) -> None:
         self.autonomous = autonomous
         self.node_name = node_name
         self.step_def = step_def
         self.action_defs = action_defs
         self.utility_weights = utility_weights
 
-    def build(self, agent, world, event_bus, rng, dt):
+    def build(self, agent: BaseAgent, world: WorldKnowledge, event_bus: EventBus, rng: np.random.Generator, dt: float) -> AutonomousNode | ConcreteStepNode:
         if self.autonomous:
             return AutonomousNode(
                 name=self.node_name,
@@ -57,21 +60,21 @@ class BehaviorTreeFactory:
         for seq_name, seq_def in agent_type.sequences.items():
             for transition in seq_def.transitions:
                 if isinstance(transition.when, str):
-                    raise ValueError(
-                        f"String-based transition condition '{transition.when}' in sequence '{seq_name}' is not supported. Use dict[str, NeedCondition] instead."
-                    )
+                    raise ValueError(f"String-based transition condition '{transition.when}' in sequence '{seq_name}' is not supported. Use dict[str, NeedCondition] instead.")
 
         self._seq_recipes: dict[str, list[_StepRecipe]] = {}
         for seq_name, seq_def in agent_type.sequences.items():
             recipes: list[_StepRecipe] = []
             for step_name, step_def in seq_def.steps.items():
-                recipes.append(_StepRecipe(
-                    autonomous=step_def.autonomous,
-                    node_name=f"{seq_name}/{step_name}",
-                    step_def=step_def,
-                    action_defs=agent_type.actions,
-                    utility_weights=agent_type.utility_weights,
-                ))
+                recipes.append(
+                    _StepRecipe(
+                        autonomous=step_def.autonomous,
+                        node_name=f"{seq_name}/{step_name}",
+                        step_def=step_def,
+                        action_defs=agent_type.actions,
+                        utility_weights=agent_type.utility_weights,
+                    )
+                )
             self._seq_recipes[seq_name] = recipes
 
     def build(
@@ -134,7 +137,5 @@ def compile_agent_behavior(
 
     factory = BehaviorTreeFactory(agent_type)
     bt = factory.build(agent, world, event_bus, rng, dt)
-    _logger.debug(
-        f"Agent {agent.state.agent_id} ({agent_type.name}): compiled {len(agent_type.sequences)} sequence(s), initial={agent_type.initial_sequence}"
-    )
+    _logger.debug(f"Agent {agent.state.agent_id} ({agent_type.name}): compiled {len(agent_type.sequences)} sequence(s), initial={agent_type.initial_sequence}")
     return bt

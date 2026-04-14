@@ -1,6 +1,6 @@
 import py_trees
-
 from pydantic import BaseModel, Field
+
 from arena_humansim.agents import BaseAgent
 from arena_humansim.manager.interaction_manager import CommandType
 from arena_humansim.utils.types import HighLevelCommand, InteractionType
@@ -47,6 +47,4 @@ class TalkToNode(py_trees.behaviour.Behaviour):
             return py_trees.common.Status.FAILURE
 
         else:
-            raise ValueError(
-                f"Invalid InteractionOutcome for node {self.__class__.__name__}. Received {outcome}"
-            )
+            raise ValueError(f"Invalid InteractionOutcome for node {self.__class__.__name__}. Received {outcome}")

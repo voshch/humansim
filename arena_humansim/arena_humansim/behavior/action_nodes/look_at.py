@@ -1,7 +1,7 @@
 import numpy as np
 import py_trees
-
 from pydantic import BaseModel, Field
+
 from arena_humansim.agents import BaseAgent
 from arena_humansim.behavior.nodes import _nav_command
 from arena_humansim.manager.interaction_manager import CommandType
@@ -15,9 +15,7 @@ class LookAtNodeSchema(BaseModel):
     """
 
     agent: BaseAgent = Field(description="The agent will look")
-    target_look_pose: Pose2D = Field(
-        description="The target position for the agent to look at"
-    )
+    target_look_pose: Pose2D = Field(description="The target position for the agent to look at")
     duration: float = Field(description="The duration of time of the look")
 
 
@@ -55,9 +53,7 @@ class LookAtNode(py_trees.behaviour.Behaviour):
         angle_diff = angle_diff / np.pi * 180
 
         if abs(angle_diff) > ANGLE_TOLERANCE:
-            self.agent.movement.command = _nav_command(
-                agent=self.agent, target_pose=self.target_pose
-            )
+            self.agent.movement.command = _nav_command(agent=self.agent, target_pose=self.target_pose)
             return py_trees.common.Status.RUNNING
 
         # 2. Rotation complete, emit IDLE command
@@ -83,6 +79,4 @@ class LookAtNode(py_trees.behaviour.Behaviour):
             return py_trees.common.Status.FAILURE
 
         else:
-            raise ValueError(
-                f"Invalid of InteractionOutcome for {self.__class__.__name__} of agent {self.agent.state.agent_id}. Received {outcome}"
-            )
+            raise ValueError(f"Invalid of InteractionOutcome for {self.__class__.__name__} of agent {self.agent.state.agent_id}. Received {outcome}")

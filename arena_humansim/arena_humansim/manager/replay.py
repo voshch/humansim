@@ -1,12 +1,32 @@
+from __future__ import annotations
+
 import json
-import math
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
+
+import attrs
 
 from arena_humansim.agents import BaseAgent, SampledParams
 from arena_humansim.agents.types import SampledLocalPlanner, SampledPerception
 from arena_humansim.utils.loggable import Loggable
-from arena_humansim.utils.types import AgentState, HighLevelCommand, InteractionState, Pose2D
+from arena_humansim.utils.types import AgentState, HighLevelCommand, Pose2D
+
+if TYPE_CHECKING:
+    from arena_humansim.manager.agent_manager import AgentManager
+    from arena_humansim.manager.logger import SimulationLogger
+
+
+@attrs.frozen
+class AgentStateDivergence:
+    tick: int
+    agent_id: int
+    detail: str
+
+
+@attrs.define
+class ReplayResult:
+    total_ticks: int
+    success: bool = True
+    first_divergence: AgentStateDivergence | None = None
 
 
 class ReplayManager(Loggable):
@@ -16,14 +36,14 @@ class ReplayManager(Loggable):
         self._spawns: dict[int, dict] = {}
         self._log_path: str | None = None
 
-    def load(self, log_path: str):
+    def load(self, log_path: str) -> None:
         self._log_path = log_path
         self._ticks = []
         self._tick_index = {}
         self._spawns = {}
 
         tick_idx = 0
-        with open(log_path, "r") as f:
+        with open(log_path) as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -149,12 +169,8 @@ class ReplayManager(Loggable):
             )
         return commands
 
-    def replay(self, agent_manager, logger=None) -> dict[str, Any]:
-        result = {
-            "success": True,
-            "total_ticks": len(self._ticks),
-            "first_divergence": None,
-        }
+    def replay(self, agent_manager: AgentManager, logger: SimulationLogger | None = None) -> ReplayResult:
+        result = ReplayResult(total_ticks=len(self._ticks))
 
         for record in self._ticks:
             tick_n = record["tick"]
@@ -173,10 +189,10 @@ class ReplayManager(Loggable):
             )
 
             if divergence is not None:
-                result["success"] = False
-                if result["first_divergence"] is None:
-                    result["first_divergence"] = divergence
-                    msg = f"Replay divergence at tick {tick_n}: agent {divergence['agent_id']} - {divergence['detail']}"
+                result.success = False
+                if result.first_divergence is None:
+                    result.first_divergence = divergence
+                    msg = f"Replay divergence at tick {tick_n}: agent {divergence.agent_id} - {divergence.detail}"
                     if logger:
                         logger.warn(msg)
                 break
@@ -191,28 +207,20 @@ def _compare_agent_states(
     actual: dict[int, AgentState],
     expected: dict[int, AgentState],
     tick: int,
-) -> dict[str, Any] | None:
+) -> AgentStateDivergence | None:
     all_ids = set(actual.keys()) | set(expected.keys())
     for aid in sorted(all_ids):
         if aid not in actual:
-            return {
-                "tick": tick,
-                "agent_id": aid,
-                "detail": "agent missing from actual state",
-            }
+            return AgentStateDivergence(tick=tick, agent_id=aid, detail="agent missing from actual state")
         if aid not in expected:
-            return {
-                "tick": tick,
-                "agent_id": aid,
-                "detail": "agent missing from expected (logged) state",
-            }
+            return AgentStateDivergence(tick=tick, agent_id=aid, detail="agent missing from expected (logged) state")
         a = actual[aid]
         e = expected[aid]
 
         if abs(a.pose.x - e.pose.x) > _FLOAT_TOL or abs(a.pose.y - e.pose.y) > _FLOAT_TOL or abs(a.pose.theta - e.pose.theta) > _FLOAT_TOL:
-            return {"tick": tick, "agent_id": aid, "detail": f"pose mismatch: actual=({a.pose.x}, {a.pose.y}, {a.pose.theta}) expected=({e.pose.x}, {e.pose.y}, {e.pose.theta})"}
+            return AgentStateDivergence(tick=tick, agent_id=aid, detail=f"pose mismatch: actual=({a.pose.x}, {a.pose.y}, {a.pose.theta}) expected=({e.pose.x}, {e.pose.y}, {e.pose.theta})")
 
         if abs(a.velocity[0] - e.velocity[0]) > _FLOAT_TOL or abs(a.velocity[1] - e.velocity[1]) > _FLOAT_TOL:
-            return {"tick": tick, "agent_id": aid, "detail": f"velocity mismatch: actual=({a.velocity[0]}, {a.velocity[1]}) expected=({e.velocity[0]}, {e.velocity[1]})"}
+            return AgentStateDivergence(tick=tick, agent_id=aid, detail=f"velocity mismatch: actual=({a.velocity[0]}, {a.velocity[1]}) expected=({e.velocity[0]}, {e.velocity[1]})")
 
     return None

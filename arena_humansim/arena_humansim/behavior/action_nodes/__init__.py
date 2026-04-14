@@ -1,14 +1,14 @@
-from .block import BlockNodeSchema, BlockNode
-from .follow import FollowNodeSchema, FollowNode
-from .go_to import GoToNodeSchema, GoToNode
-from .group_talk import GroupTalkNodeSchema, GroupTalkNode
-from .idle import IdleNodeSchema, IdleNode
-from .lie_on import LieOnNodeSchema, LieOnNode
-from .look_at import LookAtNodeSchema, LookAtNode
-from .queue import QueueNodeSchema, QueueNode
-from .sit_on import SitOnNodeSchema, SitOnNode
-from .talk_to import TalkToNodeSchema, TalkToNode
-from .wave_at import WaveAtNodeSchema, WaveAtNode
+from .block import BlockNode, BlockNodeSchema
+from .follow import FollowNode, FollowNodeSchema
+from .go_to import GoToNode, GoToNodeSchema
+from .group_talk import GroupTalkNode, GroupTalkNodeSchema
+from .idle import IdleNode, IdleNodeSchema
+from .lie_on import LieOnNode, LieOnNodeSchema
+from .look_at import LookAtNode, LookAtNodeSchema
+from .queue import QueueNode, QueueNodeSchema
+from .sit_on import SitOnNode, SitOnNodeSchema
+from .talk_to import TalkToNode, TalkToNodeSchema
+from .wave_at import WaveAtNode, WaveAtNodeSchema
 
 __all__ = [
     "BlockNodeSchema",

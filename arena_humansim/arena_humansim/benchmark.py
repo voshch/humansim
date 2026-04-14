@@ -125,12 +125,12 @@ class BenchmarkDriver(Node):
             self._collecting = False
             self._done_event.set()
 
-    def wait_for_services(self, timeout: float = 10.0):
+    def wait_for_services(self, timeout: float = 10.0) -> None:
         for cli in (self._spawn_cli, self._remove_cli, self._add_walls_cli, self._remove_walls_cli, self._get_profile_cli):
             if not cli.wait_for_service(timeout_sec=timeout):
                 raise TimeoutError(f"Service {cli.srv_name} not available")
 
-    def add_walls(self, segments: list[list[list[float]]]):
+    def add_walls(self, segments: list[list[list[float]]]) -> None:
         req = AddWalls.Request()
         for i, seg in enumerate(segments):
             req.names.append(f"bench_wall_{i}")
@@ -140,7 +140,7 @@ class BenchmarkDriver(Node):
         if resp is None or not resp.success:
             raise RuntimeError(f"add_walls failed: {resp}")
 
-    def remove_walls(self):
+    def remove_walls(self) -> None:
         req = RemoveWalls.Request()
         self._call_sync(self._remove_walls_cli, req, timeout=10.0)
 
@@ -156,10 +156,10 @@ class BenchmarkDriver(Node):
             n_agents=resp.n_agents,
         )
 
-    def spawn_random_agents(self, n: int, seed: int = 42, radius: float = 20.0, spawn_rect: SpawnRect | None = None):
+    def spawn_random_agents(self, n: int, seed: int = 42, radius: float = 20.0, spawn_rect: SpawnRect | None = None) -> None:
         rng = np.random.default_rng(seed)
         req = SpawnAgents.Request()
-        for i in range(n):
+        for _ in range(n):
             if spawn_rect:
                 x = rng.uniform(spawn_rect.x_min, spawn_rect.x_max)
                 y = rng.uniform(spawn_rect.y_min, spawn_rect.y_max)
@@ -190,7 +190,7 @@ class BenchmarkDriver(Node):
             raise RuntimeError(f"Spawn failed: {resp}")
         return resp.spawned_ids
 
-    def _call_sync(self, client, request, timeout=10.0):
+    def _call_sync(self, client: Any, request: Any, timeout: float = 10.0) -> object:  # noqa: ANN401
         future = client.call_async(request)
         event = threading.Event()
         future.add_done_callback(lambda _: event.set())
@@ -198,7 +198,7 @@ class BenchmarkDriver(Node):
             raise TimeoutError(f"Service call to {client.srv_name} timed out")
         return future.result()
 
-    def remove_all(self, ids: Iterable[int]):
+    def remove_all(self, ids: Iterable[int]) -> None:
         req = RemoveAgents.Request()
         req.agent_ids = list(ids)
         self._call_sync(self._remove_cli, req, timeout=10.0)
@@ -339,8 +339,10 @@ def generate_maze(grid_size: int, seed: int, cell_size: float = 2.0) -> WallLayo
 
     margin = cell_size * 0.3
     rect = SpawnRect(
-        x_min=margin, x_max=cols * cell_size - margin,
-        y_min=margin, y_max=rows * cell_size - margin,
+        x_min=margin,
+        x_max=cols * cell_size - margin,
+        y_min=margin,
+        y_max=rows * cell_size - margin,
     )
     return WallLayout(walls=walls, spawn_rect=rect)
 
@@ -414,7 +416,7 @@ def run_single(
     n_ticks: int,
     warmup: int,
     seed: int,
-    executor,
+    executor: rclpy.executors.Executor,
     walls: list[list[list[float]]] | None = None,
     spawn_rect: SpawnRect | None = None,
     profile: bool = False,
@@ -446,7 +448,7 @@ def run_incremental(
     spawn_interval: int,
     warmup: int,
     seed: int,
-    executor,
+    executor: rclpy.executors.Executor,
     profile: bool = False,
     profile_interval: int = 100,
 ) -> IncrementalResult:
@@ -474,7 +476,7 @@ def print_incremental_results(label: str, result: IncrementalResult):
         print(f"  {label}: no data collected")
         return
 
-    def ms(v):
+    def ms(v: float) -> str:
         return f"{v:.2f}ms"
 
     W = 10
@@ -525,7 +527,7 @@ def print_results(
     ref_label: str,
     all_stages: Sequence[StageResults],
 ):
-    def ms(v):
+    def ms(v: float) -> str:
         return f"{v:.2f}ms"
 
     W = 12
@@ -535,7 +537,7 @@ def print_results(
     all_ref = []
     for sr in all_stages:
         wc = sr.stage.wall_count
-        for cr, rr in zip(sr.cand_results, sr.ref_results):
+        for cr, rr in zip(sr.cand_results, sr.ref_results, strict=True):
             col_labels.append(_col_label(cr.n_agents, wc))
             all_cand.append(cr)
             all_ref.append(rr)
@@ -577,6 +579,7 @@ def print_results(
     print()
     print("  comparison (candidate vs reference)")
     print(header)
+
     def _total_ms(r: RunResult) -> float:
         if r.profile and r.profile.phase_means_ms:
             return sum(r.profile.phase_means_ms)
@@ -584,14 +587,16 @@ def print_results(
 
     ratios = []
     speedups = []
-    for rc, rr in zip(all_cand, all_ref):
+    for rc, rr in zip(all_cand, all_ref, strict=True):
         ct, rt = _total_ms(rc), _total_ms(rr)
         ratios.append(ct / rt if rt > 0 else float("inf"))
         speedups.append((rt - ct) / rt * 100 if rt > 0 else 0)
     print(f"{'ratio':>{PW}}" + "".join(f"{r:>{W}.3f}" for r in ratios))
-    def _speedup_label(s):
+
+    def _speedup_label(s: float) -> str:
         sign = "+" if s >= 0 else ""
         return f"{sign}{s:.1f}%"
+
     print(f"{'speedup':>{PW}}" + "".join(f"{_speedup_label(s):>{W}}" for s in speedups))
     print()
 
@@ -606,13 +611,14 @@ def parse_params(raw: str | None) -> dict[str, Any]:
     return params
 
 
-def _parse_walls_spec(spec, seed: int, stage_idx: int) -> WallLayout | None:
+def _parse_walls_spec(spec: int | str | list[list[list[float]]] | None, seed: int, stage_idx: int) -> WallLayout | None:
     if spec is None:
         return None
     if isinstance(spec, int):
         return generate_random_walls(spec, seed=seed + stage_idx)
     if isinstance(spec, str):
         import re
+
         m = re.match(r"maze\((\d+)\)", spec)
         if m:
             return generate_maze(int(m.group(1)), seed=seed + stage_idx)
@@ -740,8 +746,17 @@ def main():
             ]:
                 print(f"{label}: running incremental...", flush=True)
                 result = run_incremental(
-                    driver, params_file, extra, dt, n_ticks, spawn_interval, warmup, seed, executor,
-                    profile=args.profile, profile_interval=args.profile_interval,
+                    driver,
+                    params_file,
+                    extra,
+                    dt,
+                    n_ticks,
+                    spawn_interval,
+                    warmup,
+                    seed,
+                    executor,
+                    profile=args.profile,
+                    profile_interval=args.profile_interval,
                 )
                 print_incremental_results(label, result)
             executor.shutdown()
@@ -771,7 +786,7 @@ def main():
                 ref_rounds = []
                 round_lists = [cand_rounds, ref_rounds]
                 for r in range(rounds):
-                    for (label, params_file, extra), round_list in zip(configs, round_lists):
+                    for (label, params_file, extra), round_list in zip(configs, round_lists, strict=True):
                         print(f"{label}: {n_agents} agents [{r + 1}/{rounds}] running...", end="", flush=True)
                         result = run_single(
                             driver,
