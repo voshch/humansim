@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from rclpy.logging import get_logger
 
 from arena_humansim.agents.base import BaseAgent
+from arena_humansim.behavior.nodes import _nav_command
 from arena_humansim.utils.const import DISTANCE_TOLERANCE
 from arena_humansim.utils.types import (
     HighLevelCommand,

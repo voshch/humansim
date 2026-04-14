@@ -2,7 +2,8 @@ import py_trees
 from pydantic import BaseModel, Field
 
 from arena_humansim.agents import BaseAgent
-from arena_humansim.utils.types import HighLevelCommand, InteractionType
+from arena_humansim.manager.interaction_manager import CommandType
+from arena_humansim.utils.types import HighLevelCommand, InteractionOutcome, InteractionType
 
 
 class WaveAtNodeSchema(BaseModel):
