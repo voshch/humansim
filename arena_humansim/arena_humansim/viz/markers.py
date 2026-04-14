@@ -3,11 +3,15 @@ from __future__ import annotations
 import math
 import queue
 import threading
+from typing import TYPE_CHECKING
 
 from geometry_msgs.msg import Point
 from rclpy.node import Node
 from std_msgs.msg import ColorRGBA
 from visualization_msgs.msg import Marker, MarkerArray
+
+if TYPE_CHECKING:
+    from arena_humansim.utils.types import Pose2D
 
 _FRAME = "map"
 
@@ -534,7 +538,7 @@ def publish_perception(pub: MarkerPublisher, agents) -> None:
                 m.points[1].z = 0.1
 
 
-def publish_global_plan(pub: MarkerPublisher, agents, cmds, intermediate_goals) -> None:
+def publish_global_plan(pub: MarkerPublisher, agents, cmds, intermediate_goals: dict[int, Pose2D]) -> None:
     path_view = pub.view("path", Marker.LINE_STRIP)
     igoal_view = pub.view("igoal", Marker.SPHERE)
     goal_view = pub.view("goal", Marker.ARROW)
@@ -559,8 +563,8 @@ def publish_global_plan(pub: MarkerPublisher, agents, cmds, intermediate_goals) 
 
         ig = intermediate_goals.get(aid)
         if ig is not None:
-            gx = ig.x if hasattr(ig, "x") else float(ig[0])
-            gy = ig.y if hasattr(ig, "y") else float(ig[1])
+            gx = ig.x
+            gy = ig.y
             m, new = igoal_view.get(aid)
             if new:
                 m.scale.x = m.scale.y = m.scale.z = 0.1 * 2.0

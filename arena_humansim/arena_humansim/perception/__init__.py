@@ -8,19 +8,21 @@ from arena_humansim.utils.loggable import Loggable
 
 if TYPE_CHECKING:
     from arena_humansim.agents import BaseAgent
-    from arena_humansim.utils.types import AgentState, BeliefState
+    from arena_humansim.utils.types import AgentState, BeliefState, WorldState
     from arena_humansim.viz import MarkerPublisher
 
 _registry = ModuleRegistry()
 
 
 class Perception(Loggable, ABC):
+    supports_pool: bool = False
+
     @abstractmethod
     def compute(
         self,
         agent: BaseAgent,
         all_agents: dict[int, AgentState],
-        world_state: dict,
+        world_state: WorldState,
         belief: BeliefState,
     ) -> BeliefState: ...
 

@@ -169,7 +169,7 @@ class InteractionManager(Loggable):
 
     def update(
         self,
-        high_level_commands: dict[int, Any],
+        high_level_commands: dict[int, HighLevelCommand],
         dt: float = 0.0,
     ) -> dict[int, InteractionState]:
         self._prune_ended_interactions()
@@ -290,7 +290,7 @@ class InteractionManager(Loggable):
         iid = self.next_interaction_id
         self.next_interaction_id += 1
 
-        state_dict: dict = {}
+        state_dict: dict[str, Any] = {}
         if target_agent >= 0:
             state_dict["target_agent"] = target_agent
         if interaction_type == InteractionType.FOLLOW:

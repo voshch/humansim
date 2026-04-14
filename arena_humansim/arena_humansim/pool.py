@@ -7,6 +7,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from arena_humansim.agents import BaseAgent
+    from arena_humansim.utils.types import Pose2D
 
 _DEFAULT_CAPACITY = 512
 
@@ -120,18 +121,14 @@ class AgentPool:
             agent.state.pose.theta = float(self.theta[i])
             agent.state.velocity = (float(self.vel[i, 0]), float(self.vel[i, 1]))
 
-    def set_goals(self, goals: dict[int, object]) -> None:
+    def set_goals(self, goals: dict[int, Pose2D]) -> None:
         self.has_goal[: self.n] = False
         for aid, goal in goals.items():
             idx = self._id_to_idx.get(aid)
             if idx is None:
                 continue
-            if hasattr(goal, "x") and hasattr(goal, "y"):
-                self.goal_pos[idx, 0] = goal.x
-                self.goal_pos[idx, 1] = goal.y
-            else:
-                self.goal_pos[idx, 0] = float(goal[0])
-                self.goal_pos[idx, 1] = float(goal[1])
+            self.goal_pos[idx, 0] = goal.x
+            self.goal_pos[idx, 1] = goal.y
             self.has_goal[idx] = True
 
     def store_prev_vel(self) -> None:

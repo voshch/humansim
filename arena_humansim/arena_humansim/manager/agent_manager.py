@@ -75,6 +75,8 @@ from arena_humansim.utils.types import (
     SpawnRequest,
     WaypointMode,
     WaypointMovement,
+    WorldAgentState,
+    WorldState,
 )
 from arena_humansim.viz import MarkerPublisher, publish_behavior, publish_global_plan, publish_infrastructure, publish_interaction, publish_local_plan, publish_module_markers, publish_perception, publish_waypoints
 
@@ -210,8 +212,6 @@ class AgentManager(Node):
         self._local_planner = LocalPlanner.create(
             self._module_selections["local_planner"],
         )
-        if hasattr(self._local_planner, "_dt"):
-            self._local_planner._dt = self._dt
         self._interaction_manager = InteractionManager(rng_manager=self._rng)
         self._animation = MotionAnimation.create(
             self._module_selections["animation"],
@@ -259,8 +259,8 @@ class AgentManager(Node):
         self._tick_phases: dict[str, float] = {}
         self._overrun_count: int = 0
         self._last_overrun_log: float = 0.0
-        self._high_level_cmds: dict = {}
-        self._cached_intermediate_goals: dict = {}
+        self._high_level_cmds: dict[int, HighLevelCommand] = {}
+        self._cached_intermediate_goals: dict[int, Pose2D] = {}
         self._next_agent_id: int = 1
 
         self._agent_states_pub = self.create_publisher(
@@ -350,6 +350,7 @@ class AgentManager(Node):
             self._get_profile_callback,
         )
 
+        self._timer: rclpy.timer.Timer | None = None
         if self._mode == self.MODE_MASTER:
             self._setup_master_mode()
         elif self._mode == self.MODE_SUBSYSTEM:
@@ -385,7 +386,7 @@ class AgentManager(Node):
             f"AgentManager initialized (seed={seed}, dt={self._dt}, mode={self._mode})"
         )
 
-    def _collect_ros_parameters(self) -> dict:
+    def _collect_ros_parameters(self) -> dict[str, Any]:
         params = {}
         for name in (
             "seed",
@@ -669,7 +670,7 @@ class AgentManager(Node):
         # --- SENSE (vectorized perception -> CSR) ---
         t0 = time.perf_counter()
         default_layer = next(iter(self._perception_cache.values()), None)
-        if default_layer is not None and hasattr(default_layer, "compute_pool"):
+        if default_layer is not None and default_layer.supports_pool:
             default_layer.compute_pool(pool)
 
         n = pool.n
@@ -734,7 +735,7 @@ class AgentManager(Node):
         # --- LOCAL PLAN (vectorized SFM or per-agent fallback) ---
         t0 = time.perf_counter()
         pool.store_prev_vel()
-        if hasattr(self._local_planner, "compute_pool"):
+        if self._local_planner.supports_pool:
             self._local_planner.compute_pool(
                 pool, store_forces=self._publish_markers >= 2, dt=self._dt
             )
@@ -917,7 +918,7 @@ class AgentManager(Node):
     def _local_plan_fallback(
         self,
         agents: Iterable[BaseAgent],
-        intermediate_goals: dict,
+        intermediate_goals: dict[int, Pose2D],
         pool: AgentPool,
     ) -> None:
         moving = []
@@ -931,9 +932,9 @@ class AgentManager(Node):
             if dx * dx + dy * dy < self._waypoint_threshold**2:
                 continue
             moving.append(agent)
-        vel_dict: dict = {}
+        vel_dict: dict[int, tuple[float, float]] = {}
         for planner, group in _group_by(moving, key=lambda a: a.local_planner):
-            vel_dict.update(planner.compute(group, intermediate_goals))
+            vel_dict.update(planner.compute(group, intermediate_goals, dt=self._dt))
         for i in range(pool.n):
             aid = int(pool.agent_ids[i])
             v = vel_dict.get(aid, (0.0, 0.0))
@@ -1020,7 +1021,7 @@ class AgentManager(Node):
     def _run_extra_modules(self, agents: Iterable[BaseAgent], phase: TickPhase):
         from arena_humansim.agents.base import VectorizedModule
 
-        modules_agents: dict = {}
+        modules_agents: dict[Any, list[BaseAgent]] = {}
         for agent in agents:
             for mod in agent.modules.values():
                 if mod.phase() == phase:
@@ -1038,7 +1039,7 @@ class AgentManager(Node):
             else:
                 self._event_bus.fire(script.event, script.target_agent)
 
-    def run_replay(self) -> dict:
+    def run_replay(self) -> dict[str, Any]:
         if self._replay is None:
             return {}
         result = self._replay.replay(self, logger=self._logger)
@@ -1154,18 +1155,18 @@ class AgentManager(Node):
     def _world_state_callback(self, msg: AgentStatesMsg):
         self._latest_world_state = msg
 
-    def _consume_world_state(self) -> dict:
-        world: dict = {}
+    def _consume_world_state(self) -> WorldState:
+        world: WorldState = {}
         if self._latest_world_state is not None:
             for agent_msg in self._latest_world_state.agents:
-                world[agent_msg.agent_id] = {
-                    "pose": Pose2D(
+                world[agent_msg.agent_id] = WorldAgentState(
+                    pose=Pose2D(
                         x=agent_msg.pose.x,
                         y=agent_msg.pose.y,
                         theta=agent_msg.pose.theta,
                     ),
-                    "velocity": (agent_msg.velocity.x, agent_msg.velocity.y),
-                }
+                    velocity=(agent_msg.velocity.x, agent_msg.velocity.y),
+                )
             self._latest_world_state = None
         return world
 
@@ -1576,7 +1577,7 @@ class AgentManager(Node):
         return response
 
     def destroy_node(self):
-        if hasattr(self, "_timer"):
+        if self._timer is not None:
             self._timer.cancel()
         if self._profile_phases:
             self._flush_profile()

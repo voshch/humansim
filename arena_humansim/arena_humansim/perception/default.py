@@ -10,10 +10,12 @@ from . import Perception
 if TYPE_CHECKING:
     from arena_humansim.agents import BaseAgent
     from arena_humansim.pool import AgentPool
-    from arena_humansim.utils.types import AgentState, BeliefState
+    from arena_humansim.utils.types import AgentState, BeliefState, WorldState
 
 
 class DefaultPerception(Perception):
+    supports_pool: bool = True
+
     def __init__(self) -> None:
         self._shared_tree: cKDTree | None = None
         self._shared_ids: list[int] | None = None
@@ -159,7 +161,7 @@ class DefaultPerception(Perception):
         self,
         agent: BaseAgent,
         all_agents: dict[int, AgentState],
-        world_state: dict,
+        world_state: WorldState,
         belief: BeliefState,
     ) -> BeliefState:
         agent_id = agent.state.agent_id

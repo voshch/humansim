@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Sequence
-from typing import Any, Optional
+from typing import Optional
 
 import attrs
 import numpy as np
@@ -167,7 +167,7 @@ class DijkstraPlanner(GlobalPlanner):
 
         self._path_cache: dict[int, tuple[tuple[float, float], list[Pose2D], int]] = {}
 
-        self._cached_results: dict[int, Any] = {}
+        self._cached_results: dict[int, Pose2D] = {}
 
     def set_walls(self, segments: list) -> None:
         self._path_cache.clear()
@@ -215,7 +215,7 @@ class DijkstraPlanner(GlobalPlanner):
             f"graph edges={self._grid_graph.nnz}"
         )
 
-    def get_cached_goals(self) -> dict[int, Any]:
+    def get_cached_goals(self) -> dict[int, Pose2D]:
         return dict(self._cached_results)
 
     def get_cached_paths(self) -> dict[int, list[Pose2D]]:
@@ -340,8 +340,8 @@ class DijkstraPlanner(GlobalPlanner):
     def compute(
         self,
         agents: Iterable[BaseAgent],
-        high_level_commands: dict[int, Any],
-    ) -> dict[int, Any]:
+        high_level_commands: dict[int, HighLevelCommand],
+    ) -> dict[int, Pose2D]:
         agent_positions: dict[int, Pose2D] = {agent.state.agent_id: agent.state.pose for agent in agents}
 
         goals: dict[int, Pose2D] = {}

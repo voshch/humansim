@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from typing import Any
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -26,7 +25,8 @@ class ORCAPlanner(LocalPlanner):
     def compute(
         self,
         agents: Sequence[BaseAgent],
-        global_goals: dict[int, Any],
+        global_goals: dict[int, Pose2D],
+        dt: float = 1.0,
     ) -> dict[int, tuple[float, float]]:
         if not agents:
             return {}
@@ -54,12 +54,7 @@ class ORCAPlanner(LocalPlanner):
             max_speed = params.desired_velocity
             desired_vel = params.desired_velocity
 
-            if isinstance(goal, Pose2D):
-                goal_pos = np.array([goal.x, goal.y])
-            elif hasattr(goal, "x") and hasattr(goal, "y"):
-                goal_pos = np.array([goal.x, goal.y])
-            else:
-                goal_pos = np.array([float(goal[0]), float(goal[1])])
+            goal_pos = np.array([goal.x, goal.y])
 
             diff = goal_pos - pos
             dist = np.linalg.norm(diff)

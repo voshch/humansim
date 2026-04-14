@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -21,6 +21,8 @@ _DEFAULT_WALL_REPULSION_RANGE = 0.1
 
 
 class SFMPlanner(LocalPlanner):
+    supports_pool: bool = True
+
     def __init__(
         self,
         wall_repulsion_strength: float = _DEFAULT_WALL_REPULSION_STRENGTH,
@@ -28,7 +30,6 @@ class SFMPlanner(LocalPlanner):
     ):
         self.wall_repulsion_strength = wall_repulsion_strength
         self.wall_repulsion_range = wall_repulsion_range
-        self._dt: float = 1.0
         self._wall_segments: list = []
         self._wall_segments_np: np.ndarray = np.empty((0, 2, 2), dtype=np.float64)
         self._last_forces: dict[int, tuple[tuple[float, float], tuple[float, float], tuple[float, float]]] = {}
@@ -157,7 +158,8 @@ class SFMPlanner(LocalPlanner):
     def compute(
         self,
         agents: Sequence[BaseAgent],
-        global_goals: dict[int, Any],
+        global_goals: dict[int, Pose2D],
+        dt: float = 1.0,
     ) -> dict[int, tuple[float, float]]:
         self._last_agents = agents
         if not agents:
@@ -186,12 +188,7 @@ class SFMPlanner(LocalPlanner):
             agent_radius: float = params.agent_radius
             max_velocity: float = params.max_velocity
 
-            if isinstance(goal, Pose2D):
-                gx, gy = goal.x, goal.y
-            elif hasattr(goal, "x") and hasattr(goal, "y"):
-                gx, gy = goal.x, goal.y
-            else:
-                gx, gy = float(goal[0]), float(goal[1])
+            gx, gy = goal.x, goal.y
 
             cur_x, cur_y = agent.state.pose.x, agent.state.pose.y
             cur_vx, cur_vy = agent.state.velocity
@@ -251,8 +248,8 @@ class SFMPlanner(LocalPlanner):
             total_fx = f_att_x + f_rep_x + f_wall_x
             total_fy = f_att_y + f_rep_y + f_wall_y
 
-            new_vx = cur_vx + total_fx * self._dt
-            new_vy = cur_vy + total_fy * self._dt
+            new_vx = cur_vx + total_fx * dt
+            new_vy = cur_vy + total_fy * dt
 
             speed = np.hypot(new_vx, new_vy)
             if speed > max_velocity:

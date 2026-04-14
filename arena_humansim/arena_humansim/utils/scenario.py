@@ -148,7 +148,7 @@ class ScenarioConfig:
     event_scripts: list[EventScript] = attrs.Factory(list)
 
 
-def _parse_agent_types(raw_section: dict) -> dict[str, AgentType]:
+def _parse_agent_types(raw_section: dict[str, Any]) -> dict[str, AgentType]:
     from arena_humansim.utils.types import converter
 
     result: dict[str, AgentType] = {}
@@ -311,10 +311,10 @@ def _resolve_var_string(
 
 
 def resolve_vars(
-    raw_dict: dict,
+    raw_dict: dict[str, Any],
     var_defs: dict[str, VarDef],
     overrides: dict[str, int | float | bool | str] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     variables: dict[str, int | float | bool | str] = {}
     for vname, vdef in var_defs.items():
         variables[vname] = vdef.default
@@ -388,7 +388,7 @@ def load_scenario(
 
 
 def _structure_manual(
-    data: dict,
+    data: dict[str, Any],
     var_overrides: dict[str, int | float | bool | str] | None = None,
     scenario_dir: Path | None = None,
 ) -> ScenarioConfig:

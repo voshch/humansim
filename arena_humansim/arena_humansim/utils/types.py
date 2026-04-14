@@ -39,12 +39,24 @@ class Pose2D:
     theta: float = 0.0
 
 
+Goal = Pose2D | tuple[float, float]
+
+
 @attrs.define
 class AgentState:
     agent_id: int = 0
     pose: Pose2D = attrs.Factory(Pose2D)
     velocity: tuple[float, float] = (0.0, 0.0)
     desired_velocity: float = 1.3
+
+
+@attrs.define
+class WorldAgentState:
+    pose: Pose2D = attrs.Factory(Pose2D)
+    velocity: tuple[float, float] = (0.0, 0.0)
+
+
+WorldState = dict[int, WorldAgentState]
 
 
 @attrs.define
@@ -92,7 +104,7 @@ class InteractionState:
     type: int = 0
     contract: InteractionContract = attrs.Factory(InteractionContract)
     participants: list[int] = attrs.Factory(list)
-    state: dict = attrs.Factory(dict)
+    state: dict[str, Any] = attrs.Factory(dict)
     object_id: str | None = None
     outcome: int = 0  # InteractionOutcome.FORMING
 

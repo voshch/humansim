@@ -149,7 +149,7 @@ class ReplayManager(Loggable):
             )
         return commands
 
-    def replay(self, agent_manager, logger=None) -> dict:
+    def replay(self, agent_manager, logger=None) -> dict[str, Any]:
         result = {
             "success": True,
             "total_ticks": len(self._ticks),
@@ -188,10 +188,10 @@ _FLOAT_TOL = 1e-12
 
 
 def _compare_agent_states(
-    actual: dict[int, Any],
-    expected: dict[int, Any],
+    actual: dict[int, AgentState],
+    expected: dict[int, AgentState],
     tick: int,
-) -> dict | None:
+) -> dict[str, Any] | None:
     all_ids = set(actual.keys()) | set(expected.keys())
     for aid in sorted(all_ids):
         if aid not in actual:

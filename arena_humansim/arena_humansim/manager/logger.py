@@ -8,10 +8,11 @@ import attrs
 import yaml
 
 from arena_humansim.agents import SampledParams
+from arena_humansim.utils.types import AgentState, HighLevelCommand, InteractionState
 
 
 class SimulationLogger:
-    def __init__(self, log_dir: str, seed: int, config: dict | None = None):
+    def __init__(self, log_dir: str, seed: int, config: dict[str, Any] | None = None):
         self._log_dir = Path(log_dir)
         self._log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -23,7 +24,7 @@ class SimulationLogger:
         self._log_path = self._log_dir / "session.jsonl"
         self._log_file = open(self._log_path, "w")
 
-    def _write_config_snapshot(self, config: dict):
+    def _write_config_snapshot(self, config: dict[str, Any]):
         snapshot_path = self._log_dir / "config_snapshot.yaml"
         with open(snapshot_path, "w") as f:
             f.write(f"# Config snapshot - arena_humansim\n")
@@ -57,9 +58,9 @@ class SimulationLogger:
         self,
         tick: int,
         timestamp: float,
-        agents: dict,
-        interactions: dict,
-        commands: dict,
+        agents: dict[int, AgentState],
+        interactions: dict[int, InteractionState],
+        commands: dict[int, HighLevelCommand],
     ):
         record = {
             "tick": tick,
@@ -76,14 +77,14 @@ class SimulationLogger:
             self._log_file.close()
 
 
-def _serialize_agent(agent) -> dict:
+def _serialize_agent(agent) -> dict[str, Any]:
     return {
         "pose": {"x": agent.pose.x, "y": agent.pose.y, "theta": agent.pose.theta},
         "velocity": {"vx": agent.velocity[0], "vy": agent.velocity[1]},
     }
 
 
-def _serialize_interaction(interaction) -> dict:
+def _serialize_interaction(interaction) -> dict[str, Any]:
     return {
         "type": int(interaction.type),
         "participants": list(interaction.participants),
@@ -91,7 +92,7 @@ def _serialize_interaction(interaction) -> dict:
     }
 
 
-def _serialize_command(cmd) -> dict:
+def _serialize_command(cmd) -> dict[str, Any]:
     return {
         "type": int(cmd.type),
         "target_pose": {

@@ -4,14 +4,14 @@ import heapq
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from arena_humansim.agents import BaseAgent
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
-from arena_humansim.utils.types import Pose2D
+from arena_humansim.utils.types import HighLevelCommand, Pose2D
 
 if TYPE_CHECKING:
     from arena_humansim.viz import MarkerPublisher
@@ -80,11 +80,11 @@ class GlobalPlanner(Loggable, ABC):
     def compute(
         self,
         agents: Iterable[BaseAgent],
-        high_level_commands: dict[int, Any],
-    ) -> dict[int, Any]: ...
+        high_level_commands: dict[int, HighLevelCommand],
+    ) -> dict[int, Pose2D]: ...
 
     @abstractmethod
-    def get_cached_goals(self) -> dict[int, Any]: ...
+    def get_cached_goals(self) -> dict[int, Pose2D]: ...
 
     def get_cached_paths(self) -> dict[int, list[Pose2D]]:
         return {}

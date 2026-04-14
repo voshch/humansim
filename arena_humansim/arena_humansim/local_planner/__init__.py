@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from arena_humansim.agents import BaseAgent
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
+from arena_humansim.utils.types import Pose2D
 
 if TYPE_CHECKING:
     from arena_humansim.viz import MarkerPublisher
@@ -15,11 +16,14 @@ _registry = ModuleRegistry()
 
 
 class LocalPlanner(Loggable, ABC):
+    supports_pool: bool = False
+
     @abstractmethod
     def compute(
         self,
         agents: Sequence[BaseAgent],
-        global_goals: dict[int, Any],
+        global_goals: dict[int, Pose2D],
+        dt: float = 1.0,
     ) -> dict[int, tuple[float, float]]: ...
 
     def publish_markers(self, pub: MarkerPublisher) -> None:

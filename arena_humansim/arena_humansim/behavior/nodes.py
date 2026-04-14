@@ -20,6 +20,7 @@ from arena_humansim.utils.types import (
     HighLevelCommand,
     InteractionOutcome,
     InteractionType,
+    NeedState,
     Pose2D,
 )
 from arena_humansim.utils import DT, DISTANCE_TOLERANCE
@@ -36,7 +37,7 @@ def check_condition(value: float, condition: NeedCondition) -> bool:
 
 
 def preconditions_met(
-    needs: dict,
+    needs: dict[str, NeedState],
     when: dict[str, NeedCondition],
 ) -> bool:
     for need_name, condition in when.items():
@@ -49,7 +50,7 @@ def preconditions_met(
 
 
 def score_actions(
-    needs: dict,
+    needs: dict[str, NeedState],
     actions: dict[str, ActionDef],
     utility_weights: dict[str, float],
     world: WorldKnowledge,

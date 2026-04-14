@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
-
 from arena_humansim.agents import BaseAgent
-from arena_humansim.utils.types import InteractionState
+from arena_humansim.utils.types import InteractionState, Pose2D
 
 from . import MotionAnimation
 
@@ -16,5 +14,5 @@ class NoopAnimation(MotionAnimation):
         velocities: dict[int, tuple[float, float]],
         interactions: dict[int, InteractionState],
         dt: float,
-    ) -> dict[int, Any]:
+    ) -> dict[int, Pose2D]:
         return {}

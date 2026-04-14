@@ -1,6 +1,7 @@
 import math
 from typing import Callable
 
+from arena_humansim.agents import BaseAgent
 from arena_humansim.utils.loggable import Loggable
 from arena_humansim.utils.types import AgentLifetime, DespawnRequest, ShapeType, SinkConfig
 
@@ -13,7 +14,7 @@ class DespawnMonitor(Loggable):
 
     def tick(
         self,
-        agents: dict,
+        agents: dict[int, BaseAgent],
         interaction_check: Callable[[int], bool],
         tick_count: int,
         dt: float,

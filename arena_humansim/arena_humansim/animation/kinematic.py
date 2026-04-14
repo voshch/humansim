@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from arena_humansim.agents import BaseAgent
 from arena_humansim.utils.types import InteractionState, Pose2D
@@ -19,7 +19,7 @@ class KinematicAnimation(MotionAnimation):
         velocities: dict[int, tuple[float, float]],
         interactions: dict[int, InteractionState],
         dt: float,
-    ) -> dict[int, Any]:
+    ) -> dict[int, Pose2D]:
         motions = {}
         for agent in agents:
             agent_id = agent.state.agent_id

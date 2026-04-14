@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from arena_humansim.agents import BaseAgent
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
-from arena_humansim.utils.types import InteractionState
+from arena_humansim.utils.types import InteractionState, Pose2D
 
 if TYPE_CHECKING:
     from arena_humansim.pool import AgentPool
@@ -23,7 +23,7 @@ class MotionAnimation(Loggable, ABC):
         velocities: dict[int, tuple[float, float]],
         interactions: dict[int, InteractionState],
         dt: float,
-    ) -> dict[int, Any]: ...
+    ) -> dict[int, Pose2D]: ...
 
     def compute_batch_pool(
         self,

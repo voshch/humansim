@@ -4,7 +4,7 @@ import math
 import os
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Optional
+from typing import Optional
 
 import numpy as np
 import pyastar2d
@@ -88,7 +88,7 @@ class AStarPlanner(GlobalPlanner):
         self._wall_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
 
         self._path_cache: dict[int, tuple[tuple[float, float], list[Pose2D], int]] = {}
-        self._cached_results: dict[int, Any] = {}
+        self._cached_results: dict[int, Pose2D] = {}
         self._pool = ThreadPoolExecutor(max_workers=max((os.cpu_count() or 2) - 1, 1))
 
     def set_walls(self, segments: list) -> None:
@@ -136,7 +136,7 @@ class AStarPlanner(GlobalPlanner):
             f"{len(segments)} segment(s), inflation={self._inflation_radius}m ({radius_cells} cells)"
         )
 
-    def get_cached_goals(self) -> dict[int, Any]:
+    def get_cached_goals(self) -> dict[int, Pose2D]:
         return dict(self._cached_results)
 
     def get_cached_paths(self) -> dict[int, list[Pose2D]]:
@@ -247,8 +247,8 @@ class AStarPlanner(GlobalPlanner):
     def compute(
         self,
         agents: Iterable[BaseAgent],
-        high_level_commands: dict[int, Any],
-    ) -> dict[int, Any]:
+        high_level_commands: dict[int, HighLevelCommand],
+    ) -> dict[int, Pose2D]:
         agent_positions: dict[int, Pose2D] = {agent.state.agent_id: agent.state.pose for agent in agents}
         goals: dict[int, Pose2D] = {}
         has_grid = self._occupancy_grid is not None and self._weights is not None

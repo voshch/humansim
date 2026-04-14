@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Iterable, Sequence
+from typing import Any
 
 import attrs
 import numpy as np
@@ -344,7 +345,7 @@ def generate_maze(grid_size: int, seed: int, cell_size: float = 2.0) -> WallLayo
     return WallLayout(walls=walls, spawn_rect=rect)
 
 
-def _merge_params_file(params_file: str, extra_params: dict, dt: float) -> str:
+def _merge_params_file(params_file: str, extra_params: dict[str, Any], dt: float) -> str:
     with open(params_file) as f:
         data = yaml.safe_load(f) or {}
     node_key = next(iter(data), "arena_humansim")
@@ -362,7 +363,7 @@ def _merge_params_file(params_file: str, extra_params: dict, dt: float) -> str:
 
 def launch_humansim(
     params_file: str | None,
-    extra_params: dict,
+    extra_params: dict[str, Any],
     dt: float,
     profile: bool = False,
     profile_interval: int = 100,
@@ -407,7 +408,7 @@ def kill_proc(proc: subprocess.Popen):
 def run_single(
     driver: BenchmarkDriver,
     params_file: str | None,
-    extra_params: dict,
+    extra_params: dict[str, Any],
     n_agents: int,
     dt: float,
     n_ticks: int,
@@ -439,7 +440,7 @@ def run_single(
 def run_incremental(
     driver: BenchmarkDriver,
     params_file: str | None,
-    extra_params: dict,
+    extra_params: dict[str, Any],
     dt: float,
     total_ticks: int,
     spawn_interval: int,
@@ -595,7 +596,7 @@ def print_results(
     print()
 
 
-def parse_params(raw: str | None) -> dict:
+def parse_params(raw: str | None) -> dict[str, Any]:
     if not raw:
         return {}
     params = {}
@@ -621,7 +622,7 @@ def _parse_walls_spec(spec, seed: int, stage_idx: int) -> WallLayout | None:
     raise ValueError(f"Unknown walls spec type: {type(spec)}")
 
 
-def parse_stages(cfg: dict, seed: int) -> list[Stage]:
+def parse_stages(cfg: dict[str, Any], seed: int) -> list[Stage]:
     if "stages" in cfg:
         stages = []
         for i, s in enumerate(cfg["stages"]):
@@ -642,7 +643,7 @@ def parse_stages(cfg: dict, seed: int) -> list[Stage]:
     return [Stage(agents=agents)]
 
 
-def load_benchmark_config(path: str) -> dict:
+def load_benchmark_config(path: str) -> dict[str, Any]:
     with open(path) as f:
         return yaml.safe_load(f)
 
