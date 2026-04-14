@@ -160,3 +160,30 @@ ros2 run arena_humansim benchmark
 - `add_walls`, `remove_walls` — dynamic obstacles
 - `set_flow` — bulk configure sources, sinks, walls
 - `reset` — clear all simulation state
+
+## Development
+
+### Linting
+
+Linting is handled by [Ruff](https://docs.astral.sh/ruff/), driven by [pre-commit](https://pre-commit.com/). Config lives in `arena_humansim/pyproject.toml`; the hook pin is in `.pre-commit-config.yaml`. Auto-formatting is intentionally not enforced.
+
+**One-time setup:**
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+**Everyday use:** hooks run automatically on `git commit` against staged files. To run manually:
+```bash
+pre-commit run            # staged files only
+pre-commit run -a         # entire repo
+ruff check arena_humansim # check without pre-commit
+```
+
+If the hook auto-fixes something, the commit is aborted and the fixes are left unstaged — `git add` and re-commit.
+
+### CI
+
+`.github/workflows/lint.yml` runs the same pre-commit hooks on every push to `master` and every pull request. The GH check uses the exact config and hook pins from `.pre-commit-config.yaml`, so local and CI never drift. Make the check required in branch protection to block merges on lint failures.
+
+Bump the Ruff version with `pre-commit autoupdate`.
