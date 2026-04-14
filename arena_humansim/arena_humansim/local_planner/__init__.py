@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from arena_humansim.agents import BaseAgent
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
-from arena_humansim.utils.types import Pose2D
+from arena_humansim.utils.types import Pose2D, WallAware
 
 if TYPE_CHECKING:
     from arena_humansim.viz import MarkerPublisher
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 _registry = ModuleRegistry()
 
 
-class LocalPlanner(Loggable, ABC):
+class LocalPlanner(WallAware, Loggable, ABC):
     supports_pool: bool = False
 
     @abstractmethod

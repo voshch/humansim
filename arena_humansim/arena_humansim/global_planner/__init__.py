@@ -11,7 +11,7 @@ import numpy as np
 from arena_humansim.agents import BaseAgent
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
-from arena_humansim.utils.types import HighLevelCommand, Pose2D
+from arena_humansim.utils.types import HighLevelCommand, Pose2D, WallAware
 
 if TYPE_CHECKING:
     from arena_humansim.viz import MarkerPublisher
@@ -72,10 +72,7 @@ def simplify_path(
     return [waypoints[i] for i in range(n) if not removed[i]]
 
 
-class GlobalPlanner(Loggable, ABC):
-    @abstractmethod
-    def set_walls(self, segments: list) -> None: ...
-
+class GlobalPlanner(WallAware, Loggable, ABC):
     @abstractmethod
     def compute(
         self,

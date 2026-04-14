@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from arena_humansim.agents import BaseAgent
-from arena_humansim.utils.types import Pose2D
+from arena_humansim.utils.types import Pose2D, Segments
 
 from . import LocalPlanner
 
@@ -30,13 +30,13 @@ class SFMPlanner(LocalPlanner):
     ):
         self.wall_repulsion_strength = wall_repulsion_strength
         self.wall_repulsion_range = wall_repulsion_range
-        self._wall_segments: list = []
+        self._wall_segments: Segments = []
         self._wall_segments_np: np.ndarray = np.empty((0, 2, 2), dtype=np.float64)
         self._last_forces: dict[int, tuple[tuple[float, float], tuple[float, float], tuple[float, float]]] = {}
         self._last_force_arrays: tuple | None = None
         self._last_agents: Sequence[BaseAgent] | None = None
 
-    def set_walls(self, segments: list) -> None:
+    def set_walls(self, segments: Segments) -> None:
         self._wall_segments = list(segments)
         if segments:
             self._wall_segments_np = np.array(segments, dtype=np.float64).reshape(-1, 2, 2)

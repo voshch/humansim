@@ -6,6 +6,15 @@ from typing import Any
 import attrs
 
 
+Segment = tuple[tuple[float, float], tuple[float, float]]
+Segments = list[Segment]
+
+
+class WallAware:
+    def set_walls(self, segments: Segments) -> None:
+        pass
+
+
 class WaypointMode(enum.IntEnum):
     REPEAT = 0
     REVERSE = 1

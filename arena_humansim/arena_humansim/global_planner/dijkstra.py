@@ -11,7 +11,7 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 
 from arena_humansim.agents import BaseAgent
-from arena_humansim.utils.types import HighLevelCommand, Pose2D
+from arena_humansim.utils.types import HighLevelCommand, Pose2D, Segment, Segments
 
 from . import GlobalPlanner, simplify_path
 
@@ -163,13 +163,13 @@ class DijkstraPlanner(GlobalPlanner):
         self._grid_graph: Optional[csr_matrix] = None
         self._resolution: float = 0.2
         self._origin: Pose2D = Pose2D()
-        self._wall_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+        self._wall_segments: list[Segment] = []
 
         self._path_cache: dict[int, tuple[tuple[float, float], list[Pose2D], int]] = {}
 
         self._cached_results: dict[int, Pose2D] = {}
 
-    def set_walls(self, segments: list) -> None:
+    def set_walls(self, segments: Segments) -> None:
         self._path_cache.clear()
         self._grid_graph = None
         self._wall_segments = list(segments)

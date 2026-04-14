@@ -1,21 +1,16 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
-
-import numpy as np
 
 from arena_humansim.pool import AgentPool
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
+from arena_humansim.utils.types import WallAware
 
 _registry = ModuleRegistry()
 
 
-class CollisionResolver(Loggable, ABC):
-    @abstractmethod
-    def set_walls(self, segments: Iterable[tuple[tuple[float, float], tuple[float, float]]]) -> None: ...
-
+class CollisionResolver(WallAware, Loggable, ABC):
     @abstractmethod
     def resolve(self, pool: AgentPool) -> None: ...
 
@@ -33,10 +28,7 @@ class CollisionResolver(Loggable, ABC):
 
 
 class NoopCollisionResolver(CollisionResolver):
-    def set_walls(self, segments):
-        pass
-
-    def resolve(self, pool):
+    def resolve(self, pool: AgentPool) -> None:
         pass
 
 

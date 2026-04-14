@@ -4,6 +4,7 @@ import numpy as np
 
 from arena_humansim.collision import CollisionResolver
 from arena_humansim.pool import AgentPool
+from arena_humansim.utils.types import Segments
 
 
 class WallProjectionResolver(CollisionResolver):
@@ -11,7 +12,7 @@ class WallProjectionResolver(CollisionResolver):
         self._margin = margin
         self._wall_segments_np: np.ndarray = np.empty((0, 2, 2), dtype=np.float64)
 
-    def set_walls(self, segments):
+    def set_walls(self, segments: Segments) -> None:
         if segments:
             self._wall_segments_np = np.array(segments, dtype=np.float64).reshape(-1, 2, 2)
         else:

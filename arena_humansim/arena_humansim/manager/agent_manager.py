@@ -72,7 +72,9 @@ from arena_humansim.utils.types import (
     HighLevelCommand,
     InteractionOutcome,
     Pose2D,
+    Segments,
     SpawnRequest,
+    WallAware,
     WaypointMode,
     WaypointMovement,
     WorldAgentState,
@@ -218,6 +220,11 @@ class AgentManager(Node):
         )
         self._collision = CollisionResolver.create(
             self._module_selections["collision"],
+        )
+        self._wall_aware: tuple[WallAware, ...] = (
+            self._local_planner,
+            self._global_planner,
+            self._collision,
         )
 
         self._module_pool: dict[str, Any] = {
@@ -1308,9 +1315,8 @@ class AgentManager(Node):
         self._event_scripts_by_tick.clear()
         self._walls.clear()
         self._obstacles.clear()
-        self._local_planner.set_walls([])
-        self._global_planner.set_walls([])
-        self._collision.set_walls([])
+        for subsystem in self._wall_aware:
+            subsystem.set_walls([])
         self._world_knowledge.clear()
         self._next_agent_id = 1
         self._tick_count = 0
@@ -1469,7 +1475,7 @@ class AgentManager(Node):
         self._logger.debug(response.message)
         return response
 
-    def _all_wall_segments(self) -> list:
+    def _all_wall_segments(self) -> Segments:
         """Collect wall segments from both explicit walls and obstacle bounding boxes."""
         segments = list(self._walls.values())
         for obs in self._obstacles.values():
@@ -1479,9 +1485,8 @@ class AgentManager(Node):
     def _refresh_planners(self):
         """Push current wall segments to local planner, global planner, and collision."""
         segments = self._all_wall_segments()
-        self._local_planner.set_walls(segments)
-        self._global_planner.set_walls(segments)
-        self._collision.set_walls(segments)
+        for subsystem in self._wall_aware:
+            subsystem.set_walls(segments)
 
     def _add_walls_callback(self, request, response):
         for name, start, end in zip(request.names, request.starts, request.ends):
