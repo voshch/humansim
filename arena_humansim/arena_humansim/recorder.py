@@ -1,0 +1,76 @@
+from __future__ import annotations
+
+import os
+from datetime import datetime
+from pathlib import Path
+
+from arena_humansim_msgs.msg import AgentStates as AgentStatesMsg
+from arena_humansim_msgs.msg import WorldGeometry as WorldGeometryMsg
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
+from rclpy.serialization import serialize_message
+from rosbag2_py import ConverterOptions, SequentialWriter, StorageOptions, TopicMetadata
+from rosgraph_msgs.msg import Clock
+
+
+def default_record_dir() -> Path:
+    ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    return Path(os.getcwd()) / "recordings" / ts
+
+
+class BagRecorder:
+    def __init__(self, node: Node, record_dir: Path) -> None:
+        self._node = node
+        self._record_dir = record_dir
+        self._bag_dir = record_dir / "bag"
+        self._record_dir.mkdir(parents=True, exist_ok=True)
+
+        self._writer = SequentialWriter()
+        self._writer.open(
+            StorageOptions(uri=str(self._bag_dir), storage_id="mcap"),
+            ConverterOptions(input_serialization_format="cdr", output_serialization_format="cdr"),
+        )
+
+        self._topics = [
+            ("/agent_states", "arena_humansim_msgs/msg/AgentStates", AgentStatesMsg, QoSProfile(depth=10)),
+            ("/world_geometry", "arena_humansim_msgs/msg/WorldGeometry", WorldGeometryMsg, QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)),
+            ("/clock", "rosgraph_msgs/msg/Clock", Clock, QoSProfile(depth=10)),
+        ]
+        for i, (topic_name, type_name, _, _) in enumerate(self._topics):
+            self._writer.create_topic(
+                TopicMetadata(
+                    id=i,
+                    name=topic_name,
+                    type=type_name,
+                    serialization_format="cdr",
+                )
+            )
+
+        self._subs = [node.create_subscription(msg_type, topic_name, self._make_cb(topic_name), qos) for topic_name, _, msg_type, qos in self._topics]
+
+        self._closed = False
+        node.get_logger().info(f"BagRecorder writing to {self._bag_dir}")
+
+    def _make_cb(self, topic_name: str):
+        def cb(msg) -> None:
+            if self._closed:
+                return
+            stamp = self._node.get_clock().now().nanoseconds
+            self._writer.write(topic_name, serialize_message(msg), stamp)
+
+        return cb
+
+    @property
+    def record_dir(self) -> Path:
+        return self._record_dir
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        for sub in self._subs:
+            try:
+                self._node.destroy_subscription(sub)
+            except Exception:
+                pass
+        del self._writer

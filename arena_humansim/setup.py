@@ -40,6 +40,7 @@ setup(
         "console_scripts": [
             "arena_humansim_node = arena_humansim.manager.agent_manager:main",
             "benchmark = arena_humansim.benchmark:main",
+            "arena_humansim_render = arena_humansim.viz.renderer:main",
         ],
     },
 )

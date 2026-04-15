@@ -1,0 +1,91 @@
+# t_junction.yaml
+# T-shaped corridor intersection. A horizontal corridor runs east-west along
+# y in [-1.2, 1.2] and a vertical stub runs south from it along
+# x in [-1.2, 1.2]. Three flows converge at the junction.
+
+name: t_junction
+description: >-
+  Nine pedestrians converge on a T-junction: three flow east, three flow
+  west, and three enter from the south stub heading east or west. Tests
+  merging and yielding behaviour at the corridor tee.
+
+simulation:
+  seed: 23
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 5000
+  execution_mode: master
+
+modules:
+  perception: default
+  global_planner: dijkstra
+  local_planner: sfm
+  interaction_manager: default
+  animation: kinematic
+
+agents:
+  # --- Eastbound through the horizontal corridor ---
+  - agent_id: 0
+    spawn_pose: {x: -12.0, y:  0.4, theta: 0.0}
+    goal_sequence: [{x: 12.0, y:  0.4}]
+    desired_velocity: 1.2
+
+  - agent_id: 1
+    spawn_pose: {x: -12.0, y:  0.0, theta: 0.0}
+    goal_sequence: [{x: 12.0, y:  0.0}]
+    desired_velocity: 1.3
+
+  - agent_id: 2
+    spawn_pose: {x: -11.0, y: -0.4, theta: 0.0}
+    goal_sequence: [{x: 12.0, y: -0.4}]
+    desired_velocity: 1.15
+
+  # --- Westbound through the horizontal corridor ---
+  - agent_id: 3
+    spawn_pose: {x: 12.0, y:  0.4, theta: 3.14159}
+    goal_sequence: [{x: -12.0, y:  0.4}]
+    desired_velocity: 1.2
+
+  - agent_id: 4
+    spawn_pose: {x: 12.0, y: -0.4, theta: 3.14159}
+    goal_sequence: [{x: -12.0, y: -0.4}]
+    desired_velocity: 1.25
+
+  - agent_id: 5
+    spawn_pose: {x: 11.0, y:  0.0, theta: 3.14159}
+    goal_sequence: [{x: -12.0, y:  0.0}]
+    desired_velocity: 1.1
+
+  # --- From the southern stub, entering the junction and turning ---
+  - agent_id: 6
+    spawn_pose: {x: -0.4, y: -10.0, theta: 1.5708}
+    goal_sequence:
+      - {x: -0.4, y: 0.0}
+      - {x: -12.0, y: 0.0}
+    desired_velocity: 1.2
+
+  - agent_id: 7
+    spawn_pose: {x:  0.0, y:  -9.0, theta: 1.5708}
+    goal_sequence:
+      - {x: 0.0, y: 0.0}
+      - {x: 12.0, y: 0.0}
+    desired_velocity: 1.25
+
+  - agent_id: 8
+    spawn_pose: {x:  0.4, y: -10.0, theta: 1.5708}
+    goal_sequence:
+      - {x: 0.4, y: 0.0}
+      - {x: 12.0, y: 0.4}
+    desired_velocity: 1.15
+
+walls:
+  # Horizontal corridor: north wall is unbroken, south wall is split by the stub
+  - {name: h_north,    start: {x: -13.0, y:  1.2}, end: {x:  13.0, y:  1.2}}
+  - {name: h_south_w,  start: {x: -13.0, y: -1.2}, end: {x:  -1.2, y: -1.2}}
+  - {name: h_south_e,  start: {x:   1.2, y: -1.2}, end: {x:  13.0, y: -1.2}}
+  # Vertical stub walls running south from the corridor opening
+  - {name: stub_west,  start: {x:  -1.2, y: -1.2}, end: {x:  -1.2, y: -11.0}}
+  - {name: stub_east,  start: {x:   1.2, y: -1.2}, end: {x:   1.2, y: -11.0}}
+  - {name: stub_south, start: {x:  -1.2, y: -11.0}, end: {x:  1.2, y: -11.0}}
+
+interaction_scripts: []

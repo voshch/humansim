@@ -22,16 +22,6 @@ modules:
   local_planner: sfm
   interaction_manager: default
   animation: kinematic
-  perception_params:
-    vision_range: 8.0
-    vision_fov: 200.0
-  local_planner_params:
-    relaxation_time: 0.5
-    repulsion_strength: 2.1
-    repulsion_range: 0.3
-    desired_velocity: 1.3
-    max_velocity: 2.0
-    agent_radius: 0.35
 
 # Inline agent type definitions (merged with builtins; overrides take precedence).
 agent_types:

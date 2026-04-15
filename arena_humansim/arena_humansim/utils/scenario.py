@@ -41,11 +41,6 @@ class ModuleConfig:
     local_planner: str = "sfm"
     animation: str = "noop"
 
-    perception_params: dict[str, Any] = attrs.Factory(dict)
-    global_planner_params: dict[str, Any] = attrs.Factory(dict)
-    local_planner_params: dict[str, Any] = attrs.Factory(dict)
-    animation_params: dict[str, Any] = attrs.Factory(dict)
-
 
 @attrs.define
 class AgentConfig:
@@ -135,6 +130,32 @@ class EventScript:
 
 
 @attrs.define
+class WallConfig:
+    name: str = ""
+    start: Pose2DModel = attrs.Factory(Pose2DModel)
+    end: Pose2DModel = attrs.Factory(Pose2DModel)
+
+
+@attrs.define
+class ObstacleBB:
+    x_min: float = 0.0
+    x_max: float = 0.0
+    y_min: float = 0.0
+    y_max: float = 0.0
+    z_min: float = 0.0
+    z_max: float = 0.0
+
+
+@attrs.define
+class ObstacleSceneConfig:
+    name: str = ""
+    pose: Pose2DModel = attrs.Factory(Pose2DModel)
+    bb: ObstacleBB = attrs.Factory(ObstacleBB)
+    obstacle_type: str = ""
+    interaction_types: list[str] = attrs.Factory(list)
+
+
+@attrs.define
 class ScenarioConfig:
     name: str = "unnamed"
     description: str = ""
@@ -145,6 +166,8 @@ class ScenarioConfig:
     flow: FlowScenarioConfig | None = None
     agent_types: dict[str, AgentType] = attrs.Factory(dict)
     world_objects: list[WorldObjectConfig] = attrs.Factory(list)
+    walls: list[WallConfig] = attrs.Factory(list)
+    obstacles: list[ObstacleSceneConfig] = attrs.Factory(list)
     event_scripts: list[EventScript] = attrs.Factory(list)
 
 
@@ -427,6 +450,8 @@ def _structure_manual(
     flow_raw = data.get("flow")
     flow = converter.structure(flow_raw, FlowScenarioConfig) if flow_raw else None
     world_objects = [converter.structure(wo, WorldObjectConfig) for wo in data.get("world_objects", [])]
+    walls = [converter.structure(w, WallConfig) for w in data.get("walls", [])]
+    obstacles = [converter.structure(o, ObstacleSceneConfig) for o in data.get("obstacles", [])]
     event_scripts = [converter.structure(es, EventScript) for es in data.get("event_scripts", [])]
 
     return ScenarioConfig(
@@ -439,5 +464,7 @@ def _structure_manual(
         flow=flow,
         agent_types=merged_types,
         world_objects=world_objects,
+        walls=walls,
+        obstacles=obstacles,
         event_scripts=event_scripts,
     )

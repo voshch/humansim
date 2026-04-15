@@ -12,6 +12,9 @@
   <depend>arena_humansim_msgs</depend>
   <exec_depend>python3-attr</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-matplotlib</exec_depend>
+  <exec_depend>rosbag2_py</exec_depend>
+  <exec_depend>rosbag2_storage_mcap</exec_depend>
 
   <test_depend>python3-pytest</test_depend>
   <test_depend>python3-pytest-xdist</test_depend>

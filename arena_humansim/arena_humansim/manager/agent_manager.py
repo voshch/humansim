@@ -5,6 +5,7 @@ import queue
 import threading
 import time
 from collections.abc import Callable, Hashable, Iterable
+from pathlib import Path
 from typing import Any
 
 import attrs
@@ -13,9 +14,12 @@ import rclpy
 import rclpy.publisher
 from arena_humansim_msgs.msg import AgentState as AgentStateMsg
 from arena_humansim_msgs.msg import AgentStates as AgentStatesMsg
+from arena_humansim_msgs.msg import ObstacleConfig as ObstacleConfigMsg
 from arena_humansim_msgs.msg import Shape as ShapeMsg
 from arena_humansim_msgs.msg import SinkConfig as SinkConfigMsg
 from arena_humansim_msgs.msg import SourceConfig as SourceConfigMsg
+from arena_humansim_msgs.msg import WorldGeometry as WorldGeometryMsg
+from arena_humansim_msgs.msg import WorldObjectInfo as WorldObjectInfoMsg
 from arena_humansim_msgs.srv import (
     AddObstacles,
     AddSink,
@@ -34,8 +38,8 @@ from arena_humansim_msgs.srv import (
     SpawnAgents,
     UpdateRobot,
 )
+from geometry_msgs.msg import Point32, Vector3
 from geometry_msgs.msg import Pose2D as Pose2DMsg
-from geometry_msgs.msg import Vector3
 from py_trees.trees import BehaviourTree
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
@@ -65,6 +69,7 @@ from arena_humansim.manager.spawn_scheduler import SpawnScheduler
 from arena_humansim.manager.world_knowledge import WorldKnowledge, WorldObject
 from arena_humansim.perception import Perception
 from arena_humansim.pool import AgentPool
+from arena_humansim.recorder import BagRecorder, default_record_dir
 from arena_humansim.utils import RNG
 from arena_humansim.utils.event_bus import EventBus
 from arena_humansim.utils.loggable import Loggable
@@ -182,6 +187,12 @@ class AgentManager(Node):
         self.declare_parameter("publish_markers", 0)
         self.declare_parameter("profile_phases", False)
         self.declare_parameter("profile_interval", 0)
+        self.declare_parameter("record_bag", False)
+        self.declare_parameter("record_dir", "")
+        self.declare_parameter("scenario", "")
+        self.declare_parameter("ticks", 0)
+        self.declare_parameter("time", 0.0)
+        self.declare_parameter("rtf", 0.0)
 
         seed = self.get_parameter("seed").value
         self._dt = self.get_parameter("dt").value
@@ -191,6 +202,11 @@ class AgentManager(Node):
         replay_mode = self.get_parameter("replay_mode").value
         self._waypoint_threshold = self.get_parameter("waypoint_threshold").value
         self._min_speed_for_heading = self.get_parameter("min_speed_for_heading").value
+        self._ticks_limit = int(self.get_parameter("ticks").value)
+        time_limit = float(self.get_parameter("time").value)
+        if self._ticks_limit == 0 and time_limit > 0.0:
+            self._ticks_limit = max(1, int(round(time_limit / self._dt)))
+        self._rtf = float(self.get_parameter("rtf").value)
         _pm = self.get_parameter("publish_markers").value
         if isinstance(_pm, bool):
             self._publish_markers = 2 if _pm else 0
@@ -284,6 +300,12 @@ class AgentManager(Node):
             10,
         )
         self._agent_states_bg = _BackgroundPublisher(self._agent_states_pub)
+
+        self._world_geometry_pub = self.create_publisher(
+            WorldGeometryMsg,
+            "world_geometry",
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL),
+        )
 
         self._world_state_sub = self.create_subscription(
             AgentStatesMsg,
@@ -398,6 +420,24 @@ class AgentManager(Node):
             self._replay.load(replay_mode)
             self._logger.info(f"Replay mode: loaded {self._replay.tick_count} ticks from {replay_mode}")
 
+        self._recorder: BagRecorder | None = None
+        if self.get_parameter("record_bag").value:
+            from pathlib import Path
+
+            record_dir = self.get_parameter("record_dir").value
+            if not record_dir:
+                self._logger.warning("record_bag=true but record_dir empty; using default")
+                target = default_record_dir()
+            else:
+                target = Path(record_dir)
+            self._recorder = BagRecorder(self, target)
+
+        scenario_arg = self.get_parameter("scenario").value
+        if scenario_arg and self._mode == self.MODE_MASTER:
+            self._load_scenario_file(scenario_arg)
+        elif scenario_arg:
+            self._logger.warning(f"scenario='{scenario_arg}' ignored in mode={self._mode} (orchestrator-driven)")
+
         self._logger.info(f"AgentManager initialized (seed={seed}, dt={self._dt}, mode={self._mode})")
 
     def _collect_ros_parameters(self) -> dict[str, Any]:
@@ -440,6 +480,87 @@ class AgentManager(Node):
             self._module_pool[name] = instance
         return self._perception_cache[name]
 
+    def _resolve_scenario_path(self, name_or_path: str) -> Path:
+        p = Path(name_or_path)
+        if p.is_file():
+            return p
+        try:
+            from ament_index_python.packages import get_package_share_directory
+
+            share = Path(get_package_share_directory("arena_humansim"))
+        except Exception:
+            share = None
+        if share is not None:
+            candidate = share / "config" / "scenarios" / (p.name if p.suffix else f"{p.name}.yaml")
+            if candidate.is_file():
+                return candidate
+        raise FileNotFoundError(f"scenario not found: {name_or_path}")
+
+    def _load_scenario_file(self, name_or_path: str) -> None:
+        from arena_humansim.utils.scenario import load_scenario
+
+        path = self._resolve_scenario_path(name_or_path)
+        scenario = load_scenario(str(path))
+        self._logger.info(f"Loading scenario '{scenario.name}' from {path}")
+
+        self._init_world_knowledge(scenario)
+
+        if self._ticks_limit == 0 and scenario.simulation.max_ticks > 0:
+            self._ticks_limit = int(scenario.simulation.max_ticks)
+
+        if scenario.walls:
+            walls_req = AddWalls.Request()
+            for w in scenario.walls:
+                walls_req.names.append(w.name)
+                walls_req.starts.append(Point32(x=float(w.start.x), y=float(w.start.y), z=0.0))
+                walls_req.ends.append(Point32(x=float(w.end.x), y=float(w.end.y), z=0.0))
+            self._add_walls_callback(walls_req, AddWalls.Response())
+
+        if scenario.obstacles:
+            obs_req = AddObstacles.Request()
+            for o in scenario.obstacles:
+                m = ObstacleConfigMsg()
+                m.name = o.name
+                m.pose = Pose2DMsg(x=o.pose.x, y=o.pose.y, theta=o.pose.theta)
+                m.bb_x_min, m.bb_x_max = o.bb.x_min, o.bb.x_max
+                m.bb_y_min, m.bb_y_max = o.bb.y_min, o.bb.y_max
+                m.bb_z_min, m.bb_z_max = o.bb.z_min, o.bb.z_max
+                m.obstacle_type = o.obstacle_type
+                m.interaction_types = list(o.interaction_types)
+                obs_req.obstacles.append(m)
+            self._add_obstacles_callback(obs_req, AddObstacles.Response())
+
+        if not scenario.agents:
+            return
+
+        req = SpawnAgents.Request()
+        for a in scenario.agents:
+            msg = AgentStateMsg()
+            msg.agent_id = int(a.agent_id)
+            msg.pose = Pose2DMsg(x=a.spawn_pose.x, y=a.spawn_pose.y, theta=a.spawn_pose.theta)
+            msg.velocity = Vector3(x=0.0, y=0.0, z=0.0)
+            msg.desired_velocity = float(a.desired_velocity)
+            msg.radius = float(a.agent_radius)
+            msg.agent_type = a.agent_type
+            from arena_humansim_msgs.msg import Waypoint as WaypointMsg
+            from arena_humansim_msgs.msg import Waypoints as WaypointsMsg
+
+            wps = WaypointsMsg()
+            wps.mode = WaypointsMsg.MODE_ONCE
+            for gp in a.goal_sequence:
+                w = WaypointMsg()
+                w.pose = Pose2DMsg(x=gp.x, y=gp.y, theta=gp.theta)
+                w.radius = 0.0
+                wps.points.append(w)
+            msg.waypoints = wps
+            req.agents.append(msg)
+
+        resp = self._spawn_agents_callback(req, SpawnAgents.Response())
+        if not resp.success:
+            self._logger.error(f"scenario spawn failed: {resp.message}")
+        else:
+            self._logger.info(f"scenario spawned {len(resp.spawned_ids)} agent(s)")
+
     def _init_world_knowledge(self, scenario: ScenarioConfig) -> None:
         if scenario.agent_types:
             self._agent_types = {**BUILTIN_AGENTS, **scenario.agent_types}
@@ -457,6 +578,7 @@ class AgentManager(Node):
         self._event_scripts_by_tick: dict[int, list[EventScript]] = {}
         for script in self._event_scripts:
             self._event_scripts_by_tick.setdefault(script.tick, []).append(script)
+        self._publish_world_geometry()
 
     def _build_base_agent(
         self,
@@ -1129,7 +1251,8 @@ class AgentManager(Node):
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
         self._clock_pub = self.create_publisher(Clock, "/clock", clock_qos)
-        self._timer = self.create_timer(self._dt, self._master_timer_callback)
+        period = self._dt / self._rtf if self._rtf > 0.0 else 0.0
+        self._timer = self.create_timer(period, self._master_timer_callback)
 
     def _setup_subsystem_mode(self):
         # Timer drives ticking at dt intervals, paced by the external /clock
@@ -1158,6 +1281,8 @@ class AgentManager(Node):
         self._overrun_count = 0
 
     def _master_timer_callback(self):
+        if self._tick_count == 0:
+            self._publish_world_geometry()
         t0 = time.perf_counter()
         self.tick()
         self._check_overrun(time.perf_counter() - t0)
@@ -1166,8 +1291,15 @@ class AgentManager(Node):
         clock_msg.clock.sec = int(self._sim_time_ns // int(1e9))
         clock_msg.clock.nanosec = int(self._sim_time_ns % int(1e9))
         self._clock_pub.publish(clock_msg)
+        if self._ticks_limit > 0 and self._tick_count >= self._ticks_limit:
+            if self._timer is not None:
+                self._timer.cancel()
+            self._logger.info(f"reached ticks={self._ticks_limit}, shutting down")
+            rclpy.try_shutdown()
 
     def _subsystem_timer_callback(self):
+        if self._tick_count == 0:
+            self._publish_world_geometry()
         now = self.get_clock().now()
         self._sim_time_ns = now.nanoseconds
         t0 = time.perf_counter()
@@ -1401,6 +1533,7 @@ class AgentManager(Node):
         self._sim_time_ns = 0
         self._last_spawned_ids = []
         self._last_despawned_ids = []
+        self._publish_world_geometry()
         response.success = True
         response.message = "Simulation reset"
         self._logger.info(response.message)
@@ -1595,10 +1728,46 @@ class AgentManager(Node):
         for subsystem in self._wall_aware:
             subsystem.set_walls(segments)
 
+    def _publish_world_geometry(self) -> None:
+        msg = WorldGeometryMsg()
+        msg.header.frame_id = "map"
+        msg.header.stamp = self.get_clock().now().to_msg()
+
+        for name, ((sx, sy), (ex, ey)) in self._walls.items():
+            msg.wall_names.append(name)
+            msg.wall_starts.append(Point32(x=float(sx), y=float(sy), z=0.0))
+            msg.wall_ends.append(Point32(x=float(ex), y=float(ey), z=0.0))
+
+        for obs in self._obstacles.values():
+            obs_msg = ObstacleConfigMsg()
+            obs_msg.name = obs.name
+            obs_msg.pose.x = obs.pose.x
+            obs_msg.pose.y = obs.pose.y
+            obs_msg.pose.theta = obs.pose.theta
+            obs_msg.bb_x_min, obs_msg.bb_x_max, obs_msg.bb_y_min, obs_msg.bb_y_max, obs_msg.bb_z_min, obs_msg.bb_z_max = obs.bb
+            obs_msg.interaction_types = list(obs.interaction_types)
+            obs_msg.obstacle_type = obs.obstacle_type
+            msg.obstacles.append(obs_msg)
+
+        for obj in self._world_knowledge._objects.values():
+            info = WorldObjectInfoMsg()
+            info.object_id = obj.object_id
+            info.type = obj.type
+            info.pose.x = obj.pose.x
+            info.pose.y = obj.pose.y
+            info.pose.theta = obj.pose.theta
+            info.capacity = int(obj.capacity)
+            info.satisfies_keys = list(obj.satisfies.keys())
+            info.satisfies_values = [float(v) for v in obj.satisfies.values()]
+            msg.world_objects.append(info)
+
+        self._world_geometry_pub.publish(msg)
+
     def _add_walls_callback(self, request: AddWalls.Request, response: AddWalls.Response) -> AddWalls.Response:
         for name, start, end in zip(request.names, request.starts, request.ends, strict=True):
             self._walls[name] = ((start.x, start.y), (end.x, end.y))
         self._refresh_planners()
+        self._publish_world_geometry()
         response.success = True
         response.message = f"Added {len(request.names)} wall(s), total {len(self._walls)}"
         self._logger.debug(response.message)
@@ -1613,6 +1782,7 @@ class AgentManager(Node):
                 self._walls.pop(name, None)
             response.message = f"Removed {len(request.names)} wall(s), remaining {len(self._walls)}"
         self._refresh_planners()
+        self._publish_world_geometry()
         response.success = True
         self._logger.debug(response.message)
         return response
@@ -1676,6 +1846,7 @@ class AgentManager(Node):
             added += 1
         if added:
             self._refresh_planners()
+            self._publish_world_geometry()
         response.success = True
         response.message = f"Added {added} obstacle(s), total {len(self._obstacles)}"
         self._logger.debug(response.message)
@@ -1690,6 +1861,7 @@ class AgentManager(Node):
                 self._obstacles.pop(name, None)
             response.message = f"Removed {len(request.names)} obstacle(s), remaining {len(self._obstacles)}"
         self._refresh_planners()
+        self._publish_world_geometry()
         response.success = True
         self._logger.debug(response.message)
         return response
@@ -1701,6 +1873,9 @@ class AgentManager(Node):
             self._flush_profile()
         if self._sim_logger is not None:
             self._sim_logger.close()
+        if self._recorder is not None:
+            self._recorder.close()
+            self._recorder = None
         super().destroy_node()
 
 

@@ -25,6 +25,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/SourceConfig.msg"
   "msg/Waypoint.msg"
   "msg/Waypoints.msg"
+  "msg/WorldGeometry.msg"
+  "msg/WorldObjectInfo.msg"
   "srv/AddObstacles.srv"
   "srv/AddSink.srv"
   "srv/AddSource.srv"

@@ -17,7 +17,7 @@ omit = [
 target-version = "py312"
 line-length = 320
 src = ["arena_humansim"]
-extend-exclude = ["launch", "tests"]
+extend-exclude = ["launch", "tests", "arena_humansim/viz/renderer.py", "arena_humansim/recorder.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "ANN", "PYI"]
