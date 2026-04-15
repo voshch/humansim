@@ -65,7 +65,7 @@ class DefaultPerception(Perception):
             self._compute_pool_kdtree(pool, positions, n)
 
     def _compute_pool_dense(self, pool: AgentPool, positions: np.ndarray, n: int) -> None:
-        diff = positions[:, None, :] - positions[None, :, :]
+        diff = positions[None, :, :] - positions[:, None, :]
         dists = np.hypot(diff[:, :, 0], diff[:, :, 1])
         np.fill_diagonal(dists, np.inf)
 

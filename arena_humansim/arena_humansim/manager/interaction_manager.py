@@ -109,6 +109,7 @@ class InteractionManager(Loggable):
         interaction.participants.append(agent_id)
         interaction.contract.current_participants.append(agent_id)
         self._agent_to_interactions.setdefault(agent_id, set()).add(interaction_id)
+        self._maybe_activate(interaction)
         self._readvertise_for_participant(agent_id, interaction)
         return True
 
@@ -211,13 +212,14 @@ class InteractionManager(Loggable):
                 interaction.participants.append(next_agent)
                 contract.current_participants.append(next_agent)
                 self._agent_to_interactions.setdefault(next_agent, set()).add(interaction.id)
+                self._maybe_activate(interaction)
 
     def _process_command(self, cmd: HighLevelCommand) -> None:
         ctype = cmd.type
 
         if ctype == CommandType.ADVERTISE:
             ad = self.advertise(cmd.agent_id, cmd.interaction_type)
-            object_id = cmd.__dict__.get("_object_id")
+            object_id = getattr(cmd, "_object_id", None)
             interaction = self._create_interaction(
                 cmd.interaction_type,
                 cmd.agent_id,
@@ -228,8 +230,7 @@ class InteractionManager(Loggable):
             ad.interaction_id = interaction.id
 
         elif ctype == CommandType.SEARCH:
-            results = self.search(cmd.agent_id, cmd.interaction_type)
-            cmd.__dict__["_search_results"] = [ad.interaction_id for ad in results if ad.interaction_id is not None]
+            self.search(cmd.agent_id, cmd.interaction_type)
 
         elif ctype == CommandType.ACCEPT:
             target_id = cmd.interaction_target
@@ -287,6 +288,7 @@ class InteractionManager(Loggable):
         contract.current_participants.append(creator_id)
         self._agent_to_interactions.setdefault(creator_id, set()).add(iid)
         self.interactions[iid] = interaction
+        self._maybe_activate(interaction)
         self._logger.debug(f"Interaction {iid} created: type={InteractionType(interaction_type).name}, creator={creator_id}")
         return interaction
 
@@ -365,8 +367,14 @@ class InteractionManager(Loggable):
             if contract.elapsed >= contract.duration:
                 self._teardown(iid, InteractionOutcome.COMPLETED)
 
+    def _maybe_activate(self, interaction: InteractionState) -> None:
+        if interaction.outcome != InteractionOutcome.FORMING:
+            return
+        if len(interaction.participants) >= interaction.contract.min_participants:
+            interaction.outcome = InteractionOutcome.ACTIVE
+
     def _prune_ended_interactions(self) -> None:
-        to_remove = [iid for iid, interaction in self.interactions.items() if interaction.outcome != InteractionOutcome.ACTIVE]
+        to_remove = [iid for iid, interaction in self.interactions.items() if interaction.outcome in (InteractionOutcome.COMPLETED, InteractionOutcome.INTERRUPTED)]
         for iid in to_remove:
             del self.interactions[iid]
 

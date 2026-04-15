@@ -148,18 +148,6 @@ class ScenarioConfig:
     event_scripts: list[EventScript] = attrs.Factory(list)
 
 
-def _parse_agent_types(raw_section: dict[str, Any]) -> dict[str, AgentType]:
-    from arena_humansim.utils.types import converter
-
-    result: dict[str, AgentType] = {}
-    for name, fields in raw_section.items():
-        if fields is None:
-            fields = {}
-        fields["name"] = name
-        result[name] = converter.structure(fields, AgentType)
-    return result
-
-
 _DICT_MERGE_FIELDS = {
     "needs",
     "utility_weights",
@@ -174,14 +162,10 @@ _TUPLE_FIELDS = {"perception_stack"}
 
 
 def resolve_extends(
-    agent_types: dict[str, AgentType],
-    builtins: dict[str, AgentType],
-) -> dict[str, AgentType]:
-    _strip_source = attrs.filters.exclude(attrs.fields(AgentType).source_path)
-    source_paths: dict[str, Any] = {name: at.source_path for name, at in agent_types.items()}
-    all_types: dict[str, dict[str, Any]] = {}
-    for name, at in agent_types.items():
-        all_types[name] = attrs.asdict(at, filter=_strip_source)  # type: ignore[arg-type]
+    agent_types: dict[str, dict[str, Any]],
+    builtins: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    all_types: dict[str, dict[str, Any]] = {**builtins, **agent_types}
 
     resolved: dict[str, dict[str, Any]] = {}
     in_progress: set[str] = set()
@@ -199,9 +183,9 @@ def resolve_extends(
         extends = child.get("extends")
 
         if extends is None:
-            resolved[name] = child
+            resolved[name] = copy.deepcopy(child)
             in_progress.discard(name)
-            return child
+            return resolved[name]
 
         parent = _resolve(extends)
         merged = _deep_merge(parent, child, name)
@@ -209,20 +193,10 @@ def resolve_extends(
         in_progress.discard(name)
         return merged
 
-    for name in all_types:
+    for name in agent_types:
         _resolve(name)
 
-    from arena_humansim.utils.types import converter
-
-    result: dict[str, AgentType] = {}
-    for name, raw in resolved.items():
-        raw["name"] = name
-        at = converter.structure(raw, AgentType)
-        src = source_paths.get(name)
-        if src is not None:
-            at = attrs.evolve(at, source_path=src)
-        result[name] = at
-    return result
+    return {name: resolved[name] for name in agent_types}
 
 
 def _deep_merge(
@@ -401,9 +375,11 @@ def _structure_manual(
     var_overrides: dict[str, int | float | bool | str] | None = None,
     scenario_dir: Path | None = None,
 ) -> ScenarioConfig:
-    from arena_humansim.agents.loader import load_agent_types
+    from arena_humansim.agents.loader import _load_default_agent_types_raw, _structure_raw, load_agent_types_raw_from_dir
 
-    file_types = load_agent_types(scenario_dir=scenario_dir)
+    defaults_raw = _load_default_agent_types_raw()
+    scenario_local_raw = load_agent_types_raw_from_dir(scenario_dir) if scenario_dir is not None else {}
+    file_types_raw: dict[str, tuple[dict[str, Any], Path]] = {**defaults_raw, **scenario_local_raw}
 
     raw_agent_types = data.get("agent_types", {})
     if raw_agent_types:
@@ -425,15 +401,24 @@ def _structure_manual(
                     resolved_raw[atype_name] = atype_fields
             raw_agent_types = resolved_raw
 
-        inline_types = _parse_agent_types(raw_agent_types)
-    else:
-        inline_types = {}
+    inline_raw: dict[str, dict[str, Any]] = {}
+    for name, fields in raw_agent_types.items():
+        d = dict(fields) if fields else {}
+        d["name"] = name
+        inline_raw[name] = d
 
-    merged_types: dict[str, AgentType] = {**file_types, **inline_types}
+    file_raw: dict[str, dict[str, Any]] = {name: raw for name, (raw, _) in file_types_raw.items()}
+    merged_raw: dict[str, dict[str, Any]] = {**file_raw, **inline_raw}
 
-    has_extends = any(at.extends is not None for at in merged_types.values())
+    has_extends = any(raw.get("extends") is not None for raw in merged_raw.values())
     if has_extends:
-        merged_types = resolve_extends(merged_types, file_types)
+        defaults_dicts = {name: raw for name, (raw, _) in defaults_raw.items()}
+        merged_raw = resolve_extends(merged_raw, defaults_dicts)
+
+    merged_types: dict[str, AgentType] = {}
+    for name, raw in merged_raw.items():
+        src = file_types_raw[name][1] if name in file_types_raw else None
+        merged_types[name] = _structure_raw(raw, src)
 
     sim = converter.structure(data.get("simulation", {}), SimulationParams)
     modules = converter.structure(data.get("modules", {}), ModuleConfig)

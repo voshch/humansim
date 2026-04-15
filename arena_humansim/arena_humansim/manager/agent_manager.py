@@ -830,9 +830,10 @@ class AgentManager(Node):
             self._marker_pub.flush()
         self._phase_end("publish", t0)
 
+        if self._publish_markers == 0:
+            pool.sync_back(agents)
+
         if self._sim_logger is not None:
-            if self._publish_markers == 0:
-                pool.sync_back(agents)
             self._sim_logger.record_tick(
                 tick=self._tick_count,
                 timestamp=self._tick_count * self._dt,
@@ -1288,6 +1289,7 @@ class AgentManager(Node):
         for subsystem in self._wall_aware:
             subsystem.set_walls([])
         self._world_knowledge.clear()
+        self._rng.reset()
         self._next_agent_id = 1
         self._tick_count = 0
         self._sim_time_ns = 0
