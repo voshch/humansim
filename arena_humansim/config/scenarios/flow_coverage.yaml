@@ -1,0 +1,66 @@
+# flow_coverage.yaml
+# Exercises FlowScenarioConfig parsing (sources/sinks) in scenario.py.
+# Note: applying flow to the scheduler requires the set_flow service; this
+# YAML covers the load/parse path. Manager-level tests that call
+# spawn_scheduler.add_source()/despawn_monitor.add_sink() cover the tick path.
+
+name: flow_coverage
+description: >-
+  Source-sink flow scenario exercising FlowScenarioConfig/SourceScenarioConfig
+  /SinkScenarioConfig parsing plus the sampling paths in spawn_scheduler.
+
+simulation:
+  seed: 7
+  dt: 0.1
+  bt_tick_interval: 5
+  max_ticks: 100
+  execution_mode: master
+
+modules:
+  perception: default
+  global_planner: dijkstra
+  local_planner: sfm
+  animation: kinematic
+
+flow:
+  sources:
+    - pose: {x: -5.0, y: 0.0, theta: 0.0}
+      shape:
+        type: circle
+        radius: 0.5
+      rate_profile:
+        - {t: 0.0, rate: 2.0}
+        - {t: 10.0, rate: 1.0}
+      max_concurrent: 10
+      max_total: 20
+      agent_template:
+        desired_velocity_min: 1.0
+        desired_velocity_max: 1.4
+        agent_radius: 0.3
+        agent_type: adult
+        sink_affinity:
+          - {sink_idx: 0, weight: 1.0}
+
+    - pose: {x: 0.0, y: 5.0, theta: 0.0}
+      shape:
+        type: polygon
+      rate_profile:
+        - {t: 0.0, rate: 0.5}
+      max_concurrent: 5
+      max_total: 10
+      agent_template:
+        desired_velocity_min: 0.8
+        desired_velocity_max: 1.2
+        agent_radius: 0.35
+        agent_type: adult
+
+  sinks:
+    - pose: {x: 5.0, y: 0.0, theta: 0.0}
+      shape:
+        type: circle
+        radius: 0.8
+      absorption_radius: 0.8
+      capacity: -1
+
+agents: []
+interaction_scripts: []

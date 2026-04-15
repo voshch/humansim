@@ -1,8 +1,23 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "ros: requires a sourced ROS2 environment",
+    "slow: long-running tests",
+]
+
+[tool.coverage.run]
+omit = [
+    "*/benchmark.py",
+    "*/behavior/document_nodes_description.py",
+    "*/behavior/action_nodes/*",
+]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 320
 src = ["arena_humansim"]
-extend-exclude = ["launch"]
+extend-exclude = ["launch", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "ANN", "PYI"]

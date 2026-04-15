@@ -37,7 +37,8 @@ modules:
 agent_types:
   tourist_group:
     desired_velocity: {mean: 0.9, std: 0.2}
-    vision_range: {mean: 4.0, std: 1.0}
+    perception:
+      vision_range: {mean: 4.0, std: 1.0}
 
 agents:
   - agent_id: 0

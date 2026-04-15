@@ -1,0 +1,92 @@
+# bt_coverage.yaml
+# Exercises behavior-tree compilation and action_nodes paths.
+# Defines an agent_type with actions covering go_to (target_object) and
+# interaction-based actions (idle, look_at, wave_at, talk_to).
+# The initial sequence chains multiple steps so BT ticks exercise the
+# compiler, ConcreteStepNode, AutonomousNode, and SequenceStateMachine paths.
+
+name: bt_coverage
+description: >-
+  Minimal behavior-tree scenario exercising action_nodes coverage. Three
+  agents walk through a sequence of steps driven by a compiled BT.
+
+simulation:
+  seed: 42
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 50
+  execution_mode: master
+
+modules:
+  perception: default
+  global_planner: dijkstra
+  local_planner: sfm
+  animation: kinematic
+  perception_params:
+    vision_range: 6.0
+    vision_fov: 180.0
+  local_planner_params:
+    relaxation_time: 0.5
+    repulsion_strength: 2.1
+    repulsion_range: 0.3
+
+world_objects:
+  - object_id: bench_a
+    type: bench
+    pose: {x: 3.0, y: 0.0, theta: 0.0}
+    capacity: 2
+    satisfies: {rest: 40.0}
+
+agent_types:
+  bt_walker:
+    extends: adult
+    mode: behavior_tree
+    needs:
+      rest:
+        initial: {mean: 60.0, std: 0.0, clip_low: 0.0, clip_high: 100.0}
+        decay_rate: {mean: 1.0, std: 0.0, clip_low: 0.0, clip_high: 5.0}
+    utility_weights:
+      rest: 1.0
+    actions:
+      rest_at_bench:
+        target_object: bench
+        duration: {mean: 0.5, std: 0.0, clip_low: 0.1, clip_high: 2.0}
+        satisfies: {rest: 30.0}
+    initial_sequence: stroll
+    sequences:
+      stroll:
+        steps:
+          walk_out:
+            target_object: bench
+            duration: {mean: 0.2, std: 0.0, clip_low: 0.05, clip_high: 1.0}
+          pause:
+            duration: {mean: 0.3, std: 0.0, clip_low: 0.1, clip_high: 1.0}
+          wander:
+            autonomous: true
+            duration: {mean: 0.5, std: 0.0, clip_low: 0.1, clip_high: 2.0}
+            allowed_actions: [rest_at_bench]
+        then: stroll
+
+agents:
+  - agent_id: 0
+    agent_type: bt_walker
+    spawn_pose: {x: -2.0, y: 0.0, theta: 0.0}
+    goal_sequence:
+      - {x: 3.0, y: 0.0}
+    desired_velocity: 1.0
+
+  - agent_id: 1
+    agent_type: bt_walker
+    spawn_pose: {x: -2.0, y: 1.5, theta: 0.0}
+    goal_sequence:
+      - {x: 3.0, y: 1.5}
+    desired_velocity: 1.0
+
+  - agent_id: 2
+    agent_type: bt_walker
+    spawn_pose: {x: -2.0, y: -1.5, theta: 0.0}
+    goal_sequence:
+      - {x: 3.0, y: -1.5}
+    desired_velocity: 1.0
+
+interaction_scripts: []

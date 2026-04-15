@@ -1,0 +1,148 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from arena_humansim.agents import loader
+from arena_humansim.agents.types import AgentType
+
+
+def test_get_share_agent_types_dir_fallback_or_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    import ament_index_python.packages as aip
+
+    def _raise(_name: str) -> str:
+        raise RuntimeError("no ament")
+
+    monkeypatch.setattr(aip, "get_package_share_directory", _raise)
+
+    result = loader._get_share_agent_types_dir()
+    if result is not None:
+        assert result.is_dir()
+        assert result.name == "agent_types"
+    else:
+        assert result is None
+
+
+def test_load_agent_type_raw_fills_name_from_stem_when_missing(tmp_path: Path) -> None:
+    path = tmp_path / "wanderer.yaml"
+    path.write_text("mode: simple\n")
+
+    name, raw, src = loader.load_agent_type_raw_from_file(path)
+
+    assert name == "wanderer"
+    assert raw["name"] == "wanderer"
+    assert raw["mode"] == "simple"
+    assert src == path.resolve()
+
+
+def test_load_agent_type_raw_empty_yaml_yields_empty_dict(tmp_path: Path) -> None:
+    path = tmp_path / "blank.yaml"
+    path.write_text("")
+
+    name, raw, src = loader.load_agent_type_raw_from_file(path)
+
+    assert name == "blank"
+    assert raw == {"name": "blank"}
+    assert src == path.resolve()
+
+
+def test_load_agent_types_raw_from_dir_skips_bad_yamls(tmp_path: Path) -> None:
+    good = tmp_path / "good.yaml"
+    good.write_text("name: good\nmode: simple\n")
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("name: bad\nmode: [unterminated\n")
+
+    result = loader.load_agent_types_raw_from_dir(tmp_path)
+
+    assert "good" in result
+    assert "bad" not in result
+    assert result["good"][1] == good.resolve()
+
+
+def test_load_agent_types_raw_from_dir_missing_returns_empty(tmp_path: Path) -> None:
+    missing = tmp_path / "does_not_exist"
+    assert loader.load_agent_types_raw_from_dir(missing) == {}
+
+
+def test_load_default_agent_types_empty_when_share_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(loader, "_get_share_agent_types_dir", lambda: None)
+    assert loader.load_default_agent_types() == {}
+    assert loader._load_default_agent_types_raw() == {}
+
+
+def test_is_path_agent_type_recognizes_slash_and_yaml_suffix() -> None:
+    assert loader.is_path_agent_type("foo/bar")
+    assert loader.is_path_agent_type("agent.yaml")
+    assert loader.is_path_agent_type("/abs/path/agent.yaml")
+    assert not loader.is_path_agent_type("adult")
+    assert not loader.is_path_agent_type("elder")
+
+
+def test_resolve_agent_type_by_name_path_and_registry(tmp_path: Path) -> None:
+    path = tmp_path / "walker.yaml"
+    path.write_text("name: walker\nmode: simple\n")
+
+    by_path = loader.resolve_agent_type_name(str(path), registry={})
+    assert isinstance(by_path, AgentType)
+    assert by_path.name == "walker"
+
+    missing = loader.resolve_agent_type_name(str(tmp_path / "nope.yaml"), registry={})
+    assert missing is None
+
+    dummy = AgentType(name="adult")
+    by_registry = loader.resolve_agent_type_name("adult", registry={"adult": dummy})
+    assert by_registry is dummy
+
+    assert loader.resolve_agent_type_name("unknown", registry={}) is None
+
+
+def test_load_agent_types_with_extends_resolves_inline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    defaults_dir = tmp_path / "defaults"
+    defaults_dir.mkdir()
+    parent_yaml = defaults_dir / "parent.yaml"
+    parent_yaml.write_text(
+        "name: parent\n"
+        "mode: simple\n"
+        "desired_velocity:\n"
+        "  mean: 2.0\n"
+        "agent_radius:\n"
+        "  mean: 0.5\n"
+    )
+
+    scenario_dir = tmp_path / "scenario"
+    scenario_dir.mkdir()
+    child_yaml = scenario_dir / "child.yaml"
+    child_yaml.write_text(
+        "name: child\n"
+        "extends: parent\n"
+        "desired_velocity:\n"
+        "  mean: 3.3\n"
+    )
+
+    monkeypatch.setattr(loader, "_get_share_agent_types_dir", lambda: defaults_dir)
+
+    result = loader.load_agent_types(scenario_dir=scenario_dir)
+
+    assert set(result) == {"parent", "child"}
+    assert result["child"].desired_velocity.mean == 3.3
+    assert result["child"].agent_radius.mean == 0.5
+    assert result["child"].extends is None
+    assert result["parent"].desired_velocity.mean == 2.0
+
+
+def test_load_agent_types_without_extends_returns_structured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    defaults_dir = tmp_path / "defaults"
+    defaults_dir.mkdir()
+    (defaults_dir / "plain.yaml").write_text("name: plain\nmode: simple\n")
+
+    monkeypatch.setattr(loader, "_get_share_agent_types_dir", lambda: defaults_dir)
+
+    result = loader.load_agent_types()
+    assert "plain" in result
+    assert isinstance(result["plain"], AgentType)
+    assert result["plain"].name == "plain"

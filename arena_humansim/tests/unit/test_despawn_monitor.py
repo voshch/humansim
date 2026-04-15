@@ -1,0 +1,200 @@
+from __future__ import annotations
+
+from collections.abc import Callable
+
+import pytest
+
+pytest.importorskip("rclpy")
+
+from arena_humansim.agents.base import BaseAgent
+from arena_humansim.manager.despawn_monitor import DespawnMonitor
+from arena_humansim.utils.types import (
+    AgentLifetime,
+    Pose2D,
+    Shape,
+    ShapeType,
+    SinkConfig,
+)
+
+
+def _make_monitor() -> DespawnMonitor:
+    return DespawnMonitor()
+
+
+def _circle_sink(name: str = "exit", x: float = 0.0, y: float = 0.0, radius: float = 0.5, capacity: int = -1) -> SinkConfig:
+    return SinkConfig(
+        name=name,
+        pose=Pose2D(x=x, y=y),
+        shape=Shape(type=ShapeType.CIRCLE, radius=radius),
+        absorption_radius=radius,
+        capacity=capacity,
+    )
+
+
+def _polygon_sink(name: str = "room", cx: float = 0.0, cy: float = 0.0, vertices: list[Pose2D] | None = None) -> SinkConfig:
+    verts = vertices if vertices is not None else [
+        Pose2D(x=-1.0, y=-1.0),
+        Pose2D(x=1.0, y=-1.0),
+        Pose2D(x=1.0, y=1.0),
+        Pose2D(x=-1.0, y=1.0),
+    ]
+    return SinkConfig(
+        name=name,
+        pose=Pose2D(x=cx, y=cy),
+        shape=Shape(type=ShapeType.POLYGON, vertices=verts),
+        absorption_radius=0.0,
+    )
+
+
+def _no_interaction(_aid: int) -> bool:
+    return False
+
+
+def _always_interaction(_aid: int) -> bool:
+    return True
+
+
+def test_tick_empty_returns_no_requests() -> None:
+    m = _make_monitor()
+    assert m.tick({}, _no_interaction, tick_count=0, dt=0.1) == []
+
+
+def test_circle_sink_proximity_triggers_despawn(agent_factory: Callable[..., BaseAgent]) -> None:
+    m = _make_monitor()
+    m.add_sink(_circle_sink("exit", x=5.0, y=0.0, radius=0.5))
+    agent = agent_factory(agent_id=1, x=5.1, y=0.0)
+    m.register(1, AgentLifetime(agent_id=1, target_sink_name="exit", spawn_tick=0))
+    requests = m.tick({1: agent}, _no_interaction, tick_count=1, dt=0.1)
+    assert len(requests) == 1
+    assert requests[0].agent_id == 1
+    assert requests[0].reason == "sink"
+    assert requests[0].force is False
+
+
+def test_polygon_sink_proximity_triggers_despawn(agent_factory: Callable[..., BaseAgent]) -> None:
+    m = _make_monitor()
+    m.add_sink(_polygon_sink("room", cx=2.0, cy=2.0))
+    agent = agent_factory(agent_id=7, x=2.3, y=2.1)
+    m.register(7, AgentLifetime(agent_id=7, target_sink_name="room"))
+    requests = m.tick({7: agent}, _no_interaction, tick_count=1, dt=0.1)
+    assert len(requests) == 1
+    assert requests[0].agent_id == 7
+    assert requests[0].reason == "sink"
+
+
+def test_in_interaction_defers_despawn(agent_factory: Callable[..., BaseAgent]) -> None:
+    m = _make_monitor()
+    m.add_sink(_circle_sink("exit", x=0.0, y=0.0, radius=0.5))
+    agent = agent_factory(agent_id=1, x=0.1, y=0.0)
+    lifetime = AgentLifetime(agent_id=1, target_sink_name="exit")
+    m.register(1, lifetime)
+    requests = m.tick({1: agent}, _always_interaction, tick_count=1, dt=0.1)
+    assert requests == []
+    assert lifetime.pending_despawn is True
+
+
+def test_pending_despawn_fires_after_interaction_ends(agent_factory: Callable[..., BaseAgent]) -> None:
+    m = _make_monitor()
+    m.add_sink(_circle_sink("exit", x=0.0, y=0.0, radius=0.5))
+    agent = agent_factory(agent_id=1, x=5.0, y=5.0)
+    lifetime = AgentLifetime(agent_id=1, target_sink_name="exit", pending_despawn=True)
+    m.register(1, lifetime)
+    requests = m.tick({1: agent}, _no_interaction, tick_count=1, dt=0.1)
+    assert len(requests) == 1
+    assert requests[0].reason == "deferred"
+    assert requests[0].force is False
+
+
+def test_ttl_expired_forces_despawn_in_interaction(agent_factory: Callable[..., BaseAgent]) -> None:
+    m = _make_monitor()
+    agent = agent_factory(agent_id=1, x=50.0, y=50.0)
+    m.register(1, AgentLifetime(agent_id=1, spawn_tick=0, max_lifetime_s=1.0))
+    requests = m.tick({1: agent}, _always_interaction, tick_count=100, dt=0.1)
+    assert len(requests) == 1
+    assert requests[0].reason == "ttl"
+    assert requests[0].force is True
+
+
+def test_ttl_not_expired_does_nothing(agent_factory: Callable[..., BaseAgent]) -> None:
+    m = _make_monitor()
+    agent = agent_factory(agent_id=1, x=50.0, y=50.0)
+    m.register(1, AgentLifetime(agent_id=1, spawn_tick=0, max_lifetime_s=100.0))
+    requests = m.tick({1: agent}, _no_interaction, tick_count=5, dt=0.1)
+    assert requests == []
+
+
+def test_sink_capacity_blocks_absorption(agent_factory: Callable[..., BaseAgent]) -> None:
+    m = _make_monitor()
+    m.add_sink(_circle_sink("exit", x=0.0, y=0.0, radius=0.5, capacity=1))
+    m._sink_occupancy["exit"] = 1
+    agent = agent_factory(agent_id=1, x=0.1, y=0.0)
+    m.register(1, AgentLifetime(agent_id=1, target_sink_name="exit"))
+    requests = m.tick({1: agent}, _no_interaction, tick_count=1, dt=0.1)
+    assert requests == []
+
+
+def test_register_unregister_and_clear() -> None:
+    m = _make_monitor()
+    m.register(1, AgentLifetime(agent_id=1))
+    m.register(2, AgentLifetime(agent_id=2))
+    assert set(m._lifetimes.keys()) == {1, 2}
+    m.unregister(1)
+    assert set(m._lifetimes.keys()) == {2}
+    m.unregister(999)
+    assert set(m._lifetimes.keys()) == {2}
+    m.add_sink(_circle_sink("s"))
+    m.clear()
+    assert m._lifetimes == {}
+    assert m._sink_occupancy == {}
+
+
+def test_sink_registration_set_and_remove() -> None:
+    m = _make_monitor()
+    s1 = _circle_sink("a")
+    s2 = _circle_sink("b")
+    m.add_sink(s1)
+    m.add_sink(s2)
+    assert set(m.sinks.keys()) == {"a", "b"}
+    m.remove_sink("a")
+    assert set(m.sinks.keys()) == {"b"}
+    m.set_sinks({"c": _circle_sink("c")})
+    assert set(m.sinks.keys()) == {"c"}
+    m.clear_sinks()
+    assert m.sinks == {}
+
+
+@pytest.mark.parametrize(
+    "px, py, expected",
+    [
+        (0.0, 0.0, True),
+        (2.0, 0.0, False),
+        (-2.0, -2.0, False),
+        (0.99, 0.99, True),
+        (1.0, 0.0, False),
+        (0.0, 1.0, False),
+    ],
+)
+def test_point_in_polygon_square(px: float, py: float, expected: bool) -> None:
+    square = [
+        Pose2D(x=-1.0, y=-1.0),
+        Pose2D(x=1.0, y=-1.0),
+        Pose2D(x=1.0, y=1.0),
+        Pose2D(x=-1.0, y=1.0),
+    ]
+    assert DespawnMonitor._point_in_polygon(px, py, square) is expected
+
+
+def test_point_in_polygon_concave_shape() -> None:
+    concave = [
+        Pose2D(x=0.0, y=0.0),
+        Pose2D(x=4.0, y=0.0),
+        Pose2D(x=4.0, y=4.0),
+        Pose2D(x=2.0, y=4.0),
+        Pose2D(x=2.0, y=2.0),
+        Pose2D(x=0.0, y=2.0),
+    ]
+    assert DespawnMonitor._point_in_polygon(1.0, 1.0, concave) is True
+    assert DespawnMonitor._point_in_polygon(3.0, 1.0, concave) is True
+    assert DespawnMonitor._point_in_polygon(3.0, 3.0, concave) is True
+    assert DespawnMonitor._point_in_polygon(1.0, 3.0, concave) is False
+    assert DespawnMonitor._point_in_polygon(5.0, 5.0, concave) is False

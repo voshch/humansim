@@ -28,6 +28,9 @@ setup(
         "pyastar2d",
         "pydantic",
     ],
+    extras_require={
+        "test": ["pytest>=7", "pytest-xdist", "hypothesis>=6"],
+    },
     zip_safe=True,
     maintainer="voshch",
     maintainer_email="dev@voshch.dev",

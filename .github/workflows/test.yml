@@ -1,0 +1,44 @@
+name: test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    container:
+      image: ros:jazzy
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src/arena_humansim
+
+      - name: Install build tooling
+        run: |
+          apt-get update
+          apt-get install -y python3-colcon-common-extensions python3-pip
+          rosdep update
+          rosdep install --from-paths src --ignore-src -y || true
+
+      - name: Build
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon build --packages-up-to arena_humansim arena_humansim_msgs
+
+      - name: Install test deps
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          pip install --break-system-packages -e 'src/arena_humansim/arena_humansim[test]'
+
+      - name: Run pytest
+        shell: bash
+        working-directory: src/arena_humansim/arena_humansim
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source ../../../install/setup.bash
+          pytest tests/ -n auto
