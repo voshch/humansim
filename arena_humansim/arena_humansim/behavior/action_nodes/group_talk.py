@@ -8,6 +8,7 @@ from arena_humansim.behavior.nodes import _nav_command
 from arena_humansim.manager.interaction_manager import CommandType
 from arena_humansim.utils import DISTANCE_TOLERANCE
 from arena_humansim.utils.types import (
+    AgentKind,
     HighLevelCommand,
     InteractionOutcome,
     InteractionType,
@@ -39,7 +40,7 @@ class GroupTalkNode(py_trees.behaviour.Behaviour):
     def __init__(self, name: str, config: GroupTalkNodeSchema):
         super().__init__(name)
         self.agent = config.agent
-        self.agents = config.participant_agents
+        self.agents = [a for a in config.participant_agents if a.state.kind == AgentKind.HUMAN]
         self.group_center = config.group_center
         self.duration = config.duration
         self.emited_cmd = False

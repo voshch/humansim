@@ -56,6 +56,7 @@ class AgentState:
     pose: Pose2D = attrs.Factory(Pose2D)
     velocity: tuple[float, float] = (0.0, 0.0)
     desired_velocity: float = 1.3
+    kind: int = 0
 
 
 @attrs.define
@@ -165,6 +166,11 @@ class SinkAffinity:
     weight: float = 1.0  # relative weight (normalized at runtime)
 
 
+class AgentKind(enum.IntEnum):
+    HUMAN = 0
+    ROBOT = 1
+
+
 @attrs.define
 class AgentTemplate:
     desired_velocity_min: float = 1.0
@@ -172,6 +178,9 @@ class AgentTemplate:
     agent_radius: float = 0.35
     agent_type: str = "adult"
     sink_affinity: list[SinkAffinity] = attrs.Factory(list)
+    kind: AgentKind = AgentKind.HUMAN
+    policy: str = ""
+    policy_params: str = ""
 
 
 @attrs.define

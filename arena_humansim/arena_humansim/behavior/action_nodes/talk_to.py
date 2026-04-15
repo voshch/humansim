@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 from arena_humansim.agents import BaseAgent
 from arena_humansim.manager.interaction_manager import CommandType
-from arena_humansim.utils.types import HighLevelCommand, InteractionOutcome, InteractionType
+from arena_humansim.utils.types import AgentKind, HighLevelCommand, InteractionOutcome, InteractionType
 
 
 class TalkToNodeSchema(BaseModel):
@@ -27,6 +27,8 @@ class TalkToNode(py_trees.behaviour.Behaviour):
         """
         Emit HighLevelCommand only once, when node first starts to tick for InteractionManager to manage elapsed time via `InteractionContract.elapsed`
         """
+        if self.target_agent.state.kind != AgentKind.HUMAN:
+            return
         self.agent.movement.command = HighLevelCommand(
             agent_id=self.agent.state.agent_id,
             type=CommandType.ADVERTISE,
@@ -36,6 +38,8 @@ class TalkToNode(py_trees.behaviour.Behaviour):
         )
 
     def update(self) -> py_trees.common.Status:
+        if self.target_agent.state.kind != AgentKind.HUMAN:
+            return py_trees.common.Status.FAILURE
         outcome = self.agent.movement.last_outcome
         if outcome in [InteractionOutcome.ACTIVE, InteractionOutcome.FORMING]:
             return py_trees.common.Status.RUNNING

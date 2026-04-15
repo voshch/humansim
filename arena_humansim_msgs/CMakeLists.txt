@@ -38,6 +38,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/RemoveSource.srv"
   "srv/RemoveWalls.srv"
   "srv/SetFlow.srv"
+  "srv/SetWaypoints.srv"
   "srv/SpawnAgents.srv"
   "srv/GetProfile.srv"
   "srv/UpdateRobot.srv"

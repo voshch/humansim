@@ -592,3 +592,17 @@ def test_state_machine_terminate_forwards_to_current(agent_factory: Callable[...
     sm.initialise()
     sm.terminate(py_trees.common.Status.INVALID)
     assert py_trees.common.Status.INVALID in a.terminated_with
+
+
+def test_pool_kind_filter_excludes_robots(agent_factory: Callable[..., BaseAgent]) -> None:
+    from arena_humansim.pool import AgentPool, human_mask, is_human
+
+    pool = AgentPool(capacity=4)
+    pool.add_agent(agent_factory(agent_id=1, x=0.0, y=0.0))
+    pool.add_agent(agent_factory(agent_id=2, x=1.0, y=0.0))
+    pool.kind[pool.idx(2)] = 1
+
+    mask = human_mask(pool)
+    assert mask.tolist() == [True, False]
+    assert is_human(pool, pool.idx(1)) is True
+    assert is_human(pool, pool.idx(2)) is False

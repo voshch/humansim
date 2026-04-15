@@ -17,6 +17,7 @@ _registry: ModuleRegistry[LocalPlanner] = ModuleRegistry()
 
 class LocalPlanner(WallAware, Loggable, ABC):
     supports_pool: bool = False
+    needs_global_subgoal: bool = True
 
     @abstractmethod
     def compute(
@@ -54,5 +55,12 @@ def _load_orca() -> type[LocalPlanner]:
     return ORCAPlanner
 
 
+def _load_straight() -> type[LocalPlanner]:
+    from .straight import StraightToGoalPlanner
+
+    return StraightToGoalPlanner
+
+
 _registry.register("sfm")(_load_sfm)
 _registry.register("orca")(_load_orca)
+_registry.register("straight")(_load_straight)

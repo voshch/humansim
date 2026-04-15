@@ -30,6 +30,7 @@ from arena_humansim_msgs.srv import (
     RemoveWalls,
     ResetSimulation,
     SetFlow,
+    SetWaypoints,
     SpawnAgents,
     UpdateRobot,
 )
@@ -218,6 +219,10 @@ class AgentManager(Node):
         self._local_planner = LocalPlanner.create(
             self._module_selections["local_planner"],
         )
+        self._default_policy_idx: int = 0
+        self._policy_names = [self._module_selections["local_planner"]]
+        self._policy_name_to_idx = {self._module_selections["local_planner"]: 0}
+        self._policies = [self._local_planner]
         self._interaction_manager = InteractionManager(rng_manager=self._rng)
         self._animation = MotionAnimation.create(
             self._module_selections["animation"],
@@ -259,7 +264,7 @@ class AgentManager(Node):
         self._agent_types: dict[str, AgentType] = dict(BUILTIN_AGENTS)
         self._agents: dict[int, BaseAgent] = {}
         self._pool_agent_ids: list[int] = []
-        self._robots: dict[str, tuple[Pose2D, float]] = {}
+        self._robot_name_to_id: dict[str, int] = {}
         self._walls: dict[str, tuple[tuple[float, float], tuple[float, float]]] = {}
         self._obstacles: dict[str, ObstacleData] = {}
         self._marker_pub = MarkerPublisher(self) if self._publish_markers > 0 else None
@@ -302,6 +307,11 @@ class AgentManager(Node):
             UpdateRobot,
             "update_robot",
             self._update_robot_callback,
+        )
+        self._set_waypoints_srv = self.create_service(
+            SetWaypoints,
+            "set_waypoints",
+            self._set_waypoints_callback,
         )
 
         self._set_flow_srv = self.create_service(
@@ -409,6 +419,19 @@ class AgentManager(Node):
             except Exception:
                 pass
         return params
+
+    def _resolve_policy_idx(self, name: str) -> int:
+        if not name:
+            return -1
+        idx = self._policy_name_to_idx.get(name)
+        if idx is not None:
+            return idx
+        planner = LocalPlanner.create(name)
+        idx = len(self._policies)
+        self._policies.append(planner)
+        self._policy_names.append(name)
+        self._policy_name_to_idx[name] = idx
+        return idx
 
     def _resolve_perception_layer(self, name: str) -> Perception:
         if name not in self._perception_cache:
@@ -582,6 +605,9 @@ class AgentManager(Node):
         self._interaction_manager.force_stop(aid)
         self._event_bus.clear_agent(aid)
         self._rng.remove_agent_substreams(aid)
+        for name, mapped_id in list(self._robot_name_to_id.items()):
+            if mapped_id == aid:
+                del self._robot_name_to_id[name]
 
     def _phase_end(self, name: str, t0: float):
         self._tick_phases[name] = (time.perf_counter() - t0) * 1000.0
@@ -647,7 +673,8 @@ class AgentManager(Node):
             self._next_agent_id += 1
             agent = self._build_base_agent_from_spawn(aid, spawn_req)
             self._agents[aid] = agent
-            self._pool.add_agent(agent)
+            idx = self._pool.add_agent(agent)
+            self._pool.policy_idx[idx] = self._default_policy_idx
             self._pool_agent_ids.append(aid)
             self._compile_behavior_tree(agent)
             spawn_req.lifetime.agent_id = aid
@@ -729,12 +756,24 @@ class AgentManager(Node):
 
             # --- GLOBAL PLAN ---
             t0 = time.perf_counter()
-            for planner, group in _group_by(agents, key=lambda a: a.global_planner):
+            needs_subgoal_ids: set[int] = set()
+            for i in range(pool.n):
+                pidx = int(pool.policy_idx[i])
+                planner = self._policies[pidx] if 0 <= pidx < len(self._policies) else None
+                if planner is None or getattr(planner, "needs_global_subgoal", True):
+                    needs_subgoal_ids.add(int(pool.agent_ids[i]))
+            subgoal_agents = [a for a in agents if a.state.agent_id in needs_subgoal_ids]
+            for planner, group in _group_by(subgoal_agents, key=lambda a: a.global_planner):
                 planner.compute(group, self._high_level_cmds)
 
             self._cached_intermediate_goals = {}
-            for planner, _group in _group_by(agents, key=lambda a: a.global_planner):
+            for planner, _group in _group_by(subgoal_agents, key=lambda a: a.global_planner):
                 self._cached_intermediate_goals.update(planner.get_cached_goals())
+
+            for aid in self._high_level_cmds:
+                if aid not in needs_subgoal_ids:
+                    cmd = self._high_level_cmds[aid]
+                    self._cached_intermediate_goals[aid] = cmd.target_pose
 
             pool.set_goals(self._cached_intermediate_goals)
             self._phase_end("global_plan", t0)
@@ -742,10 +781,43 @@ class AgentManager(Node):
         # --- LOCAL PLAN (vectorized SFM or per-agent fallback) ---
         t0 = time.perf_counter()
         pool.store_prev_vel()
-        if self._local_planner.supports_pool:
-            self._local_planner.compute_pool(pool, store_forces=self._publish_markers >= 2, dt=self._dt)
+        n = pool.n
+        active_mask = pool.policy_idx[:n] != -1
+        if not np.any(active_mask):
+            pool.vel[:n] = 0.0
+        elif np.all(active_mask) and len(self._policies) == 1:
+            planner = self._policies[0]
+            if planner.supports_pool:
+                planner.compute_pool(pool, store_forces=self._publish_markers >= 2, dt=self._dt)
+            else:
+                self._local_plan_fallback(agents, self._cached_intermediate_goals, pool)
         else:
-            self._local_plan_fallback(agents, self._cached_intermediate_goals, pool)
+            saved_has_goal = pool.has_goal[:n].copy()
+            pool.has_goal[:n] = saved_has_goal & active_mask
+            accum_vel = np.zeros_like(pool.vel[:n])
+            for pidx in np.unique(pool.policy_idx[:n]):
+                if pidx < 0:
+                    continue
+                planner = self._policies[int(pidx)]
+                own_mask = pool.policy_idx[:n] == int(pidx)
+                if planner.supports_pool:
+                    pool.has_goal[:n] = saved_has_goal & active_mask & own_mask
+                    planner.compute_pool(pool, store_forces=self._publish_markers >= 2, dt=self._dt)
+                    accum_vel[own_mask] = pool.vel[:n][own_mask]
+                else:
+                    group = [agents[i] for i in range(n) if int(pool.policy_idx[i]) == int(pidx)]
+                    vel_dict: dict[int, tuple[float, float]] = {}
+                    for sub_planner, sub_group in _group_by(group, key=lambda a: a.local_planner):
+                        vel_dict.update(sub_planner.compute(sub_group, self._cached_intermediate_goals, dt=self._dt))
+                    for i in range(n):
+                        if not own_mask[i]:
+                            continue
+                        v = vel_dict.get(int(pool.agent_ids[i]), (0.0, 0.0))
+                        accum_vel[i, 0] = v[0]
+                        accum_vel[i, 1] = v[1]
+            pool.vel[:n] = accum_vel
+            pool.has_goal[:n] = saved_has_goal
+            pool.vel[:n][~active_mask] = 0.0
 
         self._run_extra_modules(agents, TickPhase.PLAN)
         self._phase_end("local_plan", t0)
@@ -1127,13 +1199,8 @@ class AgentManager(Node):
     ) -> Feedback.Response:
         for robot in request.robots:
             name = robot.name or "robot"
-            pose = Pose2D(
-                x=robot.pose.x,
-                y=robot.pose.y,
-                theta=robot.pose.theta,
-            )
             radius = robot.radius if robot.radius > 0 else 0.3
-            self._robots[name] = (pose, radius)
+            self._teleport_robot(name, robot.pose.x, robot.pose.y, robot.pose.theta, radius)
 
         response.success = True
         response.spawned_ids = self._accumulated_spawned
@@ -1142,6 +1209,22 @@ class AgentManager(Node):
         self._accumulated_despawned = []
         self._logger.debug(f"feedback: {len(request.robots)} robots, spawned={len(response.spawned_ids)}, despawned={len(response.despawned_ids)}")
         return response
+
+    def _teleport_robot(self, name: str, x: float, y: float, theta: float, radius: float) -> None:
+        aid = self._robot_name_to_id.get(name)
+        if aid is None:
+            self._logger.debug(f"feedback: unknown robot name '{name}', skipping")
+            return
+        idx = self._pool._id_to_idx.get(aid)
+        if idx is None:
+            self._logger.debug(f"feedback: robot '{name}' (id={aid}) not in pool, skipping")
+            return
+        self._pool.pos[idx, 0] = x
+        self._pool.pos[idx, 1] = y
+        self._pool.theta[idx] = theta
+        self._pool.agent_radius[idx] = radius
+        self._pool.vel[idx] = 0.0
+        self._pool.prev_vel[idx] = 0.0
 
     def _world_state_callback(self, msg: AgentStatesMsg):
         self._latest_world_state = msg
@@ -1197,16 +1280,37 @@ class AgentManager(Node):
             waypoints = [Pose2D(x=pt.pose.x, y=pt.pose.y, theta=pt.pose.theta) for pt in agent_msg.waypoints.points]
             radii = [pt.radius for pt in agent_msg.waypoints.points]
 
+            kind = int(getattr(agent_msg, "kind", 0))
+            policy_name = getattr(agent_msg, "policy", "") or ""
+            policy_params = getattr(agent_msg, "policy_params", "") or ""
+            if policy_name:
+                policy_idx = self._resolve_policy_idx(policy_name)
+            else:
+                policy_idx = self._default_policy_idx if kind == 0 else -1
+            if policy_params and 0 <= policy_idx < len(self._policies):
+                planner = self._policies[policy_idx]
+                apply = getattr(planner, "apply_policy_params", None)
+                if callable(apply):
+                    apply(policy_params)
+
             agent = self._build_base_agent(aid, agent_msg, waypoints)
+            agent.state.kind = kind
             agent.movement = WaypointMovement(
                 waypoints=waypoints,
                 radii=radii,
                 mode=WaypointMode(agent_msg.waypoints.mode),
             )
             self._agents[aid] = agent
-            self._pool.add_agent(agent)
+            idx = self._pool.add_agent(agent)
+            self._pool.kind[idx] = kind
+            self._pool.policy_idx[idx] = policy_idx
             self._pool_agent_ids.append(aid)
-            self._compile_behavior_tree(agent)
+
+            if kind == 0:
+                self._compile_behavior_tree(agent)
+            else:
+                self._behavior_trees[aid] = None
+                self._robot_name_to_id[agent.params.name or f"robot_{aid}"] = aid
 
             mv = agent.movement
             if isinstance(mv, WaypointMovement) and mv.waypoints:
@@ -1245,6 +1349,7 @@ class AgentManager(Node):
             self._pool.reset()
             self._high_level_cmds.clear()
             self._behavior_trees.clear()
+            self._robot_name_to_id.clear()
             self._despawn_monitor.clear()
             self._spawn_scheduler.reset_counts()
             self._interaction_manager.interactions.clear()
@@ -1276,6 +1381,7 @@ class AgentManager(Node):
         self._pool.reset()
         self._high_level_cmds.clear()
         self._behavior_trees.clear()
+        self._robot_name_to_id.clear()
         self._despawn_monitor.clear()
         self._spawn_scheduler.reset_counts()
         self._spawn_scheduler.clear_sources()
@@ -1306,15 +1412,60 @@ class AgentManager(Node):
         response: UpdateRobot.Response,
     ) -> UpdateRobot.Response:
         name = request.name or "robot"
-        pose = Pose2D(
-            x=request.pose.x,
-            y=request.pose.y,
-            theta=request.pose.theta,
-        )
         radius = request.radius if request.radius > 0 else 0.3
-        self._robots[name] = (pose, radius)
+        self._teleport_robot(name, request.pose.x, request.pose.y, request.pose.theta, radius)
         response.success = True
-        self._logger.debug(f"update_robot: {name} at ({pose.x:.2f}, {pose.y:.2f}), r={radius:.2f}")
+        self._logger.debug(f"update_robot: {name} at ({request.pose.x:.2f}, {request.pose.y:.2f}), r={radius:.2f}")
+        return response
+
+    def _set_waypoints_callback(
+        self,
+        request: SetWaypoints.Request,
+        response: SetWaypoints.Response,
+    ) -> SetWaypoints.Response:
+        aid = int(request.agent_id) if request.agent_id != 0 else 0
+        if aid == 0:
+            aid = self._robot_name_to_id.get(request.name, 0)
+        agent = self._agents.get(aid) if aid else None
+        if agent is None:
+            response.success = False
+            response.message = f"unknown agent (id={request.agent_id}, name='{request.name}')"
+            return response
+
+        waypoints = [Pose2D(x=pt.pose.x, y=pt.pose.y, theta=pt.pose.theta) for pt in request.waypoints.points]
+        radii = [pt.radius for pt in request.waypoints.points]
+        mode = WaypointMode(request.waypoints.mode)
+
+        mv = agent.movement
+        if isinstance(mv, WaypointMovement):
+            mv.waypoints = waypoints
+            mv.radii = radii
+            mv.mode = mode
+            mv.index = 0
+            mv.forward = True
+        else:
+            mv = WaypointMovement(waypoints=waypoints, radii=radii, mode=mode)
+            agent.movement = mv
+
+        idx = self._pool._id_to_idx.get(aid)
+        if waypoints:
+            self._high_level_cmds[aid] = HighLevelCommand(
+                agent_id=aid,
+                type=CommandType.NAVIGATE,
+                target_pose=mv.waypoints[mv.index],
+                desired_velocity=float(self._pool.desired_vel[idx]) if idx is not None else agent.state.desired_velocity,
+            )
+            if idx is not None:
+                self._pool.goal_pos[idx, 0] = mv.waypoints[mv.index].x
+                self._pool.goal_pos[idx, 1] = mv.waypoints[mv.index].y
+                self._pool.has_goal[idx] = True
+        else:
+            self._high_level_cmds.pop(aid, None)
+            if idx is not None:
+                self._pool.has_goal[idx] = False
+
+        response.success = True
+        response.message = f"set {len(waypoints)} waypoint(s) for agent {aid}"
         return response
 
     @staticmethod

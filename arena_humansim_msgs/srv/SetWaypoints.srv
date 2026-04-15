@@ -1,0 +1,7 @@
+# Replace the waypoint list for an existing agent (human or robot).
+int32 agent_id                           # 0 = resolve by name
+string name                              # optional, used if agent_id == 0
+arena_humansim_msgs/Waypoints waypoints  # new list; empty points clears goals
+---
+bool success
+string message

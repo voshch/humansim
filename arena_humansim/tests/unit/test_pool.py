@@ -5,7 +5,7 @@ from collections.abc import Callable
 import pytest
 
 from arena_humansim.agents.base import BaseAgent
-from arena_humansim.pool import AgentPool
+from arena_humansim.pool import AgentPool, human_mask, is_human
 
 
 def test_add_agent_grows_n(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
@@ -110,3 +110,65 @@ def test_grow_beyond_capacity(pool_empty: Callable[..., AgentPool], agent_factor
     assert pool.capacity >= 5
     assert pool.pos.shape == (pool.capacity, 2)
     assert pool.vel.shape == (pool.capacity, 2)
+
+
+def test_kind_and_policy_columns_default(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
+    pool = pool_empty(capacity=4)
+    idx = pool.add_agent(agent_factory(agent_id=1))
+    assert pool.kind.shape == (4,)
+    assert pool.policy_idx.shape == (4,)
+    assert int(pool.kind[idx]) == 0
+    assert int(pool.policy_idx[idx]) == -1
+
+
+def test_kind_and_policy_set_per_row(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
+    pool = pool_empty(capacity=4)
+    idx0 = pool.add_agent(agent_factory(agent_id=1))
+    idx1 = pool.add_agent(agent_factory(agent_id=2))
+    pool.kind[idx0] = 0
+    pool.policy_idx[idx0] = 0
+    pool.kind[idx1] = 1
+    pool.policy_idx[idx1] = -1
+    assert int(pool.kind[idx1]) == 1
+    assert int(pool.policy_idx[idx1]) == -1
+    assert int(pool.kind[idx0]) == 0
+    assert int(pool.policy_idx[idx0]) == 0
+
+
+def test_swap_remove_preserves_kind_and_policy(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
+    pool = pool_empty(capacity=4)
+    pool.add_agent(agent_factory(agent_id=1))
+    pool.add_agent(agent_factory(agent_id=2))
+    pool.add_agent(agent_factory(agent_id=3))
+    pool.kind[2] = 1
+    pool.policy_idx[2] = 7
+    pool.swap_remove(1)
+    assert int(pool.kind[0]) == 1
+    assert int(pool.policy_idx[0]) == 7
+
+
+def test_human_mask_and_is_human(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
+    pool = pool_empty(capacity=8)
+    pool.add_agent(agent_factory(agent_id=1))
+    pool.add_agent(agent_factory(agent_id=2))
+    pool.add_agent(agent_factory(agent_id=3))
+    pool.kind[1] = 1
+
+    mask = human_mask(pool)
+    assert mask.tolist() == [True, False, True]
+    assert is_human(pool, 0) is True
+    assert is_human(pool, 1) is False
+    assert is_human(pool, 2) is True
+
+
+def test_grow_preserves_kind_and_policy(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
+    pool = pool_empty(capacity=2)
+    pool.add_agent(agent_factory(agent_id=1))
+    pool.kind[0] = 1
+    pool.policy_idx[0] = 3
+    for i in range(5):
+        pool.add_agent(agent_factory(agent_id=i + 10))
+    assert int(pool.kind[0]) == 1
+    assert int(pool.policy_idx[0]) == 3
+    assert pool.kind.shape == (pool.capacity,)
+    assert pool.policy_idx.shape == (pool.capacity,)

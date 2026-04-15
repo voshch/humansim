@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
@@ -22,6 +23,13 @@ _EPS = 1e-6
 _DEFAULT_WALL_REPULSION_STRENGTH = 3.0
 _DEFAULT_WALL_REPULSION_RANGE = 0.1
 
+_KIND_HUMAN = 0
+_KIND_ROBOT = 1
+_N_KINDS = 2
+
+_DEFAULT_ROBOT_STRENGTH_SCALE = 1.5
+_DEFAULT_ROBOT_RANGE_SCALE = 1.3
+
 
 class SFMPlanner(LocalPlanner):
     supports_pool: bool = True
@@ -38,6 +46,39 @@ class SFMPlanner(LocalPlanner):
         self._last_forces: dict[int, tuple[tuple[float, float], tuple[float, float], tuple[float, float]]] = {}
         self._last_force_arrays: tuple | None = None
         self._last_agents: Sequence[BaseAgent] | None = None
+
+        self._gain_strength_scale = np.ones((_N_KINDS, _N_KINDS), dtype=np.float64)
+        self._gain_range_scale = np.ones((_N_KINDS, _N_KINDS), dtype=np.float64)
+        self._gain_strength_scale[_KIND_HUMAN, _KIND_ROBOT] = _DEFAULT_ROBOT_STRENGTH_SCALE
+        self._gain_range_scale[_KIND_HUMAN, _KIND_ROBOT] = _DEFAULT_ROBOT_RANGE_SCALE
+
+    def apply_policy_params(self, params_json: str) -> None:
+        if not params_json:
+            return
+        try:
+            blob = json.loads(params_json)
+        except (ValueError, TypeError):
+            return
+        if not isinstance(blob, dict):
+            return
+        gains = blob.get("kind_gains")
+        if not isinstance(gains, dict):
+            return
+        kind_map = {"human": _KIND_HUMAN, "robot": _KIND_ROBOT}
+        for key, entry in gains.items():
+            if not isinstance(entry, dict) or "_" not in key:
+                continue
+            a, b = key.split("_", 1)
+            i = kind_map.get(a.lower())
+            j = kind_map.get(b.lower())
+            if i is None or j is None:
+                continue
+            s = entry.get("strength_scale")
+            r = entry.get("range_scale")
+            if isinstance(s, (int, float)):
+                self._gain_strength_scale[i, j] = float(s)
+            if isinstance(r, (int, float)):
+                self._gain_range_scale[i, j] = float(r)
 
     def set_walls(self, segments: Segments) -> None:
         self._wall_segments = list(segments)
@@ -93,8 +134,16 @@ class SFMPlanner(LocalPlanner):
             dists = np.maximum(dists, _EPS)
             normals = diff / dists[:, None]
 
+            kind_arr = pool.kind[:n]
+            obs_kind = np.clip(kind_arr[pair_obs].astype(np.int64), 0, _N_KINDS - 1)
+            nbr_kind = np.clip(kind_arr[pair_nbr].astype(np.int64), 0, _N_KINDS - 1)
+            s_scale = self._gain_strength_scale[obs_kind, nbr_kind]
+            r_scale = self._gain_range_scale[obs_kind, nbr_kind]
+
             r_ij = radii[pair_obs] + radii[pair_nbr]
-            magnitudes = rep_str[pair_obs] * np.exp((r_ij - dists) / rep_rng[pair_obs])
+            eff_strength = rep_str[pair_obs] * s_scale
+            eff_range = rep_rng[pair_obs] * r_scale
+            magnitudes = eff_strength * np.exp((r_ij - dists) / eff_range)
 
             lam = aniso[pair_obs]
             cos_phi = np.sum(-normals * e_goal[pair_obs], axis=1)

@@ -11,6 +11,17 @@ if TYPE_CHECKING:
 
 _DEFAULT_CAPACITY = 512
 
+KIND_HUMAN = 0
+KIND_ROBOT = 1
+
+
+def human_mask(pool: AgentPool) -> np.ndarray:
+    return pool.kind[: pool.n] == KIND_HUMAN
+
+
+def is_human(pool: AgentPool, idx: int) -> bool:
+    return int(pool.kind[idx]) == KIND_HUMAN
+
 
 class AgentPool:
     def __init__(self, capacity: int = _DEFAULT_CAPACITY):
@@ -42,6 +53,9 @@ class AgentPool:
 
         self.goal_pos = np.zeros((capacity, 2), dtype=np.float64)
         self.has_goal = np.zeros(capacity, dtype=np.bool_)
+
+        self.kind = np.zeros(capacity, dtype=np.uint8)
+        self.policy_idx = np.full(capacity, -1, dtype=np.int32)
 
         self.neighbor_indptr = np.zeros(1, dtype=np.int32)
         self.neighbor_indices = np.empty(0, dtype=np.int32)
@@ -86,6 +100,8 @@ class AgentPool:
 
         self.has_goal[i] = False
         self.prev_vel[i] = self.vel[i]
+        self.kind[i] = 0
+        self.policy_idx[i] = -1
         return i
 
     def swap_remove(self, agent_id: int) -> int | None:
@@ -111,6 +127,8 @@ class AgentPool:
                 self.vision_range,
                 self.vision_fov,
                 self.has_goal,
+                self.kind,
+                self.policy_idx,
             ):
                 arr[idx] = arr[last]
             for arr in (self.pos, self.vel, self.prev_vel, self.goal_pos):
@@ -183,4 +201,10 @@ class AgentPool:
         self.vision_fov = _resize_1d(self.vision_fov)
         self.goal_pos = _resize_2d(self.goal_pos)
         self.has_goal = _resize_1d(self.has_goal)
+        kind_new = np.zeros(new_cap, dtype=self.kind.dtype)
+        kind_new[:old] = self.kind[:old]
+        self.kind = kind_new
+        pidx_new = np.full(new_cap, -1, dtype=self.policy_idx.dtype)
+        pidx_new[:old] = self.policy_idx[:old]
+        self.policy_idx = pidx_new
         self.capacity = new_cap

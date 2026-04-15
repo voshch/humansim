@@ -8,6 +8,7 @@ from arena_humansim.behavior.nodes import _nav_command
 from arena_humansim.manager.interaction_manager import CommandType
 from arena_humansim.utils import DISTANCE_TOLERANCE
 from arena_humansim.utils.types import (
+    AgentKind,
     AgentState,
     HighLevelCommand,
     InteractionOutcome,
@@ -65,6 +66,8 @@ class QueueNode(py_trees.behaviour.Behaviour):
     def is_spot_occupied(self, pose: Pose2D) -> bool:
         """Helper to check if any observed agent is at a specific queue pose."""
         for oa in self.agent.belief.observed_agents:
+            if oa.kind != AgentKind.HUMAN:
+                continue
             if self.is_at_pose(oa, target=pose):
                 return True
         return False
@@ -99,6 +102,8 @@ class QueueNode(py_trees.behaviour.Behaviour):
         """Check if someone is too close in the direction of the queue."""
         state = self.agent.state
         for oa in self.agent.belief.observed_agents:
+            if oa.kind != AgentKind.HUMAN:
+                continue
             dist = math.hypot(oa.pose.x - state.pose.x, oa.pose.y - state.pose.y)
             if dist < DISTANCE_TOLERANCE:
                 return True
