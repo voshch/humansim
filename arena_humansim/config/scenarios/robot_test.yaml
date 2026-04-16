@@ -1,0 +1,100 @@
+# robot_test.yaml
+# Validates that robots can be defined directly in a scenario with an
+# autonomous policy. Three robots cross a corridor alongside humans:
+#   - robot with the "straight" policy (ignores other agents)
+#   - robot with the "sfm" policy (social-force avoidance)
+#   - robot with no policy (teleport-only; driven externally if desired)
+
+name: robot_test
+description: >-
+  Mixed scenario with humans and autonomous robots. Exercises robot policy
+  dispatch from scenario YAML and provides a visible check that robots appear
+  in recordings and renders.
+
+simulation:
+  seed: 13
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 2000
+  execution_mode: master
+
+modules:
+  perception: default
+  global_planner: dijkstra
+  local_planner: sfm
+  interaction_manager: default
+  animation: kinematic
+
+agents:
+  # --- Westbound humans (counter-flow against eastbound robots) ---
+  - agent_id: 0
+    spawn_pose: {x: 10.0, y: 0.5, theta: 3.14159}
+    goal_sequence: [{x: -10.0, y: 0.5}]
+    desired_velocity: 1.2
+
+  - agent_id: 1
+    spawn_pose: {x: 9.0, y: -0.5, theta: 3.14159}
+    goal_sequence: [{x: -10.0, y: -0.5}]
+    desired_velocity: 1.1
+
+  - agent_id: 2
+    spawn_pose: {x: 11.0, y: 1.8, theta: 3.14159}
+    goal_sequence: [{x: -10.0, y: 1.8}]
+    desired_velocity: 1.25
+
+  - agent_id: 3
+    spawn_pose: {x: 8.0, y: -1.2, theta: 3.14159}
+    goal_sequence: [{x: -10.0, y: -1.2}]
+    desired_velocity: 1.3
+
+  - agent_id: 4
+    spawn_pose: {x: 12.0, y: 0.0, theta: 3.14159}
+    goal_sequence: [{x: -10.0, y: 0.0}]
+    desired_velocity: 1.15
+
+  - agent_id: 5
+    spawn_pose: {x: 7.0, y: 1.0, theta: 3.14159}
+    goal_sequence: [{x: -10.0, y: 1.0}]
+    desired_velocity: 1.2
+
+  - agent_id: 6
+    spawn_pose: {x: 13.0, y: -1.8, theta: 3.14159}
+    goal_sequence: [{x: -10.0, y: -1.8}]
+    desired_velocity: 1.2
+
+  - agent_id: 7
+    spawn_pose: {x: 6.0, y: 0.3, theta: 3.14159}
+    goal_sequence: [{x: -10.0, y: 0.3}]
+    desired_velocity: 1.15
+
+  # --- Autonomous robot: "straight" policy, west to east ---
+  - agent_id: 10
+    kind: 1
+    policy: straight
+    spawn_pose: {x: -10.0, y: 0.0, theta: 0.0}
+    goal_sequence: [{x: 10.0, y: 0.0}]
+    desired_velocity: 1.0
+    agent_radius: 0.3
+
+  # --- Autonomous robot: "sfm" policy, west to east, offset lane ---
+  - agent_id: 11
+    kind: 1
+    policy: sfm
+    spawn_pose: {x: -10.0, y: 1.5, theta: 0.0}
+    goal_sequence: [{x: 10.0, y: 1.5}]
+    desired_velocity: 1.0
+    agent_radius: 0.3
+
+  # --- Robot with no policy: stays put unless driven via UpdateRobot/Feedback ---
+  - agent_id: 12
+    kind: 1
+    policy: ""
+    spawn_pose: {x: 0.0, y: -2.0, theta: 0.0}
+    goal_sequence: [{x: 5.0, y: -2.0}]
+    agent_radius: 0.3
+
+walls:
+  - {name: north, start: {x: -12.0, y:  2.5}, end: {x: 12.0, y:  2.5}}
+  - {name: south, start: {x: -12.0, y: -2.5}, end: {x: 12.0, y: -2.5}}
+
+interaction_scripts: []

@@ -51,6 +51,9 @@ class AgentConfig:
     desired_velocity: float = 1.3
     agent_radius: float = 0.35
     interaction_preferences: dict[str, Any] = attrs.Factory(dict)
+    kind: int = 0  # 0=human, 1=robot (see AgentKind)
+    policy: str = ""  # local planner name for robots; empty = teleport-only
+    policy_params: str = ""  # opaque JSON blob forwarded to the planner
 
 
 @attrs.define

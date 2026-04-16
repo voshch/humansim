@@ -18,7 +18,7 @@ import matplotlib.animation as animation
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.collections import EllipseCollection
+from matplotlib.collections import PolyCollection
 from rclpy.serialization import deserialize_message
 from rosbag2_py import ConverterOptions, SequentialReader, StorageOptions
 from rosidl_runtime_py.utilities import get_message
@@ -43,7 +43,7 @@ def _setup_logging(log_file: Path | None) -> None:
 @dataclass
 class Frame:
     t_ns: int
-    agents: list[tuple[int, float, float, float, float, float, str]]
+    agents: list[tuple[int, float, float, float, float, float, str, int]]
 
 
 @dataclass
@@ -76,7 +76,7 @@ def _read_bag(bag_dir: Path) -> tuple[Geometry, list[Frame]]:
             geometry.obstacles = [((o.pose.x, o.pose.y, o.pose.theta), (o.bb_x_min, o.bb_x_max, o.bb_y_min, o.bb_y_max)) for o in msg.obstacles]
             geometry.world_objects = [(o.object_id, o.type, o.pose.x, o.pose.y) for o in msg.world_objects]
         elif topic.endswith("agent_states"):
-            agents = [(int(a.agent_id), a.pose.x, a.pose.y, a.pose.theta, a.velocity.x, a.velocity.y, getattr(a, "policy", "") or "") for a in msg.agents]
+            agents = [(int(a.agent_id), a.pose.x, a.pose.y, a.pose.theta, a.velocity.x, a.velocity.y, getattr(a, "policy", "") or "", int(getattr(a, "kind", 0))) for a in msg.agents]
             frames.append(Frame(t_ns=t_ns, agents=agents))
 
     return geometry, frames
@@ -89,6 +89,19 @@ def _policy_color(name: str, cache: dict[str, str]) -> str:
     if name not in cache:
         cache[name] = _POLICY_COLORS[len(cache) % len(_POLICY_COLORS)]
     return cache[name]
+
+
+def _teardrop_template(n_arc: int = 48) -> np.ndarray:
+    # Canonical teardrop pointing +x: sharp tip at (1, 0), body is a 3/4 arc of
+    # radius 1/sqrt(2) centered at origin, corresponding to a rounded square
+    # with border-radius: 0 50% 50% 50% (sharp corner aligned with heading).
+    r_body = 1.0 / np.sqrt(2.0)
+    theta = np.linspace(np.pi / 4.0, 7.0 * np.pi / 4.0, n_arc)
+    arc = np.column_stack([r_body * np.cos(theta), r_body * np.sin(theta)])
+    return np.vstack([[1.0, 0.0], arc])
+
+
+_AGENT_TEMPLATE = _teardrop_template()
 
 
 def _compute_bounds(geometry: Geometry, frames: list[Frame]) -> tuple[float, float, float, float]:
@@ -172,25 +185,25 @@ def render(bag_dir: Path, output: Path, fmt: str, fps: int, agent_radius: float 
     policy_cache: dict[str, str] = {}
     rgba_hidden = np.array([0.0, 0.0, 0.0, 0.0])
 
-    offsets = np.zeros((n_ids, 2))
-    widths = np.full(n_ids, 2.0 * agent_radius)
-    heights = np.full(n_ids, 2.0 * agent_radius)
     face_colors = np.tile(rgba_hidden, (n_ids, 1))
+    edge_colors = np.tile([0.0, 0.0, 0.0, 1.0], (n_ids, 1))
+    line_widths = np.full(n_ids, 0.5)
 
-    ellipse_coll = EllipseCollection(
-        widths=widths,
-        heights=heights,
-        angles=np.zeros(n_ids),
-        units="xy",
-        offsets=offsets,
-        offset_transform=ax.transData,
+    scaled_template = _AGENT_TEMPLATE * agent_radius
+    hidden_verts = np.zeros_like(scaled_template)
+
+    agent_polys = PolyCollection(
+        [scaled_template.copy() for _ in range(n_ids)],
         facecolors=face_colors,
-        edgecolors=(0.0, 0.0, 0.0, 1.0),
-        linewidths=0.5,
+        edgecolors=edge_colors,
+        linewidths=line_widths,
         zorder=4,
         animated=True,
     )
-    ax.add_collection(ellipse_coll)
+    ax.add_collection(agent_polys)
+
+    robot_face_rgba = np.array([0.839, 0.153, 0.157, 1.0])  # #d62728
+    robot_edge_rgba = np.array([0.0, 0.0, 0.0, 1.0])
 
     qx = np.zeros(n_ids)
     qy = np.zeros(n_ids)
@@ -216,30 +229,47 @@ def render(bag_dir: Path, output: Path, fmt: str, fps: int, agent_radius: float 
         frame = frames[frame_idx]
 
         face_colors[:] = rgba_hidden
+        edge_colors[:] = [0.0, 0.0, 0.0, 0.0]
         q_colors[:] = rgba_hidden
         qu[:] = 0.0
         qv[:] = 0.0
+        verts_list = [hidden_verts] * n_ids
 
-        for aid, x, y, _, vx, vy, policy in frame.agents:
+        for aid, x, y, theta, vx, vy, policy, kind in frame.agents:
             i = id_to_idx[aid]
-            offsets[i, 0] = x
-            offsets[i, 1] = y
-            col = _rgba(_policy_color(policy, policy_cache))
-            face_colors[i] = col
+            if kind == 1:
+                face_colors[i] = robot_face_rgba
+                edge_colors[i] = robot_edge_rgba
+                line_widths[i] = 2.0
+                q_colors[i] = robot_face_rgba
+            else:
+                col = _rgba(_policy_color(policy, policy_cache))
+                face_colors[i] = col
+                edge_colors[i] = [0.0, 0.0, 0.0, 1.0]
+                line_widths[i] = 0.5
+                q_colors[i] = col
+
+            speed_sq = vx * vx + vy * vy
+            heading = np.arctan2(vy, vx) if speed_sq > 1e-6 else theta
+            c, s = np.cos(heading), np.sin(heading)
+            rot = np.array([[c, -s], [s, c]])
+            verts_list[i] = scaled_template @ rot.T + np.array([x, y])
+
             qx[i] = x
             qy[i] = y
             qu[i] = vx * 0.3
             qv[i] = vy * 0.3
-            q_colors[i] = col
 
-        ellipse_coll.set_offsets(offsets)
-        ellipse_coll.set_facecolor(face_colors)
+        agent_polys.set_verts(verts_list)
+        agent_polys.set_facecolor(face_colors.tolist())
+        agent_polys.set_edgecolor(edge_colors.tolist())
+        agent_polys.set_linewidth(line_widths.tolist())
         quiver.set_offsets(np.column_stack([qx, qy]))
         quiver.set_UVC(qu, qv)
         quiver.set_facecolor(q_colors)
 
         title.set_text(f"t = {frame.t_ns / 1e9:.2f}s   agents = {len(frame.agents)}")
-        return [ellipse_coll, quiver, title]
+        return [agent_polys, quiver, title]
 
     output.parent.mkdir(parents=True, exist_ok=True)
     import shutil
@@ -252,7 +282,7 @@ def render(bag_dir: Path, output: Path, fmt: str, fps: int, agent_radius: float 
 
     _log.info(f"encoding {len(frames)} frames to {output}")
 
-    dynamic = [ellipse_coll, quiver, title]
+    dynamic = [agent_polys, quiver, title]
     if fmt == "mp4":
         _save_via_ffmpeg(fig, update, len(frames), fps, output, dynamic_artists=dynamic)
     elif fmt == "gif" and have_ffmpeg:
@@ -317,6 +347,8 @@ def _save_via_ffmpeg(
             str(fps),
             "-i",
             "-",
+            "-vf",
+            "pad=ceil(iw/2)*2:ceil(ih/2)*2:color=white",
             "-c:v",
             "libx264",
             "-pix_fmt",

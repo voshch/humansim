@@ -111,3 +111,48 @@ def test_minimal_scenario_fixture_valid(minimal_scenario: ScenarioConfig) -> Non
     assert minimal_scenario.simulation.max_ticks == 10
     assert isinstance(minimal_scenario.modules, ModuleConfig)
     assert minimal_scenario.agents == []
+
+
+def test_scenario_agent_kind_and_policy_parse(tmp_path: Path) -> None:
+    path = tmp_path / "scenario.yaml"
+    data = {
+        "name": "robots",
+        "simulation": {"seed": 1, "dt": 0.1, "max_ticks": 1},
+        "modules": {},
+        "agents": [
+            {
+                "agent_id": 0,
+                "spawn_pose": {"x": 0.0, "y": 0.0, "theta": 0.0},
+                "goal_sequence": [{"x": 1.0, "y": 0.0}],
+            },
+            {
+                "agent_id": 1,
+                "kind": 1,
+                "policy": "straight",
+                "policy_params": "{}",
+                "spawn_pose": {"x": 0.0, "y": 1.0, "theta": 0.0},
+                "goal_sequence": [{"x": 2.0, "y": 1.0}],
+            },
+        ],
+    }
+    path.write_text(yaml.safe_dump(data))
+    scn = load_scenario(str(path))
+    human, robot = scn.agents
+    assert human.kind == 0
+    assert human.policy == ""
+    assert robot.kind == 1
+    assert robot.policy == "straight"
+    assert robot.policy_params == "{}"
+
+
+def test_robot_test_scenario_file_valid() -> None:
+    scenario_path = Path(__file__).resolve().parents[2] / "config" / "scenarios" / "robot_test.yaml"
+    scn = load_scenario(str(scenario_path))
+    assert scn.name == "robot_test"
+    robots = [a for a in scn.agents if a.kind == 1]
+    humans = [a for a in scn.agents if a.kind == 0]
+    assert len(humans) >= 1
+    assert len(robots) >= 2
+    policies = {r.policy for r in robots}
+    assert "straight" in policies
+    assert "sfm" in policies

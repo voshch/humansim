@@ -509,6 +509,9 @@ class AgentManager(Node):
             msg.desired_velocity = float(a.desired_velocity)
             msg.radius = float(a.agent_radius)
             msg.agent_type = a.agent_type
+            msg.kind = int(a.kind)
+            msg.policy = a.policy
+            msg.policy_params = a.policy_params
             from arena_humansim_msgs.msg import Waypoint as WaypointMsg
             from arena_humansim_msgs.msg import Waypoints as WaypointsMsg
 
@@ -1357,6 +1360,9 @@ class AgentManager(Node):
             a.velocity.z = 0.0
             a.desired_velocity = float(pool.desired_vel[i])
             a.radius = float(pool.agent_radius[i])
+            a.kind = int(pool.kind[i])
+            pidx = int(pool.policy_idx[i])
+            a.policy = self._policy_names[pidx] if 0 <= pidx < len(self._policy_names) else ""
         return msg
 
     def _spawn_agents_callback(
