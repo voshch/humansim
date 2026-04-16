@@ -135,7 +135,7 @@ ros2 run arena_humansim benchmark
 
 | Parameter | Default | Description |
 |---|---|---|
-| `mode` | `master` | `master` / `subsystem` / `benchmark` |
+| `mode` | `master` | `master` / `subsystem` |
 | `seed` | `0` | RNG seed for deterministic runs |
 | `dt` | `0.05` | Simulation timestep (s) |
 | `bt_tick_interval` | `5` | BT ticks every N sim ticks |

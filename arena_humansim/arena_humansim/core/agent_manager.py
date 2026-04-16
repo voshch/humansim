@@ -131,7 +131,6 @@ def _group_by[K: Hashable](agents: Iterable[BaseAgent], key: Callable[[BaseAgent
 class AgentManager(Node):
     MODE_MASTER = "master"
     MODE_SUBSYSTEM = "subsystem"
-    MODE_BENCHMARK = "benchmark"
 
     def __init__(self):
         super().__init__("arena_humansim")
@@ -367,10 +366,8 @@ class AgentManager(Node):
             self._setup_master_mode()
         elif self._mode == self.MODE_SUBSYSTEM:
             self._setup_subsystem_mode()
-        elif self._mode == self.MODE_BENCHMARK:
-            self._setup_benchmark_mode()
         else:
-            raise ValueError(f"Unknown mode '{self._mode}'. Use '{self.MODE_MASTER}', '{self.MODE_SUBSYSTEM}', or '{self.MODE_BENCHMARK}'.")
+            raise ValueError(f"Unknown mode '{self._mode}'. Use '{self.MODE_MASTER}' or '{self.MODE_SUBSYSTEM}'.")
 
         self._sim_logger = None
         if log_dir:
@@ -1289,26 +1286,6 @@ class AgentManager(Node):
         self._accumulated_spawned.extend(self._last_spawned_ids)
         self._accumulated_despawned.extend(self._last_despawned_ids)
 
-    def _setup_benchmark_mode(self):
-        clock_qos = QoSProfile(
-            depth=10,
-            durability=DurabilityPolicy.TRANSIENT_LOCAL,
-        )
-        self._clock_pub = self.create_publisher(Clock, "/clock", clock_qos)
-        self._timer = self.create_timer(0.0, self._benchmark_timer_callback, clock=RclClock(clock_type=ClockType.STEADY_TIME))
-
-    def _benchmark_timer_callback(self):
-        if self._tick_count == 0:
-            self._tick_wall_start = time.perf_counter()
-        t0 = time.perf_counter()
-        self.tick()
-        self._total_tick_compute_s += time.perf_counter() - t0
-        self._sim_time_ns += int(self._dt * 1e9)
-        clock_msg = Clock()
-        clock_msg.clock.sec = int(self._sim_time_ns // int(1e9))
-        clock_msg.clock.nanosec = int(self._sim_time_ns % int(1e9))
-        self._clock_pub.publish(clock_msg)
-
     def _feedback_callback(
         self,
         request: Feedback.Request,
@@ -1865,7 +1842,7 @@ class AgentManager(Node):
         super().destroy_node()
 
     def _log_final_rtf(self):
-        if self._mode not in (self.MODE_MASTER, self.MODE_BENCHMARK):
+        if self._mode != self.MODE_MASTER:
             return
         if self._tick_wall_start is None or self._tick_count == 0:
             return

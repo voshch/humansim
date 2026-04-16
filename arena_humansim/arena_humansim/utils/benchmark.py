@@ -352,7 +352,8 @@ def _merge_params_file(params_file: str, extra_params: dict[str, Any], dt: float
         data = yaml.safe_load(f) or {}
     node_key = next(iter(data), "arena_humansim")
     ros_params = data.setdefault(node_key, {}).setdefault("ros__parameters", {})
-    ros_params["mode"] = "benchmark"
+    ros_params["mode"] = "master"
+    ros_params["rtf"] = 0.0
     ros_params["publish_markers"] = 0
     ros_params["dt"] = dt
     ros_params["profile_phases"] = True
@@ -383,7 +384,7 @@ def launch_humansim(
         merged = _merge_params_file(params_file, extra_params, dt)
         cmd.extend(["--params-file", merged])
     else:
-        cmd.extend(["-p", "mode:=benchmark", "-p", "publish_markers:=0", "-p", f"dt:={dt}", "-p", "profile_phases:=true"])
+        cmd.extend(["-p", "mode:=master", "-p", "rtf:=0.0", "-p", "publish_markers:=0", "-p", f"dt:={dt}", "-p", "profile_phases:=true"])
         for k, v in extra_params.items():
             cmd.extend(["-p", f"{k}:={v}"])
     proc = subprocess.Popen(
