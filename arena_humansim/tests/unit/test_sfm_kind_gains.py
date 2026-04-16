@@ -4,10 +4,10 @@ from collections.abc import Callable
 
 import numpy as np
 
-from arena_humansim.agents.base import BaseAgent
+from arena_humansim.core.agents.base import BaseAgent
 from arena_humansim.local_planner import LocalPlanner
 from arena_humansim.local_planner.sfm import SFMPlanner
-from arena_humansim.pool import AgentPool
+from arena_humansim.core.pool import AgentPool
 from arena_humansim.utils.types import Pose2D
 
 

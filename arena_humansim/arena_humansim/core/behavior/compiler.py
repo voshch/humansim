@@ -4,9 +4,9 @@ import numpy as np
 import py_trees
 from rclpy.logging import get_logger
 
-from arena_humansim.agents import AgentType, BaseAgent
-from arena_humansim.agents.types import ActionDef, StepDef
-from arena_humansim.manager.world_knowledge import WorldKnowledge
+from arena_humansim.core.agents import AgentType, BaseAgent
+from arena_humansim.core.agents.types import ActionDef, StepDef
+from arena_humansim.core.world_knowledge import WorldKnowledge
 from arena_humansim.utils.event_bus import EventBus
 
 _logger = get_logger("behavior_compiler")

@@ -8,9 +8,9 @@ from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
 
 if TYPE_CHECKING:
-    from arena_humansim.agents import BaseAgent
+    from arena_humansim.core.agents import BaseAgent
+    from arena_humansim.core.viz import MarkerPublisher
     from arena_humansim.utils.types import AgentState, BeliefState, WorldState
-    from arena_humansim.viz import MarkerPublisher
 
 _registry: ModuleRegistry[Perception] = ModuleRegistry()
 

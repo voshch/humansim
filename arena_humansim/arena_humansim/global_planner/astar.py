@@ -9,7 +9,7 @@ import numpy as np
 import pyastar2d
 from scipy.ndimage import binary_dilation
 
-from arena_humansim.agents import BaseAgent
+from arena_humansim.core.agents import BaseAgent
 from arena_humansim.utils.types import HighLevelCommand, Pose2D, Segment, Segments
 
 from . import GlobalPlanner

@@ -8,8 +8,8 @@ from scipy.spatial import cKDTree
 from . import Perception
 
 if TYPE_CHECKING:
-    from arena_humansim.agents import BaseAgent
-    from arena_humansim.pool import AgentPool
+    from arena_humansim.core.agents import BaseAgent
+    from arena_humansim.core.pool import AgentPool
     from arena_humansim.utils.types import AgentState, BeliefState, WorldState
 
 

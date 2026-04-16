@@ -4,7 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from arena_humansim.manager.agent_manager import AgentManager
+from arena_humansim.core.agent_manager import AgentManager
 from arena_humansim.utils.scenario import load_scenario
 
 pytestmark = pytest.mark.slow

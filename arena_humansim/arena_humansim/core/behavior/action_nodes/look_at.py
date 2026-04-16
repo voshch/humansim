@@ -2,9 +2,9 @@ import numpy as np
 import py_trees
 from pydantic import BaseModel, Field
 
-from arena_humansim.agents import BaseAgent
-from arena_humansim.behavior.nodes import _nav_command
-from arena_humansim.manager.interaction_manager import CommandType
+from arena_humansim.core.agents import BaseAgent
+from arena_humansim.core.behavior.nodes import _nav_command
+from arena_humansim.core.interaction_manager import CommandType
 from arena_humansim.utils.const import ANGLE_TOLERANCE
 from arena_humansim.utils.types import HighLevelCommand, InteractionOutcome, Pose2D
 

@@ -6,8 +6,8 @@ import pytest
 
 pytest.importorskip("rclpy")
 
-from arena_humansim.agents.base import BaseAgent
-from arena_humansim.manager.despawn_monitor import DespawnMonitor
+from arena_humansim.core.agents.base import BaseAgent
+from arena_humansim.core.despawn_monitor import DespawnMonitor
 from arena_humansim.utils.types import (
     AgentLifetime,
     Pose2D,

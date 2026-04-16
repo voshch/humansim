@@ -5,9 +5,9 @@ from collections.abc import Callable
 
 import pytest
 
-from arena_humansim.agents.base import BaseAgent
+from arena_humansim.core.agents.base import BaseAgent
 from arena_humansim.animation import MotionAnimation, _registry
-from arena_humansim.pool import AgentPool
+from arena_humansim.core.pool import AgentPool
 from arena_humansim.utils.types import Pose2D
 
 from ._util import registry_ids

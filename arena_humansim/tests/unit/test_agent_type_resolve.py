@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from arena_humansim.agents import resolve_agent_type
-from arena_humansim.agents.types import AgentType, LocalPlannerDist, ParamDist, PerceptionDist
+from arena_humansim.core.agents import resolve_agent_type
+from arena_humansim.core.agents.types import AgentType, LocalPlannerDist, ParamDist, PerceptionDist
 
 
 def test_resolve_no_extends_returns_same_object() -> None:

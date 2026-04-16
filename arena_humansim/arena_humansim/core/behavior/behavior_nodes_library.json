@@ -54,7 +54,7 @@
         "description": "The local agent instance controlled by this specific behavior tree node."
       },
       "participant_agents": {
-        "type": "List[arena_humansim.agents.base.BaseAgent]",
+        "type": "List[arena_humansim.core.agents.base.BaseAgent]",
         "description": "The full roster of agents participating in the talk. The first agent in this list is designated as the 'initiator' or 'leader' for synchronization purposes."
       },
       "group_center": {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from arena_humansim.manager.agent_manager import AgentManager
+from arena_humansim.core.agent_manager import AgentManager
 from arena_humansim.utils.scenario import ScenarioConfig
 from rclpy.node import Node
 from rclpy.parameter import Parameter

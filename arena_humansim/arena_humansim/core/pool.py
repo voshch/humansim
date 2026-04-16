@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from arena_humansim.agents import BaseAgent
+    from arena_humansim.core.agents import BaseAgent
     from arena_humansim.utils.types import Pose2D
 
 _DEFAULT_CAPACITY = 512

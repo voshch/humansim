@@ -1,8 +1,8 @@
 import py_trees
 from pydantic import BaseModel, ConfigDict, Field
 
-from arena_humansim.agents import BaseAgent
-from arena_humansim.manager.interaction_manager import CommandType
+from arena_humansim.core.agents import BaseAgent
+from arena_humansim.core.interaction_manager import CommandType
 from arena_humansim.utils.types import HighLevelCommand, InteractionOutcome, InteractionType
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from arena_humansim.manager.agent_manager import AgentManager
+from arena_humansim.core.agent_manager import AgentManager
 from arena_humansim.utils.scenario import ScenarioConfig
 from arena_humansim.utils.types import AgentLifetime
 from arena_humansim_msgs.msg import AgentState as AgentStateMsg

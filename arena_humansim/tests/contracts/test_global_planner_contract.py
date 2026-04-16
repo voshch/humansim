@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("arena_humansim_msgs.msg")
 
-from arena_humansim.agents.base import BaseAgent
+from arena_humansim.core.agents.base import BaseAgent
 from arena_humansim.global_planner import GlobalPlanner, _registry
 from arena_humansim.utils.types import Pose2D, Segments
 

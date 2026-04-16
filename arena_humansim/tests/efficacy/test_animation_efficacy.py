@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import pytest
 
-from arena_humansim.agents.base import BaseAgent
+from arena_humansim.core.agents.base import BaseAgent
 from arena_humansim.animation import MotionAnimation, _registry
 
 from tests.contracts._util import registry_ids

@@ -7,8 +7,8 @@ import pytest
 
 py_trees = pytest.importorskip("py_trees")
 
-from arena_humansim.agents import BaseAgent
-from arena_humansim.agents.types import (
+from arena_humansim.core.agents import BaseAgent
+from arena_humansim.core.agents.types import (
     AgentType,
     NeedCondition,
     NeedDist,
@@ -17,14 +17,14 @@ from arena_humansim.agents.types import (
     StepDef,
     TransitionDef,
 )
-from arena_humansim.behavior.compiler import compile_agent_behavior
-from arena_humansim.behavior.nodes import (
+from arena_humansim.core.behavior.compiler import compile_agent_behavior
+from arena_humansim.core.behavior.nodes import (
     AutonomousNode,
     ConcreteStepNode,
     NeedsDecayNode,
     SequenceStateMachine,
 )
-from arena_humansim.manager.world_knowledge import WorldKnowledge
+from arena_humansim.core.world_knowledge import WorldKnowledge
 from arena_humansim.utils.event_bus import EventBus
 from arena_humansim.utils.types import NeedsState, NeedState
 

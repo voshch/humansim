@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("rclpy")
 
-from arena_humansim.manager.world_knowledge import WorldKnowledge, WorldObject
+from arena_humansim.core.world_knowledge import WorldKnowledge, WorldObject
 from arena_humansim.utils.types import Pose2D
 
 

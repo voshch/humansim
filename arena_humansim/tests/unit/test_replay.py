@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("rclpy")
 
-from arena_humansim.manager.replay import ReplayManager, _compare_agent_states
+from arena_humansim.core.replay import ReplayManager, _compare_agent_states
 from arena_humansim.utils.types import AgentState, Pose2D
 
 

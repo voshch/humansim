@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from arena_humansim.collision import CollisionResolver
-from arena_humansim.pool import AgentPool
+from arena_humansim.core.pool import AgentPool
 from arena_humansim.utils.types import Segments
 
 

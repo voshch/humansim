@@ -7,8 +7,8 @@ import pytest
 pytest.importorskip("arena_humansim_msgs")
 pytest.importorskip("rclpy")
 
-from arena_humansim.agents.base import BaseAgent
-from arena_humansim.manager.agent_manager import _MSG_BLOCK, _AgentStateMsgPool, _group_by
+from arena_humansim.core.agents.base import BaseAgent
+from arena_humansim.core.agent_manager import _MSG_BLOCK, _AgentStateMsgPool, _group_by
 
 
 class _Tagged:

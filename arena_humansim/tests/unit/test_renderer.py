@@ -8,7 +8,7 @@ pytest.importorskip("matplotlib")
 rosbag2_py = pytest.importorskip("rosbag2_py")
 pytest.importorskip("rclpy")
 
-from arena_humansim.viz.renderer import main as render_main
+from arena_humansim.utils.renderer import main as render_main
 from arena_humansim_msgs.msg import AgentState as AgentStateMsg
 from arena_humansim_msgs.msg import AgentStates as AgentStatesMsg
 from arena_humansim_msgs.msg import WorldGeometry as WorldGeometryMsg

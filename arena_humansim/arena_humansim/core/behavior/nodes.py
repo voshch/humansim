@@ -4,7 +4,7 @@ import numpy as np
 import py_trees
 from rclpy.logging import get_logger
 
-from arena_humansim.agents import (
+from arena_humansim.core.agents import (
     ActionDef,
     BaseAgent,
     NeedCondition,
@@ -12,8 +12,8 @@ from arena_humansim.agents import (
     SequenceDef,
     StepDef,
 )
-from arena_humansim.manager.interaction_manager import CommandType
-from arena_humansim.manager.world_knowledge import WorldKnowledge
+from arena_humansim.core.interaction_manager import CommandType
+from arena_humansim.core.world_knowledge import WorldKnowledge
 from arena_humansim.utils import DISTANCE_TOLERANCE, DT
 from arena_humansim.utils.event_bus import EventBus
 from arena_humansim.utils.types import (

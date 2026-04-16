@@ -5,14 +5,14 @@ from typing import TYPE_CHECKING
 
 import attrs
 
-from arena_humansim.agents import SampledParams
-from arena_humansim.agents.types import SampledLocalPlanner, SampledPerception
+from arena_humansim.core.agents import SampledParams
+from arena_humansim.core.agents.types import SampledLocalPlanner, SampledPerception
 from arena_humansim.utils.loggable import Loggable
 from arena_humansim.utils.types import AgentState, HighLevelCommand, Pose2D
 
 if TYPE_CHECKING:
-    from arena_humansim.manager.agent_manager import AgentManager
-    from arena_humansim.manager.logger import SimulationLogger
+    from arena_humansim.core.agent_manager import AgentManager
+    from arena_humansim.core.logger import SimulationLogger
 
 
 @attrs.frozen

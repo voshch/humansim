@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from arena_humansim.manager.agent_manager import AgentManager
-from arena_humansim.manager.logger import SimulationLogger
-from arena_humansim.manager.replay import ReplayManager
+from arena_humansim.core.agent_manager import AgentManager
+from arena_humansim.core.logger import SimulationLogger
+from arena_humansim.core.replay import ReplayManager
 from arena_humansim.utils.scenario import ScenarioConfig
 from arena_humansim_msgs.msg import AgentState as AgentStateMsg
 from arena_humansim_msgs.msg import Waypoint as WaypointMsg

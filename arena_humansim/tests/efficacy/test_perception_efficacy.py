@@ -4,8 +4,8 @@ from typing import Any, cast
 
 import pytest
 
-from arena_humansim.agents.base import BaseAgent
-from arena_humansim.agents.types import SampledLocalPlanner, SampledParams, SampledPerception
+from arena_humansim.core.agents.base import BaseAgent
+from arena_humansim.core.agents.types import SampledLocalPlanner, SampledParams, SampledPerception
 from arena_humansim.perception import Perception, _registry
 from arena_humansim.utils.types import AgentState, BeliefState, Pose2D, WorldState
 

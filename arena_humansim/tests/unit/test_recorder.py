@@ -7,7 +7,7 @@ import pytest
 rclpy = pytest.importorskip("rclpy")
 rosbag2_py = pytest.importorskip("rosbag2_py")
 
-from arena_humansim.recorder import BagRecorder, default_record_dir
+from arena_humansim.core.recorder import BagRecorder, default_record_dir
 from arena_humansim_msgs.msg import AgentStates as AgentStatesMsg
 from arena_humansim_msgs.msg import WorldGeometry as WorldGeometryMsg
 from rclpy.node import Node

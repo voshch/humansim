@@ -4,8 +4,8 @@ from collections.abc import Callable
 
 import pytest
 
-from arena_humansim.agents.base import BaseAgent
-from arena_humansim.pool import AgentPool, human_mask, is_human
+from arena_humansim.core.agents.base import BaseAgent
+from arena_humansim.core.pool import AgentPool, human_mask, is_human
 
 
 def test_add_agent_grows_n(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:

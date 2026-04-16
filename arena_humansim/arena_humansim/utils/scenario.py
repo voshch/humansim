@@ -9,7 +9,7 @@ from typing import Any, cast
 import attrs
 import yaml
 
-from ..agents import AgentType, VarDef
+from ..core.agents import AgentType, VarDef
 from .types import converter
 
 
@@ -398,7 +398,7 @@ def _structure_manual(
     var_overrides: dict[str, int | float | bool | str] | None = None,
     scenario_dir: Path | None = None,
 ) -> ScenarioConfig:
-    from arena_humansim.agents.loader import _load_default_agent_types_raw, _structure_raw, load_agent_types_raw_from_dir
+    from arena_humansim.core.agents.loader import _load_default_agent_types_raw, _structure_raw, load_agent_types_raw_from_dir
 
     defaults_raw = _load_default_agent_types_raw()
     scenario_local_raw = load_agent_types_raw_from_dir(scenario_dir) if scenario_dir is not None else {}

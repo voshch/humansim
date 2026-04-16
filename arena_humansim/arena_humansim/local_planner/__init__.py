@@ -4,13 +4,13 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
-from arena_humansim.agents import BaseAgent
+from arena_humansim.core.agents import BaseAgent
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
 from arena_humansim.utils.types import Pose2D, WallAware
 
 if TYPE_CHECKING:
-    from arena_humansim.viz import MarkerPublisher
+    from arena_humansim.core.viz import MarkerPublisher
 
 _registry: ModuleRegistry[LocalPlanner] = ModuleRegistry()
 

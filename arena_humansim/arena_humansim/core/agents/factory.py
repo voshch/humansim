@@ -7,25 +7,27 @@ __all__ = [
 
 import numpy as np
 
-from arena_humansim.animation import MotionAnimation
-from arena_humansim.global_planner import GlobalPlanner
-from arena_humansim.local_planner import LocalPlanner
 from arena_humansim.utils.types import AgentState, NeedsState, NeedState
 
 from .base import BaseAgent, Module
 from .types import AgentType, SampledParams, sample_agent_type
 
-_FALLBACK_BASES: dict[str, type] = {
-    "global_planner": GlobalPlanner,
-    "local_planner": LocalPlanner,
-    "animation": MotionAnimation,
-}
+
+def _fallback_bases() -> dict[str, type]:
+    from arena_humansim.animation import MotionAnimation
+    from arena_humansim.global_planner import GlobalPlanner
+    from arena_humansim.local_planner import LocalPlanner
+    return {
+        "global_planner": GlobalPlanner,
+        "local_planner": LocalPlanner,
+        "animation": MotionAnimation,
+    }
 
 
 def _pool_lookup(module_pool: dict[str, Module], name: str | None, category: str) -> Module:
     if name is not None and name in module_pool:
         return module_pool[name]
-    base = _FALLBACK_BASES.get(category)
+    base = _fallback_bases().get(category)
     if base is not None:
         for v in module_pool.values():
             if isinstance(v, base):

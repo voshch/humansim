@@ -3,8 +3,8 @@ import math
 import py_trees
 from pydantic import BaseModel, Field
 
-from arena_humansim.agents import BaseAgent
-from arena_humansim.behavior.nodes import _nav_command
+from arena_humansim.core.agents import BaseAgent
+from arena_humansim.core.behavior.nodes import _nav_command
 from arena_humansim.utils import DISTANCE_TOLERANCE
 from arena_humansim.utils.types import Pose2D
 

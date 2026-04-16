@@ -3,8 +3,8 @@ from __future__ import annotations
 import inspect
 from collections.abc import Iterable
 
-from arena_humansim.agents.base import BaseAgent, Module, TickPhase, VectorizedModule
-from arena_humansim.pool import AgentPool
+from arena_humansim.core.agents.base import BaseAgent, Module, TickPhase, VectorizedModule
+from arena_humansim.core.pool import AgentPool
 
 
 class _DummyModule:

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from arena_humansim.collision import CollisionResolver, _registry
-from arena_humansim.pool import AgentPool
+from arena_humansim.core.pool import AgentPool
 from arena_humansim.utils.types import WallAware
 
 from tests.contracts._util import registry_ids

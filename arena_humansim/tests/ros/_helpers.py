@@ -115,7 +115,7 @@ class RosTestSystem:
 
 
 def make_system(client_node_name: str = "ros_test_client") -> RosTestSystem:
-    from arena_humansim.manager.agent_manager import AgentManager
+    from arena_humansim.core.agent_manager import AgentManager
 
     manager = AgentManager()
     if manager._timer is not None:

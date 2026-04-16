@@ -10,7 +10,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from arena_humansim.collision import CollisionResolver, _registry
-from arena_humansim.pool import AgentPool
+from arena_humansim.core.pool import AgentPool
 
 _IMPL_IDS = sorted(_registry._registry.keys())
 

@@ -3,13 +3,13 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
-from arena_humansim.agents import BaseAgent
+from arena_humansim.core.agents import BaseAgent
 from arena_humansim.utils.types import InteractionState, Pose2D
 
 from . import MotionAnimation
 
 if TYPE_CHECKING:
-    from arena_humansim.pool import AgentPool
+    from arena_humansim.core.pool import AgentPool
 
 
 class KinematicAnimation(MotionAnimation):

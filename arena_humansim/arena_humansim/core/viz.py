@@ -14,11 +14,11 @@ from visualization_msgs.msg import Marker, MarkerArray
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from arena_humansim.agents import BaseAgent
+    from arena_humansim.core.agent_manager import ObstacleData
+    from arena_humansim.core.agents import BaseAgent
+    from arena_humansim.core.world_knowledge import WorldObject
     from arena_humansim.global_planner import GlobalPlanner
     from arena_humansim.local_planner import LocalPlanner
-    from arena_humansim.manager.agent_manager import ObstacleData
-    from arena_humansim.manager.world_knowledge import WorldObject
     from arena_humansim.perception import Perception
     from arena_humansim.utils.types import HighLevelCommand, InteractionState, Pose2D, Shape, SinkConfig, SourceConfig
 

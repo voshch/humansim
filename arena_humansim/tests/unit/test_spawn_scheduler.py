@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("rclpy")
 
-from arena_humansim.manager.spawn_scheduler import SpawnScheduler
+from arena_humansim.core.spawn_scheduler import SpawnScheduler
 from arena_humansim.utils.types import (
     AgentTemplate,
     Pose2D,

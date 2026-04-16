@@ -8,7 +8,7 @@ from scipy.ndimage import binary_dilation
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 
-from arena_humansim.agents import BaseAgent
+from arena_humansim.core.agents import BaseAgent
 from arena_humansim.utils.types import HighLevelCommand, Pose2D, Segment, Segments
 
 from . import GlobalPlanner

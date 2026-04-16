@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 
 import pytest
-from arena_humansim.manager.agent_manager import AgentManager
+from arena_humansim.core.agent_manager import AgentManager
 from arena_humansim.utils.scenario import ScenarioConfig
 
 from ._helpers import build_manager

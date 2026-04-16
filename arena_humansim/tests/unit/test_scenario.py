@@ -48,7 +48,7 @@ def test_load_empty_yaml_yields_defaults(tmp_path: Path) -> None:
 
 
 def test_missing_required_field_in_structuring_raises() -> None:
-    from arena_humansim.agents.types import AgentType
+    from arena_humansim.core.agents.types import AgentType
     with pytest.raises(Exception):
         converter.structure({}, AgentType)
 

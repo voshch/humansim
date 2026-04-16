@@ -13,10 +13,10 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from arena_humansim.animation import MotionAnimation
+    from arena_humansim.core.pool import AgentPool
     from arena_humansim.global_planner import GlobalPlanner
     from arena_humansim.local_planner import LocalPlanner
     from arena_humansim.perception import Perception
-    from arena_humansim.pool import AgentPool
 
 import attrs
 

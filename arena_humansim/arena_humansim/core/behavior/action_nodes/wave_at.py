@@ -1,23 +1,23 @@
 import py_trees
 from pydantic import BaseModel, Field
 
-from arena_humansim.agents import BaseAgent
-from arena_humansim.manager.interaction_manager import CommandType
-from arena_humansim.utils.types import AgentKind, HighLevelCommand, InteractionOutcome, InteractionType
+from arena_humansim.core.agents import BaseAgent
+from arena_humansim.core.interaction_manager import CommandType
+from arena_humansim.utils.types import HighLevelCommand, InteractionOutcome, InteractionType
 
 
-class TalkToNodeSchema(BaseModel):
+class WaveAtNodeSchema(BaseModel):
     """
-    Command agent to talk to a target agent in a duration (second)
+    Command agent to wave at a target agent in a duration (second)
     """
 
-    agent: BaseAgent = Field(description="The agent will talk")
-    target_agent: BaseAgent = Field(description="The agent will listen")
-    duration: float = Field(description="The duration of time of the talk")
+    agent: BaseAgent = Field(description="The agent will wave")
+    target_agent: BaseAgent = Field(description="The agent will be wave at")
+    duration: float = Field(description="The duration of time of the waving")
 
 
-class TalkToNode(py_trees.behaviour.Behaviour):
-    def __init__(self, name: str, config: TalkToNodeSchema):
+class WaveAtNode(py_trees.behaviour.Behaviour):
+    def __init__(self, name: str, config: WaveAtNodeSchema):
         super().__init__(name)
         self.agent = config.agent
         self.target_agent = config.target_agent
@@ -27,19 +27,15 @@ class TalkToNode(py_trees.behaviour.Behaviour):
         """
         Emit HighLevelCommand only once, when node first starts to tick for InteractionManager to manage elapsed time via `InteractionContract.elapsed`
         """
-        if self.target_agent.state.kind != AgentKind.HUMAN:
-            return
         self.agent.movement.command = HighLevelCommand(
             agent_id=self.agent.state.agent_id,
             type=CommandType.ADVERTISE,
             target_agent=self.target_agent.state.agent_id,
-            interaction_type=InteractionType.TALK_TO,
+            interaction_type=InteractionType.WAVE_AT,
             interaction_duration=self.duration,
         )
 
     def update(self) -> py_trees.common.Status:
-        if self.target_agent.state.kind != AgentKind.HUMAN:
-            return py_trees.common.Status.FAILURE
         outcome = self.agent.movement.last_outcome
         if outcome in [InteractionOutcome.ACTIVE, InteractionOutcome.FORMING]:
             return py_trees.common.Status.RUNNING

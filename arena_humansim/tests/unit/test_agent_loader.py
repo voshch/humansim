@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from arena_humansim.agents import loader
-from arena_humansim.agents.types import AgentType
+from arena_humansim.core.agents import loader
+from arena_humansim.core.agents.types import AgentType
 
 
 def test_get_share_agent_types_dir_fallback_or_missing(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -5,7 +5,7 @@ from pathlib import Path
 import attrs
 import yaml
 
-from arena_humansim.agents import SampledParams
+from arena_humansim.core.agents import SampledParams
 from arena_humansim.utils.scenario import ScenarioConfig
 from arena_humansim.utils.types import AgentState, HighLevelCommand, InteractionState
 

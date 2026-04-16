@@ -9,8 +9,8 @@ import pytest
 pytest.importorskip("rclpy")
 py_trees = pytest.importorskip("py_trees")
 
-from arena_humansim.agents.base import BaseAgent
-from arena_humansim.agents.types import (
+from arena_humansim.core.agents.base import BaseAgent
+from arena_humansim.core.agents.types import (
     ActionDef,
     NeedCondition,
     ParamDist,
@@ -18,7 +18,7 @@ from arena_humansim.agents.types import (
     StepDef,
     TransitionDef,
 )
-from arena_humansim.behavior.nodes import (
+from arena_humansim.core.behavior.nodes import (
     AutonomousNode,
     ConcreteStepNode,
     NeedsDecayNode,
@@ -31,8 +31,8 @@ from arena_humansim.behavior.nodes import (
     preconditions_met,
     score_actions,
 )
-from arena_humansim.manager.interaction_manager import CommandType
-from arena_humansim.manager.world_knowledge import WorldKnowledge, WorldObject
+from arena_humansim.core.interaction_manager import CommandType
+from arena_humansim.core.world_knowledge import WorldKnowledge, WorldObject
 from arena_humansim.utils.event_bus import EventBus
 from arena_humansim.utils.types import (
     BehaviorTreeMovement,
@@ -595,7 +595,7 @@ def test_state_machine_terminate_forwards_to_current(agent_factory: Callable[...
 
 
 def test_pool_kind_filter_excludes_robots(agent_factory: Callable[..., BaseAgent]) -> None:
-    from arena_humansim.pool import AgentPool, human_mask, is_human
+    from arena_humansim.core.pool import AgentPool, human_mask, is_human
 
     pool = AgentPool(capacity=4)
     pool.add_agent(agent_factory(agent_id=1, x=0.0, y=0.0))

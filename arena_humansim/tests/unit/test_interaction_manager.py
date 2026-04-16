@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("rclpy")
 
-from arena_humansim.manager.interaction_manager import CommandType, InteractionManager
+from arena_humansim.core.interaction_manager import CommandType, InteractionManager
 from arena_humansim.utils.rng import RNG
 from arena_humansim.utils.types import (
     HighLevelCommand,

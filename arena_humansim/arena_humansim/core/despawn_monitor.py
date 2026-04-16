@@ -1,7 +1,7 @@
 import math
 from collections.abc import Callable, Sequence
 
-from arena_humansim.agents import BaseAgent
+from arena_humansim.core.agents import BaseAgent
 from arena_humansim.utils.loggable import Loggable
 from arena_humansim.utils.types import AgentLifetime, AgentState, DespawnRequest, Pose2D, ShapeType, SinkConfig
 

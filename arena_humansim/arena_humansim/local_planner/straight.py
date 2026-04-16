@@ -5,13 +5,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from arena_humansim.agents import BaseAgent
+from arena_humansim.core.agents import BaseAgent
 from arena_humansim.utils.types import Pose2D
 
 from . import LocalPlanner
 
 if TYPE_CHECKING:
-    from arena_humansim.pool import AgentPool
+    from arena_humansim.core.pool import AgentPool
 
 _EPS = 1e-6
 _ARRIVAL_EPS = 1e-3

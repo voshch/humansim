@@ -4,13 +4,13 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
-from arena_humansim.agents import BaseAgent
+from arena_humansim.core.agents import BaseAgent
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
 from arena_humansim.utils.types import InteractionState, Pose2D
 
 if TYPE_CHECKING:
-    from arena_humansim.pool import AgentPool
+    from arena_humansim.core.pool import AgentPool
 
 _registry: ModuleRegistry[MotionAnimation] = ModuleRegistry()
 

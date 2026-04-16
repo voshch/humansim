@@ -7,8 +7,8 @@ from collections.abc import Callable
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from arena_humansim.agents.base import BaseAgent
-from arena_humansim.pool import AgentPool
+from arena_humansim.core.agents.base import BaseAgent
+from arena_humansim.core.pool import AgentPool
 
 _op_strategy = st.lists(
     st.tuples(st.sampled_from(["add", "remove"]), st.integers(min_value=1, max_value=50)),

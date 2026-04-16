@@ -3,7 +3,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import attrs
-from arena_humansim.manager.agent_manager import AgentManager
+from arena_humansim.core.agent_manager import AgentManager
 from arena_humansim.utils.scenario import ScenarioConfig
 
 from ._helpers import build_manager

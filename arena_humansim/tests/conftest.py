@@ -5,13 +5,13 @@ from typing import Any, cast
 
 import pytest
 
-from arena_humansim.agents.base import BaseAgent
-from arena_humansim.agents.types import (
+from arena_humansim.core.agents.base import BaseAgent
+from arena_humansim.core.agents.types import (
     SampledLocalPlanner,
     SampledParams,
     SampledPerception,
 )
-from arena_humansim.pool import AgentPool
+from arena_humansim.core.pool import AgentPool
 from arena_humansim.utils.rng import RNG
 from arena_humansim.utils.scenario import (
     ModuleConfig,

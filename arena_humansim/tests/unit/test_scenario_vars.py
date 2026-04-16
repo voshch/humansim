@@ -4,7 +4,7 @@ import ast
 
 import pytest
 
-from arena_humansim.agents.types import VarDef
+from arena_humansim.core.agents.types import VarDef
 from arena_humansim.utils.scenario import (
     _resolve_var_string,
     _safe_eval,

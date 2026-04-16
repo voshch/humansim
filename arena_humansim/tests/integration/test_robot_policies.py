@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 import pytest
 
-from arena_humansim.manager.agent_manager import AgentManager
+from arena_humansim.core.agent_manager import AgentManager
 from arena_humansim.utils.scenario import ScenarioConfig
 from arena_humansim_msgs.msg import AgentState as AgentStateMsg
 from arena_humansim_msgs.msg import Waypoint as WaypointMsg

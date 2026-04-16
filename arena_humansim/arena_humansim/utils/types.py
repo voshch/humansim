@@ -271,7 +271,7 @@ class NeedsState:
 
 import cattrs
 
-from arena_humansim.agents.types import (
+from arena_humansim.core.agents.types import (
     ActionDef,
     AgentType,
     LocalPlannerDist,

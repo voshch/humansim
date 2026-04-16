@@ -45,7 +45,9 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from rosgraph_msgs.msg import Clock
 
-from arena_humansim.agents import (
+from arena_humansim.animation import MotionAnimation
+from arena_humansim.collision import CollisionResolver
+from arena_humansim.core.agents import (
     BUILTIN_AGENTS,
     AgentType,
     BaseAgent,
@@ -55,21 +57,20 @@ from arena_humansim.agents import (
     create_agent_from_params,
     resolve_agent_type,
 )
-from arena_humansim.agents.loader import resolve_agent_type_name
-from arena_humansim.animation import MotionAnimation
-from arena_humansim.behavior.compiler import BehaviorTreeFactory
-from arena_humansim.collision import CollisionResolver
+from arena_humansim.core.agents.loader import resolve_agent_type_name
+from arena_humansim.core.behavior.compiler import BehaviorTreeFactory
+from arena_humansim.core.despawn_monitor import DespawnMonitor
+from arena_humansim.core.interaction_manager import CommandType, InteractionManager
+from arena_humansim.core.logger import SimulationLogger
+from arena_humansim.core.pool import AgentPool
+from arena_humansim.core.recorder import BagRecorder, default_record_dir
+from arena_humansim.core.replay import ReplayManager, ReplayResult
+from arena_humansim.core.spawn_scheduler import SpawnScheduler
+from arena_humansim.core.viz import MarkerPublisher, publish_behavior, publish_global_plan, publish_infrastructure, publish_interaction, publish_local_plan, publish_module_markers, publish_perception, publish_waypoints
+from arena_humansim.core.world_knowledge import WorldKnowledge, WorldObject
 from arena_humansim.global_planner import GlobalPlanner
 from arena_humansim.local_planner import LocalPlanner
-from arena_humansim.manager.despawn_monitor import DespawnMonitor
-from arena_humansim.manager.interaction_manager import CommandType, InteractionManager
-from arena_humansim.manager.logger import SimulationLogger
-from arena_humansim.manager.replay import ReplayManager, ReplayResult
-from arena_humansim.manager.spawn_scheduler import SpawnScheduler
-from arena_humansim.manager.world_knowledge import WorldKnowledge, WorldObject
 from arena_humansim.perception import Perception
-from arena_humansim.pool import AgentPool
-from arena_humansim.recorder import BagRecorder, default_record_dir
 from arena_humansim.utils import RNG
 from arena_humansim.utils.event_bus import EventBus
 from arena_humansim.utils.loggable import Loggable
@@ -92,7 +93,6 @@ from arena_humansim.utils.types import (
     WorldAgentState,
     WorldState,
 )
-from arena_humansim.viz import MarkerPublisher, publish_behavior, publish_global_plan, publish_infrastructure, publish_interaction, publish_local_plan, publish_module_markers, publish_perception, publish_waypoints
 
 
 @attrs.define
@@ -1214,7 +1214,7 @@ class AgentManager(Node):
             )
 
     def _run_extra_modules(self, agents: Iterable[BaseAgent], phase: TickPhase):
-        from arena_humansim.agents.base import VectorizedModule
+        from arena_humansim.core.agents.base import VectorizedModule
 
         modules_agents: dict[Any, list[BaseAgent]] = {}
         for agent in agents:

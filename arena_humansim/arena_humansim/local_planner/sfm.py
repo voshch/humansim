@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from arena_humansim.agents import BaseAgent
+from arena_humansim.core.agents import BaseAgent
 from arena_humansim.utils.types import Pose2D, Segments
 
 from . import LocalPlanner
@@ -14,9 +14,8 @@ from . import LocalPlanner
 if TYPE_CHECKING:
     from std_msgs.msg import ColorRGBA
 
-    from arena_humansim.pool import AgentPool
-    from arena_humansim.viz import MarkerPublisher
-    from arena_humansim.viz.markers import MarkerView
+    from arena_humansim.core.pool import AgentPool
+    from arena_humansim.core.viz import MarkerPublisher, MarkerView
 
 _EPS = 1e-6
 
@@ -322,7 +321,7 @@ class SFMPlanner(LocalPlanner):
     def publish_markers(self, pub: MarkerPublisher) -> None:
         from visualization_msgs.msg import Marker
 
-        from arena_humansim.viz import rgba
+        from arena_humansim.core.viz import rgba
 
         c_goal = rgba(0.2, 0.9, 0.2, 0.7)
         c_social = rgba(1.0, 0.2, 0.2, 0.7)

@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 import pytest
 
-from arena_humansim.agents.base import BaseAgent
+from arena_humansim.core.agents.base import BaseAgent
 from arena_humansim.local_planner import LocalPlanner
 from arena_humansim.local_planner.straight import StraightToGoalPlanner
 from arena_humansim.utils.types import Pose2D

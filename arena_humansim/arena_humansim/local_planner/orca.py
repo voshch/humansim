@@ -5,7 +5,7 @@ from collections.abc import Iterable, Sequence
 import numpy as np
 from scipy.spatial import cKDTree
 
-from arena_humansim.agents import BaseAgent
+from arena_humansim.core.agents import BaseAgent
 from arena_humansim.utils.types import Pose2D
 
 from . import LocalPlanner
