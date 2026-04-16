@@ -38,7 +38,7 @@ def test_recorder_writes_messages(node: Node, tmp_path: Path) -> None:
     pub_agents = node.create_publisher(AgentStatesMsg, "/agent_states", 10)
     pub_geom = node.create_publisher(
         WorldGeometryMsg,
-        "/arena_humansim/world_geometry",
+        "/world_geometry",
         rclpy.qos.QoSProfile(depth=1, durability=rclpy.qos.DurabilityPolicy.TRANSIENT_LOCAL),
     )
     pub_clock = node.create_publisher(Clock, "/clock", 10)
@@ -65,7 +65,7 @@ def test_recorder_writes_messages(node: Node, tmp_path: Path) -> None:
         topics_seen.add(topic)
 
     assert "/agent_states" in topics_seen
-    assert "/arena_humansim/world_geometry" in topics_seen
+    assert "/world_geometry" in topics_seen
     assert "/clock" in topics_seen
 
 

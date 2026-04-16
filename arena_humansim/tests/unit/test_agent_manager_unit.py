@@ -59,22 +59,18 @@ def test_msg_pool_grows_on_demand() -> None:
 def test_msg_pool_reuses_underlying_messages_under_watermark() -> None:
     pool = _AgentStateMsgPool()
     pool.get(_MSG_BLOCK * 4)
-    pool.get(_MSG_BLOCK * 4)
-    first_snapshot = [id(m) for m in pool._pools[0]]
-    second_snapshot = [id(m) for m in pool._pools[1]]
+    snapshot = [id(m) for m in pool._inner]
     pool.get(_MSG_BLOCK)
     pool.get(_MSG_BLOCK)
-    assert [id(m) for m in pool._pools[0]] == first_snapshot
-    assert [id(m) for m in pool._pools[1]] == second_snapshot
+    assert [id(m) for m in pool._inner] == snapshot
 
 
-def test_msg_pool_double_buffers_returned_message() -> None:
+def test_msg_pool_returns_same_msg_instance() -> None:
     pool = _AgentStateMsgPool()
     a = pool.get(4)
     b = pool.get(4)
     c = pool.get(4)
-    assert a is not b
-    assert a is c
+    assert a is b is c
 
 
 def test_msg_pool_returns_exactly_n_agents() -> None:

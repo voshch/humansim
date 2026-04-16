@@ -92,11 +92,6 @@ class RosTestSystem:
             except Exception:
                 pass
         try:
-            if hasattr(self.manager, "_agent_states_bg"):
-                self.manager._agent_states_bg.shutdown()
-        except Exception:
-            pass
-        try:
             self.executor.remove_node(self.manager)
         except Exception:
             pass

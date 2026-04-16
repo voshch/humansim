@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import math
-import queue
-import threading
 import time
 from collections.abc import Callable, Hashable, Iterable
 from pathlib import Path
@@ -11,7 +9,6 @@ from typing import Any
 import attrs
 import numpy as np
 import rclpy
-import rclpy.publisher
 from arena_humansim_msgs.msg import AgentState as AgentStateMsg
 from arena_humansim_msgs.msg import AgentStates as AgentStatesMsg
 from arena_humansim_msgs.msg import ObstacleConfig as ObstacleConfigMsg
@@ -41,6 +38,8 @@ from arena_humansim_msgs.srv import (
 from geometry_msgs.msg import Point32, Vector3
 from geometry_msgs.msg import Pose2D as Pose2DMsg
 from py_trees.trees import BehaviourTree
+from rclpy.clock import Clock as RclClock
+from rclpy.clock import ClockType
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from rosgraph_msgs.msg import Clock
@@ -110,47 +109,15 @@ _MSG_BLOCK = 16
 
 class _AgentStateMsgPool:
     def __init__(self) -> None:
-        self._pools = ([AgentStateMsg() for _ in range(_MSG_BLOCK)], [AgentStateMsg() for _ in range(_MSG_BLOCK)])
-        self._msgs = (AgentStatesMsg(), AgentStatesMsg())
-        self._msgs[0].header.frame_id = "map"
-        self._msgs[1].header.frame_id = "map"
-        self._idx = 0
+        self._inner: list[AgentStateMsg] = [AgentStateMsg() for _ in range(_MSG_BLOCK)]
+        self._msg = AgentStatesMsg()
+        self._msg.header.frame_id = "map"
 
     def get(self, n: int) -> AgentStatesMsg:
-        pool = self._pools[self._idx]
-        while len(pool) < n:
-            pool.extend(AgentStateMsg() for _ in range(_MSG_BLOCK))
-        msg = self._msgs[self._idx]
-        msg.agents = pool[:n]
-        self._idx ^= 1
-        return msg
-
-
-class _BackgroundPublisher:
-    def __init__(self, publisher: rclpy.publisher.Publisher) -> None:
-        self._publisher = publisher
-        self._queue: queue.SimpleQueue = queue.SimpleQueue()
-        self._thread = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
-
-    def _loop(self) -> None:
-        while True:
-            msg = self._queue.get()
-            if msg is None:
-                break
-            while not self._queue.empty():
-                next_msg = self._queue.get()
-                if next_msg is None:
-                    return
-                msg = next_msg
-            self._publisher.publish(msg)
-
-    def publish(self, msg: AgentStatesMsg) -> None:
-        self._queue.put(msg)
-
-    def shutdown(self) -> None:
-        self._queue.put(None)
-        self._thread.join(timeout=1.0)
+        while len(self._inner) < n:
+            self._inner.extend(AgentStateMsg() for _ in range(_MSG_BLOCK))
+        self._msg.agents = self._inner[:n]
+        return self._msg
 
 
 def _group_by[K: Hashable](agents: Iterable[BaseAgent], key: Callable[[BaseAgent], K]) -> Iterable[tuple[K, list[BaseAgent]]]:
@@ -192,7 +159,8 @@ class AgentManager(Node):
         self.declare_parameter("scenario", "")
         self.declare_parameter("ticks", 0)
         self.declare_parameter("time", 0.0)
-        self.declare_parameter("rtf", 0.0)
+        self.declare_parameter("rtf", 1.0)
+        self.declare_parameter("subsystem_overrun_policy", "lag")
 
         seed = self.get_parameter("seed").value
         self._dt = self.get_parameter("dt").value
@@ -207,6 +175,7 @@ class AgentManager(Node):
         if self._ticks_limit == 0 and time_limit > 0.0:
             self._ticks_limit = max(1, int(round(time_limit / self._dt)))
         self._rtf = float(self.get_parameter("rtf").value)
+        self._subsystem_overrun_policy = str(self.get_parameter("subsystem_overrun_policy").value)
         _pm = self.get_parameter("publish_markers").value
         if isinstance(_pm, bool):
             self._publish_markers = 2 if _pm else 0
@@ -290,6 +259,8 @@ class AgentManager(Node):
         self._tick_phases: dict[str, float] = {}
         self._overrun_count: int = 0
         self._last_overrun_log: float = 0.0
+        self._tick_wall_start: float | None = None
+        self._total_tick_compute_s: float = 0.0
         self._high_level_cmds: dict[int, HighLevelCommand] = {}
         self._cached_intermediate_goals: dict[int, Pose2D] = {}
         self._next_agent_id: int = 1
@@ -299,7 +270,6 @@ class AgentManager(Node):
             "agent_states",
             10,
         )
-        self._agent_states_bg = _BackgroundPublisher(self._agent_states_pub)
 
         self._world_geometry_pub = self.create_publisher(
             WorldGeometryMsg,
@@ -991,7 +961,7 @@ class AgentManager(Node):
         t0 = time.perf_counter()
         self._advance_waypoints(agents, pool)
         msg = self._build_agent_states_msg()
-        self._agent_states_bg.publish(msg)
+        self._agent_states_pub.publish(msg)
 
         if self._marker_pub is not None:
             pool.sync_back(agents)
@@ -1252,10 +1222,21 @@ class AgentManager(Node):
         )
         self._clock_pub = self.create_publisher(Clock, "/clock", clock_qos)
         period = self._dt / self._rtf if self._rtf > 0.0 else 0.0
-        self._timer = self.create_timer(period, self._master_timer_callback)
+        self._timer = self.create_timer(period, self._master_timer_callback, clock=RclClock(clock_type=ClockType.STEADY_TIME))
 
     def _setup_subsystem_mode(self):
-        # Timer drives ticking at dt intervals, paced by the external /clock
+        # Subsystem mode: external orchestrator owns /clock. If tick wall-cost
+        # exceeds clock cadence our state lags the clock downstream consumers see.
+        # Policies:
+        #   lag          - keep ticking every scheduled tick; stamp header with
+        #                  scheduled sim-time; emit overrun warnings. Correct
+        #                  physics, possibly stale realtime. (only one implemented)
+        #   skip         - drop ticks to stay current with /clock. Not implemented.
+        #   backpressure - signal orchestrator to throttle /clock. Not implemented.
+        if self._subsystem_overrun_policy != "lag":
+            raise ValueError(
+                f"subsystem_overrun_policy={self._subsystem_overrun_policy!r} not implemented; only 'lag' is available"
+            )
         self._timer = self.create_timer(self._dt, self._subsystem_timer_callback)
         # Accumulated spawn/despawn IDs returned to callers via feedback
         self._accumulated_spawned: list[int] = []
@@ -1283,9 +1264,10 @@ class AgentManager(Node):
     def _master_timer_callback(self):
         if self._tick_count == 0:
             self._publish_world_geometry()
+            self._tick_wall_start = time.perf_counter()
         t0 = time.perf_counter()
         self.tick()
-        self._check_overrun(time.perf_counter() - t0)
+        self._total_tick_compute_s += time.perf_counter() - t0
         self._sim_time_ns += int(self._dt * 1e9)
         clock_msg = Clock()
         clock_msg.clock.sec = int(self._sim_time_ns // int(1e9))
@@ -1300,8 +1282,7 @@ class AgentManager(Node):
     def _subsystem_timer_callback(self):
         if self._tick_count == 0:
             self._publish_world_geometry()
-        now = self.get_clock().now()
-        self._sim_time_ns = now.nanoseconds
+        self._sim_time_ns = self._tick_count * int(self._dt * 1e9)
         t0 = time.perf_counter()
         self.tick()
         self._check_overrun(time.perf_counter() - t0)
@@ -1314,10 +1295,14 @@ class AgentManager(Node):
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
         self._clock_pub = self.create_publisher(Clock, "/clock", clock_qos)
-        self._timer = self.create_timer(0.0, self._benchmark_timer_callback)
+        self._timer = self.create_timer(0.0, self._benchmark_timer_callback, clock=RclClock(clock_type=ClockType.STEADY_TIME))
 
     def _benchmark_timer_callback(self):
+        if self._tick_count == 0:
+            self._tick_wall_start = time.perf_counter()
+        t0 = time.perf_counter()
         self.tick()
+        self._total_tick_compute_s += time.perf_counter() - t0
         self._sim_time_ns += int(self._dt * 1e9)
         clock_msg = Clock()
         clock_msg.clock.sec = int(self._sim_time_ns // int(1e9))
@@ -1871,12 +1856,28 @@ class AgentManager(Node):
             self._timer.cancel()
         if self._profile_phases:
             self._flush_profile()
+        self._log_final_rtf()
         if self._sim_logger is not None:
             self._sim_logger.close()
         if self._recorder is not None:
             self._recorder.close()
             self._recorder = None
         super().destroy_node()
+
+    def _log_final_rtf(self):
+        if self._mode not in (self.MODE_MASTER, self.MODE_BENCHMARK):
+            return
+        if self._tick_wall_start is None or self._tick_count == 0:
+            return
+        wall_elapsed = time.perf_counter() - self._tick_wall_start
+        sim_elapsed = self._tick_count * self._dt
+        compute_elapsed = self._total_tick_compute_s
+        wall_rtf = sim_elapsed / wall_elapsed if wall_elapsed > 0 else float("inf")
+        compute_rtf = sim_elapsed / compute_elapsed if compute_elapsed > 0 else float("inf")
+        self._logger.info(
+            f"final rtf: wall={wall_rtf:.2f}, compute={compute_rtf:.2f} "
+            f"({self._tick_count} ticks, sim={sim_elapsed:.1f}s, wall={wall_elapsed:.1f}s, compute={compute_elapsed:.1f}s)"
+        )
 
 
 def main(args: list[str] | None = None) -> None:

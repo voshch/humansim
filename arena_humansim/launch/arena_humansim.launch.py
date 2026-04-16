@@ -106,7 +106,7 @@ def generate_launch_description():
         DeclareLaunchArgument("scenario", default_value="", description="scenario name or absolute YAML path (master mode only)"),
         DeclareLaunchArgument("ticks", default_value="0", description="stop after N ticks (0 = run until Ctrl-C)"),
         DeclareLaunchArgument("time", default_value="0.0", description="stop after N seconds of sim time (ignored if ticks is set)"),
-        DeclareLaunchArgument("rtf", default_value="0.0", description="real-time factor (0 = unthrottled, 1.0 = real-time)"),
+        DeclareLaunchArgument("rtf", default_value="1.0", description="real-time factor (0 = unthrottled, 1.0 = real-time)"),
         OpaqueFunction(function=_compute_record_dir),
         node,
         OpaqueFunction(function=_rviz_action),
