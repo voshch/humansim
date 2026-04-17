@@ -17,6 +17,7 @@ def _fallback_bases() -> dict[str, type]:
     from arena_humansim.animation import MotionAnimation
     from arena_humansim.global_planner import GlobalPlanner
     from arena_humansim.local_planner import LocalPlanner
+
     return {
         "global_planner": GlobalPlanner,
         "local_planner": LocalPlanner,

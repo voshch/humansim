@@ -88,6 +88,8 @@ class InteractionContract:
     queue: list[int] = attrs.Factory(list)
     duration: float | None = None  # seconds; None = no contract-level timeout
     elapsed: float = 0.0
+    access: Any = None  # AccessPolicy; typed Any to avoid import cycle
+    formation: Any = None  # Formation; typed Any to avoid import cycle
 
     @property
     def queue_length(self) -> int:

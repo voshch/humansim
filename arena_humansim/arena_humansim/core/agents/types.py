@@ -17,6 +17,7 @@ __all__ = [
     "sample_agent_type",
 ]
 
+import math
 from pathlib import Path
 
 import attrs
@@ -123,6 +124,10 @@ class AgentType:
     min_turning_radius: ParamDist = ParamDist(0.3, 0.03, clip_low=0.1)
     pivot_angular_velocity: ParamDist = ParamDist(2.0, 0.2, clip_low=1.0)
 
+    # LogNormal: mean is interpreted as the desired median in seconds; std is the shape parameter.
+    reaction_time: ParamDist = ParamDist(0.4, 0.3, clip_low=0.05, clip_high=1.5)
+    personal_space_min: ParamDist = ParamDist(0.6, 0.15, clip_low=0.2, clip_high=2.0)
+
     perception: PerceptionDist = attrs.Factory(PerceptionDist)
     local_planner_params: LocalPlannerDist = attrs.Factory(LocalPlannerDist)
 
@@ -174,6 +179,9 @@ class SampledParams:
     min_turning_radius: float
     pivot_angular_velocity: float
 
+    reaction_time: float
+    personal_space_min: float
+
     perception: SampledPerception = attrs.Factory(SampledPerception)
     local_planner_params: SampledLocalPlanner = attrs.Factory(SampledLocalPlanner)
 
@@ -188,6 +196,15 @@ class SampledParams:
 
 def _sample_dist(dist: ParamDist, rng: np.random.Generator) -> float:
     value = rng.normal(dist.mean, dist.std) if dist.std > 0 else dist.mean
+    return float(np.clip(value, dist.clip_low, dist.clip_high))
+
+
+def _sample_lognormal_dist(dist: ParamDist, rng: np.random.Generator) -> float:
+    # dist.mean is interpreted as the desired median in linear space; dist.std is sigma of the underlying normal.
+    if dist.std > 0:
+        value = rng.lognormal(mean=math.log(max(dist.mean, 1e-9)), sigma=dist.std)
+    else:
+        value = dist.mean
     return float(np.clip(value, dist.clip_low, dist.clip_high))
 
 
@@ -211,6 +228,8 @@ def sample_agent_type(
         max_deceleration=_sample_dist(agent_type.max_deceleration, rng),
         min_turning_radius=_sample_dist(agent_type.min_turning_radius, rng),
         pivot_angular_velocity=_sample_dist(agent_type.pivot_angular_velocity, rng),
+        reaction_time=_sample_lognormal_dist(agent_type.reaction_time, rng),
+        personal_space_min=_sample_dist(agent_type.personal_space_min, rng),
         perception=SampledPerception(
             vision_range=_sample_dist(agent_type.perception.vision_range, rng),
             vision_fov=_sample_dist(agent_type.perception.vision_fov, rng),

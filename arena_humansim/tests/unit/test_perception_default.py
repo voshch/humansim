@@ -22,6 +22,8 @@ def _params(vision_range: float, vision_fov: float) -> SampledParams:
         max_deceleration=2.5,
         min_turning_radius=0.3,
         pivot_angular_velocity=2.0,
+        reaction_time=0.4,
+        personal_space_min=0.6,
         perception=SampledPerception(vision_range=vision_range, vision_fov=vision_fov),
         local_planner_params=SampledLocalPlanner(
             relaxation_time=0.5,

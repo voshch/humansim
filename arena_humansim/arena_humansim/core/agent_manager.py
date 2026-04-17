@@ -66,7 +66,7 @@ from arena_humansim.core.recorder import BagRecorder, default_record_dir
 from arena_humansim.core.replay import ReplayManager, ReplayResult
 from arena_humansim.core.spawn_scheduler import SpawnScheduler
 from arena_humansim.core.viz import MarkerPublisher, publish_behavior, publish_global_plan, publish_infrastructure, publish_interaction, publish_local_plan, publish_module_markers, publish_perception, publish_waypoints
-from arena_humansim.core.world_knowledge import WorldKnowledge, WorldObject
+from arena_humansim.core.world_knowledge import FormationSpec, WorldKnowledge, WorldObject
 from arena_humansim.global_planner import GlobalPlanner
 from arena_humansim.local_planner import LocalPlanner
 from arena_humansim.perception import Perception
@@ -231,6 +231,10 @@ class AgentManager(Node):
         self._behavior_trees: dict[int, BehaviourTree | None] = {}
         self._bt_factories: dict[tuple, BehaviorTreeFactory] = {}
         self._world_knowledge = WorldKnowledge()
+        self._interaction_manager.set_context(
+            world_knowledge=self._world_knowledge,
+            agent_lookup=lambda aid: self._agents.get(aid),
+        )
         self._event_bus = EventBus()
         self._event_scripts: list[EventScript] = []
         self._event_scripts_by_tick: dict[int, list] = {}
@@ -475,6 +479,10 @@ class AgentManager(Node):
         if self._ticks_limit == 0 and scenario.simulation.max_ticks > 0:
             self._ticks_limit = int(scenario.simulation.max_ticks)
 
+        self._interaction_manager.set_context(
+            formation_scale=float(scenario.simulation.formation_scale),
+        )
+
         if scenario.walls:
             walls_req = AddWalls.Request()
             for w in scenario.walls:
@@ -542,6 +550,7 @@ class AgentManager(Node):
                 pose=Pose2D(x=wo_cfg.pose.x, y=wo_cfg.pose.y, theta=wo_cfg.pose.theta),
                 capacity=wo_cfg.capacity,
                 satisfies=dict(wo_cfg.satisfies),
+                formation=FormationSpec.from_config(getattr(wo_cfg, "formation", None)),
             )
             self._world_knowledge.add_object(obj)
         self._event_scripts = list(scenario.event_scripts)
@@ -586,6 +595,8 @@ class AgentManager(Node):
                 max_deceleration=2.5,
                 min_turning_radius=0.3,
                 pivot_angular_velocity=2.0,
+                reaction_time=0.4,
+                personal_space_min=0.6,
                 perception_stack=("default",),
                 local_planner=self._module_selections["local_planner"],
                 global_planner=self._module_selections["global_planner"],
@@ -1234,9 +1245,7 @@ class AgentManager(Node):
         #   skip         - drop ticks to stay current with /clock. Not implemented.
         #   backpressure - signal orchestrator to throttle /clock. Not implemented.
         if self._subsystem_overrun_policy != "lag":
-            raise ValueError(
-                f"subsystem_overrun_policy={self._subsystem_overrun_policy!r} not implemented; only 'lag' is available"
-            )
+            raise ValueError(f"subsystem_overrun_policy={self._subsystem_overrun_policy!r} not implemented; only 'lag' is available")
         self._timer = self.create_timer(self._dt, self._subsystem_timer_callback)
         # Accumulated spawn/despawn IDs returned to callers via feedback
         self._accumulated_spawned: list[int] = []
@@ -1857,10 +1866,7 @@ class AgentManager(Node):
         compute_elapsed = self._total_tick_compute_s
         wall_rtf = sim_elapsed / wall_elapsed if wall_elapsed > 0 else float("inf")
         compute_rtf = sim_elapsed / compute_elapsed if compute_elapsed > 0 else float("inf")
-        self._logger.info(
-            f"final rtf: wall={wall_rtf:.2f}, compute={compute_rtf:.2f} "
-            f"({self._tick_count} ticks, sim={sim_elapsed:.1f}s, wall={wall_elapsed:.1f}s, compute={compute_elapsed:.1f}s)"
-        )
+        self._logger.info(f"final rtf: wall={wall_rtf:.2f}, compute={compute_rtf:.2f} ({self._tick_count} ticks, sim={sim_elapsed:.1f}s, wall={wall_elapsed:.1f}s, compute={compute_elapsed:.1f}s)")
 
 
 def main(args: list[str] | None = None) -> None:

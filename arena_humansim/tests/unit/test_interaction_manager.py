@@ -251,3 +251,35 @@ def test_talk_caps_at_two_participants() -> None:
     assert mgr.interactions[iid].contract.is_full
     assert mgr.accept(3, iid) is False
     assert len(mgr.interactions[iid].participants) == 2
+
+
+def test_queue_use_gets_fifo_access_and_line_formation() -> None:
+    mgr = InteractionManager(RNG(0))
+    iid = _advertise(mgr, 1, InteractionType.QUEUE_USE)
+    contract = mgr.interactions[iid].contract
+    assert contract.access is not None
+    assert contract.formation is not None
+
+
+def test_group_conversation_gets_f_formation() -> None:
+    mgr = InteractionManager(RNG(0))
+    iid = _advertise(mgr, 1, InteractionType.GROUP_CONVERSATION)
+    contract = mgr.interactions[iid].contract
+    assert contract.formation is not None
+    assert contract.access is None  # social, not a resource
+
+
+def test_talk_to_gets_dyad_and_no_access() -> None:
+    mgr = InteractionManager(RNG(0))
+    iid = _advertise(mgr, 1, InteractionType.TALK_TO)
+    contract = mgr.interactions[iid].contract
+    assert contract.formation is not None
+    assert contract.access is None
+
+
+def test_sit_on_is_queueable_by_default() -> None:
+    mgr = InteractionManager(RNG(0))
+    iid = _advertise(mgr, 1, InteractionType.SIT_ON)
+    assert mgr.interactions[iid].contract.is_full
+    assert mgr.accept(2, iid) is True
+    assert 2 in mgr.interactions[iid].contract.queue

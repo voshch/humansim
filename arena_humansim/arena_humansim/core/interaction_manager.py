@@ -1,7 +1,19 @@
 import dataclasses
 import enum
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
+from arena_humansim.core.access import AcceptResult, AccessPolicy
+from arena_humansim.core.access.fifo_queue import FIFOQueue
+from arena_humansim.core.formation import (
+    AgentAnchor,
+    Anchor,
+    CentroidAnchor,
+    Formation,
+    ObjectAnchor,
+    PoseAnchor,
+)
+from arena_humansim.core.world_knowledge import FormationSpec
 from arena_humansim.utils import RNG
 from arena_humansim.utils.loggable import Loggable
 from arena_humansim.utils.types import (
@@ -10,30 +22,47 @@ from arena_humansim.utils.types import (
     InteractionOutcome,
     InteractionState,
     InteractionType,
+    Pose2D,
 )
+
+if TYPE_CHECKING:
+    from arena_humansim.core.agents import BaseAgent
+    from arena_humansim.core.world_knowledge import WorldKnowledge
+
+
+AgentLookup = Callable[[int], "BaseAgent | None"]
+
+# Formation defaults per interaction type: (strategy_name, default_params).
+# Object metadata on WorldObject overrides these when present.
+DEFAULT_FORMATION_BY_INTERACTION: dict[int, tuple[str, dict[str, Any]]] = {
+    int(InteractionType.QUEUE_USE): ("line", {"base_step": 1.0}),
+    int(InteractionType.SIT_ON): ("cluster", {}),
+    int(InteractionType.LIE_ON): ("cluster", {}),
+    int(InteractionType.GROUP_CONVERSATION): ("f_formation", {}),
+    int(InteractionType.TALK_TO): ("dyad", {}),
+}
 
 
 def _make_contract(interaction_type: int) -> InteractionContract:
     it = InteractionType(interaction_type)
     if it == InteractionType.TALK_TO:
-        return InteractionContract(type=interaction_type, min_participants=2, max_participants=2)
+        contract = InteractionContract(type=interaction_type, min_participants=2, max_participants=2)
     elif it == InteractionType.GROUP_CONVERSATION:
-        return InteractionContract(type=interaction_type, min_participants=2, max_participants=-1)
+        contract = InteractionContract(type=interaction_type, min_participants=2, max_participants=-1)
     elif it == InteractionType.FOLLOW:
-        return InteractionContract(type=interaction_type, min_participants=2, max_participants=2)
+        contract = InteractionContract(type=interaction_type, min_participants=2, max_participants=2)
     elif it in (InteractionType.SIT_ON, InteractionType.LIE_ON):
-        return InteractionContract(type=interaction_type, min_participants=1, max_participants=1)
+        contract = InteractionContract(type=interaction_type, min_participants=1, max_participants=1, queueable=True)
+        contract.access = FIFOQueue()
     elif it == InteractionType.USE:
-        return InteractionContract(type=interaction_type, min_participants=1, max_participants=1)
+        contract = InteractionContract(type=interaction_type, min_participants=1, max_participants=1, queueable=True)
+        contract.access = FIFOQueue()
     elif it == InteractionType.QUEUE_USE:
-        return InteractionContract(
-            type=interaction_type,
-            min_participants=1,
-            max_participants=1,
-            queueable=True,
-        )
+        contract = InteractionContract(type=interaction_type, min_participants=1, max_participants=1, queueable=True)
+        contract.access = FIFOQueue()
     else:
-        return InteractionContract(type=interaction_type, min_participants=2, max_participants=2)
+        contract = InteractionContract(type=interaction_type, min_participants=2, max_participants=2)
+    return contract
 
 
 class CommandType(enum.IntEnum):
@@ -54,7 +83,13 @@ class _Advertisement:
 
 
 class InteractionManager(Loggable):
-    def __init__(self, rng_manager: RNG):
+    def __init__(
+        self,
+        rng_manager: RNG,
+        world_knowledge: "WorldKnowledge | None" = None,
+        agent_lookup: AgentLookup | None = None,
+        formation_scale: float = 1.0,
+    ):
         self.rng_manager = rng_manager
         self.interactions: dict[int, InteractionState] = {}
         self.next_interaction_id: int = 0
@@ -63,6 +98,28 @@ class InteractionManager(Loggable):
         self._agent_to_interactions: dict[int, set[int]] = {}  # agent_id -> set of interaction_ids
         self._agent_to_queues: dict[int, set[int]] = {}  # agent_id -> set of interaction_ids they're queued in
         self._rng = rng_manager.get_substream("interaction_manager")
+        self._world_knowledge = world_knowledge
+        self._agent_lookup: AgentLookup = agent_lookup or (lambda _aid: None)
+        self._formation_scale = formation_scale
+        self._formation_targets: dict[int, Pose2D] = {}  # agent_id -> target_pose from last formation tick
+
+    def _pose_lookup(self, agent_id: int) -> Pose2D | None:
+        agent = self._agent_lookup(agent_id)
+        return agent.state.pose if agent is not None else None
+
+    def set_context(
+        self,
+        world_knowledge: "WorldKnowledge | None" = None,
+        agent_lookup: AgentLookup | None = None,
+        formation_scale: float | None = None,
+    ) -> None:
+        """Wire world knowledge and agent lookup after construction (agent_manager init order)."""
+        if world_knowledge is not None:
+            self._world_knowledge = world_knowledge
+        if agent_lookup is not None:
+            self._agent_lookup = agent_lookup
+        if formation_scale is not None:
+            self._formation_scale = formation_scale
 
     def advertise(self, agent_id: int, interaction_type: int) -> _Advertisement:
         ad = _Advertisement(agent_id=agent_id, interaction_type=interaction_type)
@@ -97,21 +154,53 @@ class InteractionManager(Loggable):
         if agent_id in interaction.contract.queue:
             return True
 
-        if interaction.contract.is_full:
-            contract = interaction.contract
+        contract = interaction.contract
+        access: AccessPolicy | None = contract.access
+        if access is not None:
+            result = access.on_accept(interaction, agent_id)
+            if result == AcceptResult.REJECTED:
+                return False
+            if result == AcceptResult.QUEUED:
+                self._agent_to_queues.setdefault(agent_id, set()).add(interaction_id)
+                self._on_formation_join(interaction, agent_id)
+                return True
+            # BECAME_PARTICIPANT
+            self._agent_to_interactions.setdefault(agent_id, set()).add(interaction_id)
+            self._maybe_activate(interaction)
+            self._readvertise_for_participant(agent_id, interaction)
+            self._on_formation_join(interaction, agent_id)
+            return True
+
+        # Backward-compat path: no access policy set
+        if contract.is_full:
             if contract.queueable:
                 if contract.max_queue == -1 or len(contract.queue) < contract.max_queue:
                     contract.queue.append(agent_id)
                     self._agent_to_queues.setdefault(agent_id, set()).add(interaction_id)
+                    self._on_formation_join(interaction, agent_id)
                     return True
             return False
 
         interaction.participants.append(agent_id)
-        interaction.contract.current_participants.append(agent_id)
+        contract.current_participants.append(agent_id)
         self._agent_to_interactions.setdefault(agent_id, set()).add(interaction_id)
         self._maybe_activate(interaction)
         self._readvertise_for_participant(agent_id, interaction)
+        self._on_formation_join(interaction, agent_id)
         return True
+
+    def _on_formation_join(self, interaction: InteractionState, agent_id: int) -> None:
+        formation: Formation | None = interaction.contract.formation
+        if formation is None:
+            return
+        formation.on_join(agent_id)
+
+    def _on_formation_leave(self, interaction: InteractionState, agent_id: int) -> None:
+        formation: Formation | None = interaction.contract.formation
+        if formation is None:
+            return
+        formation.on_leave(agent_id)
+        self._formation_targets.pop(agent_id, None)
 
     def decline(self, agent_id: int, interaction_id: int) -> None:
         self._remove_ads_for_interaction(agent_id, interaction_id)
@@ -121,13 +210,20 @@ class InteractionManager(Loggable):
         if interaction is None:
             return None
 
-        if agent_id in interaction.contract.queue:
-            interaction.contract.queue.remove(agent_id)
-            queues = self._agent_to_queues.get(agent_id)
-            if queues is not None:
-                queues.discard(interaction_id)
-                if not queues:
-                    del self._agent_to_queues[agent_id]
+        contract = interaction.contract
+        was_involved = agent_id in contract.queue or agent_id in interaction.participants
+
+        access: AccessPolicy | None = contract.access
+        if access is not None:
+            access.on_stop(interaction, agent_id)
+        elif agent_id in contract.queue:
+            contract.queue.remove(agent_id)
+
+        queues = self._agent_to_queues.get(agent_id)
+        if queues is not None:
+            queues.discard(interaction_id)
+            if not queues:
+                del self._agent_to_queues[agent_id]
 
         if agent_id in interaction.participants:
             interaction.participants.remove(agent_id)
@@ -136,12 +232,15 @@ class InteractionManager(Loggable):
                 interactions_set.discard(interaction_id)
                 if not interactions_set:
                     del self._agent_to_interactions[agent_id]
-        if agent_id in interaction.contract.current_participants:
-            interaction.contract.current_participants.remove(agent_id)
+        if agent_id in contract.current_participants:
+            contract.current_participants.remove(agent_id)
+
+        if was_involved:
+            self._on_formation_leave(interaction, agent_id)
 
         self._remove_ads_for_interaction(agent_id, interaction_id)
 
-        if len(interaction.participants) < interaction.contract.min_participants:
+        if len(interaction.participants) < contract.min_participants:
             self._teardown(interaction_id, InteractionOutcome.INTERRUPTED)
             return None
 
@@ -154,7 +253,7 @@ class InteractionManager(Loggable):
         dt: float = 0.0,
     ) -> dict[int, InteractionState]:
         self._prune_ended_interactions()
-        self._tick_queues()
+        self._tick_access(dt)
         self._tick_durations(dt)
 
         interaction_cmds: list[HighLevelCommand] = []
@@ -171,8 +270,40 @@ class InteractionManager(Loggable):
         for cmd in interaction_cmds:
             self._process_command(cmd)
 
+        self._tick_formations(dt)
         self._prune_dead_interactions()
         return self.interactions
+
+    def _tick_formations(self, dt: float) -> dict[int, Pose2D]:
+        """Tick every interaction's formation; write NAVIGATE commands to member agents.
+
+        Returns the flat agent_id -> target_pose mapping (also cached on self).
+        """
+        targets: dict[int, Pose2D] = {}
+        for interaction in self.interactions.values():
+            formation: Formation | None = interaction.contract.formation
+            if formation is None:
+                continue
+            per_formation = formation.tick(dt)
+            for aid, pose in per_formation.items():
+                targets[aid] = pose
+                agent = self._agent_lookup(aid)
+                if agent is None:
+                    continue
+                movement = getattr(agent, "movement", None)
+                if movement is None:
+                    continue
+                movement.command = HighLevelCommand(
+                    agent_id=aid,
+                    type=int(CommandType.NAVIGATE),
+                    target_pose=pose,
+                    desired_velocity=agent.state.desired_velocity,
+                )
+        self._formation_targets = targets
+        return targets
+
+    def formation_target(self, agent_id: int) -> Pose2D | None:
+        return self._formation_targets.get(agent_id)
 
     def is_in_interaction(self, agent_id: int) -> bool:
         return bool(self._agent_to_interactions.get(agent_id))
@@ -185,8 +316,15 @@ class InteractionManager(Loggable):
             self.stop(agent_id, iid)
         for iid in list(self._agent_to_queues.get(agent_id, ())):
             interaction = self.interactions.get(iid)
-            if interaction and agent_id in interaction.contract.queue:
-                interaction.contract.queue.remove(agent_id)
+            if interaction is None:
+                continue
+            contract = interaction.contract
+            access: AccessPolicy | None = contract.access
+            if access is not None:
+                access.on_stop(interaction, agent_id)
+            elif agent_id in contract.queue:
+                contract.queue.remove(agent_id)
+            self._on_formation_leave(interaction, agent_id)
         self._agent_to_interactions.pop(agent_id, None)
         self._agent_to_queues.pop(agent_id, None)
 
@@ -197,9 +335,25 @@ class InteractionManager(Loggable):
                 total += interaction.contract.queue_length
         return total
 
-    def _tick_queues(self) -> None:
+    def _tick_access(self, dt: float) -> None:
         for interaction in self.interactions.values():
             contract = interaction.contract
+            access: AccessPolicy | None = contract.access
+
+            if access is not None:
+                promoted = access.tick(interaction, dt)
+                for next_agent in promoted:
+                    queues = self._agent_to_queues.get(next_agent)
+                    if queues is not None:
+                        queues.discard(interaction.id)
+                        if not queues:
+                            del self._agent_to_queues[next_agent]
+                    self._agent_to_interactions.setdefault(next_agent, set()).add(interaction.id)
+                if promoted:
+                    self._maybe_activate(interaction)
+                continue
+
+            # Backward-compat: legacy queueable path for manually constructed contracts
             if not contract.queueable or not contract.queue:
                 continue
             while not contract.is_full and contract.queue:
@@ -288,9 +442,94 @@ class InteractionManager(Loggable):
         contract.current_participants.append(creator_id)
         self._agent_to_interactions.setdefault(creator_id, set()).add(iid)
         self.interactions[iid] = interaction
+
+        contract.formation = self._resolve_formation(interaction)
+        if contract.formation is not None:
+            contract.formation.on_join(creator_id)
+
         self._maybe_activate(interaction)
         self._logger.debug(f"Interaction {iid} created: type={InteractionType(interaction_type).name}, creator={creator_id}")
         return interaction
+
+    def _resolve_formation(self, interaction: InteractionState) -> Formation | None:
+        spec = self._object_formation_spec(interaction.object_id)
+        if spec is not None:
+            name = spec.type
+            params = dict(spec.params or {})
+            anchor = self._anchor_from_spec(spec, interaction)
+        else:
+            default = DEFAULT_FORMATION_BY_INTERACTION.get(interaction.type)
+            if default is None:
+                return None
+            name = default[0]
+            params = dict(default[1])
+            anchor = self._build_anchor_for(interaction)
+
+        if anchor is None:
+            return None
+
+        try:
+            return Formation.create(
+                name,
+                anchor=anchor,
+                agent_lookup=self._agent_lookup,
+                formation_scale=self._formation_scale,
+                **params,
+            )
+        except (KeyError, TypeError) as e:
+            self._logger.warning(f"Formation '{name}' instantiation failed for interaction {interaction.id}: {e}")
+            return None
+
+    def _object_formation_spec(self, object_id: str | None) -> FormationSpec | None:
+        if object_id is None or self._world_knowledge is None:
+            return None
+        obj = self._world_knowledge.get(object_id)
+        if obj is None:
+            return None
+        return getattr(obj, "formation", None)
+
+    def _anchor_from_spec(self, spec: FormationSpec, interaction: InteractionState) -> Anchor | None:
+        kind = spec.anchor_kind
+        if kind == "object":
+            ref = spec.anchor_ref or interaction.object_id
+            if ref and self._world_knowledge is not None:
+                return ObjectAnchor(world_knowledge=self._world_knowledge, object_id=ref)
+            return None
+        if kind == "agent":
+            try:
+                aid = int(spec.anchor_ref) if spec.anchor_ref is not None else -1
+            except (TypeError, ValueError):
+                aid = -1
+            if aid >= 0:
+                return AgentAnchor(pose_lookup=self._pose_lookup, agent_id=aid)
+            return None
+        if kind == "pose":
+            return PoseAnchor(fixed=spec.anchor_pose or Pose2D())
+        if kind == "centroid":
+            members_ref = interaction.participants
+            return CentroidAnchor(
+                pose_lookup=self._pose_lookup,
+                members_fn=lambda: list(members_ref),
+            )
+        return None
+
+    def _build_anchor_for(self, interaction: InteractionState) -> Anchor | None:
+        it = InteractionType(interaction.type)
+        if it in (InteractionType.QUEUE_USE, InteractionType.USE, InteractionType.SIT_ON, InteractionType.LIE_ON):
+            if interaction.object_id and self._world_knowledge is not None:
+                return ObjectAnchor(world_knowledge=self._world_knowledge, object_id=interaction.object_id)
+            return PoseAnchor(fixed=Pose2D())
+        if it in (InteractionType.GROUP_CONVERSATION, InteractionType.TALK_TO):
+            members_ref = interaction.participants
+            return CentroidAnchor(
+                pose_lookup=self._pose_lookup,
+                members_fn=lambda: list(members_ref),
+            )
+        if it == InteractionType.FOLLOW:
+            leader = interaction.state.get("leader", -1)
+            if leader >= 0:
+                return AgentAnchor(pose_lookup=self._pose_lookup, agent_id=leader)
+        return None
 
     def _readvertise_for_participant(self, agent_id: int, interaction: InteractionState) -> None:
         if interaction.contract.is_full:
@@ -349,12 +588,14 @@ class InteractionManager(Loggable):
                 interactions_set.discard(interaction_id)
                 if not interactions_set:
                     del self._agent_to_interactions[agent_id]
+            self._on_formation_leave(interaction, agent_id)
         for agent_id in list(interaction.contract.queue):
             queues = self._agent_to_queues.get(agent_id)
             if queues is not None:
                 queues.discard(interaction_id)
                 if not queues:
                     del self._agent_to_queues[agent_id]
+            self._on_formation_leave(interaction, agent_id)
         for agent_id in list(self._advertisements.keys()):
             self._remove_ads_for_interaction(agent_id, interaction_id)
 

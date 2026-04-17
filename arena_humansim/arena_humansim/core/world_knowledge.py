@@ -13,6 +13,56 @@ class WorldObject:
     pose: Pose2D = attrs.Factory(Pose2D)
     capacity: int = 1
     satisfies: dict[str, float] = attrs.Factory(dict)
+    formation: "FormationSpec | None" = None
+
+
+_VALID_FORMATION_TYPES = ("line", "cluster", "f_formation", "dyad")
+_VALID_ANCHOR_KINDS = ("object", "agent", "pose", "centroid")
+
+
+@attrs.define
+class FormationSpec:
+    """Runtime representation of a scenario FormationConfig on a WorldObject."""
+
+    type: str
+    params: dict[str, float] = attrs.Factory(dict)
+    anchor_kind: str = "object"
+    anchor_ref: str | None = None
+    anchor_pose: Pose2D | None = None
+
+    @classmethod
+    def from_config(cls, cfg: object) -> "FormationSpec | None":
+        if cfg is None:
+            return None
+        ftype = getattr(cfg, "type", None)
+        if not ftype:
+            return None
+        if ftype not in _VALID_FORMATION_TYPES:
+            raise ValueError(f"Unknown formation type '{ftype}'. Valid: {_VALID_FORMATION_TYPES}")
+        params_cfg = getattr(cfg, "params", None) or {}
+        anchor_cfg = getattr(cfg, "anchor", None)
+        anchor_kind = "object"
+        anchor_ref: str | None = None
+        anchor_pose: Pose2D | None = None
+        if anchor_cfg is not None:
+            anchor_kind = getattr(anchor_cfg, "kind", "object")
+            if anchor_kind not in _VALID_ANCHOR_KINDS:
+                raise ValueError(f"Unknown anchor kind '{anchor_kind}'. Valid: {_VALID_ANCHOR_KINDS}")
+            anchor_ref = getattr(anchor_cfg, "ref", None)
+            pose_cfg = getattr(anchor_cfg, "pose", None)
+            if pose_cfg is not None:
+                anchor_pose = Pose2D(
+                    x=float(getattr(pose_cfg, "x", 0.0)),
+                    y=float(getattr(pose_cfg, "y", 0.0)),
+                    theta=float(getattr(pose_cfg, "theta", 0.0)),
+                )
+        return cls(
+            type=ftype,
+            params=dict(params_cfg),
+            anchor_kind=anchor_kind,
+            anchor_ref=anchor_ref,
+            anchor_pose=anchor_pose,
+        )
 
 
 class WorldKnowledge(Loggable):

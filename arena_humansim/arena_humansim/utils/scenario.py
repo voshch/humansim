@@ -32,6 +32,7 @@ class SimulationParams:
     bt_tick_interval: int = 5
     max_ticks: int = 0  # 0 = run indefinitely
     execution_mode: str = "master"
+    formation_scale: float = 1.0  # global multiplier on formation spacing/radii
 
 
 @attrs.define
@@ -117,12 +118,27 @@ class FlowScenarioConfig:
 
 
 @attrs.define
+class AnchorConfig:
+    kind: str = "object"  # "object" | "agent" | "pose" | "centroid"
+    ref: str | None = None  # object_id or agent_id (as str) for object/agent; None for pose/centroid
+    pose: Pose2DModel | None = None  # for kind="pose"
+
+
+@attrs.define
+class FormationConfig:
+    type: str = ""  # "line" | "cluster" | "f_formation" | "dyad"
+    anchor: AnchorConfig | None = None  # defaults to OBJECT anchor on the owning object
+    params: dict[str, float] = attrs.Factory(dict)  # strategy-specific (base_step, radius, etc)
+
+
+@attrs.define
 class WorldObjectConfig:
     object_id: str = ""
     type: str = ""
     pose: Pose2DModel = attrs.Factory(Pose2DModel)
     capacity: int = 1
     satisfies: dict[str, float] = attrs.Factory(dict)
+    formation: FormationConfig | None = None
 
 
 @attrs.define

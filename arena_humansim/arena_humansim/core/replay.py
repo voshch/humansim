@@ -84,6 +84,8 @@ class ReplayManager(Loggable):
             max_deceleration=p.get("max_deceleration", 2.5),
             min_turning_radius=p.get("min_turning_radius", 0.5),
             pivot_angular_velocity=p.get("pivot_angular_velocity", 2.0),
+            reaction_time=p.get("reaction_time", 0.4),
+            personal_space_min=p.get("personal_space_min", 0.6),
             perception=SampledPerception(
                 vision_range=perc.get("vision_range", p.get("vision_range", 5.0)),
                 vision_fov=perc.get("vision_fov", p.get("vision_fov", 180.0)),

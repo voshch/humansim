@@ -63,6 +63,8 @@ def test_sampled_params_frozen() -> None:
         max_deceleration=2.0,
         min_turning_radius=0.3,
         pivot_angular_velocity=1.5,
+        reaction_time=0.4,
+        personal_space_min=0.6,
     )
     with pytest.raises(attrs.exceptions.FrozenInstanceError):
         object.__setattr__  # touch so linter keeps import
