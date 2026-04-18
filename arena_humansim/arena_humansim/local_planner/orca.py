@@ -51,7 +51,7 @@ class ORCAPlanner(LocalPlanner):
             pos = np.array([agent.state.pose.x, agent.state.pose.y])
             vel = np.array(agent.state.velocity)
             radius_a = params.agent_radius
-            max_speed = params.desired_velocity
+            max_speed = params.max_velocity
             desired_vel = params.desired_velocity
 
             goal_pos = np.array([goal.x, goal.y])
@@ -59,10 +59,9 @@ class ORCAPlanner(LocalPlanner):
             diff = goal_pos - pos
             dist = np.linalg.norm(diff)
             if dist < _EPS:
-                velocities[aid] = (0.0, 0.0)
-                continue
-
-            pref_vel = (diff / dist) * desired_vel
+                pref_vel = np.zeros(2)
+            else:
+                pref_vel = (diff / dist) * desired_vel
 
             neighbors: list[tuple[np.ndarray, np.ndarray, float]] = []
             if tree is not None:
@@ -108,7 +107,7 @@ class ORCAPlanner(LocalPlanner):
                     else:
                         leg = np.sqrt(max(dist_sq - combined_radius_sq, _EPS))
 
-                        if float(np.cross(rel_pos, w)) > 0.0:
+                        if rel_pos[0] * w[1] - rel_pos[1] * w[0] > 0.0:
                             direction = (
                                 np.array(
                                     [

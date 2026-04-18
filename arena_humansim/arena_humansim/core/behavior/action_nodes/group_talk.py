@@ -56,9 +56,8 @@ class GroupTalkNode(py_trees.behaviour.Behaviour):
             else:
                 self.agent.movement.command = HighLevelCommand(
                     agent_id=self.agent.state.agent_id,
-                    type=CommandType.ACCEPT,
+                    type=CommandType.ADVERTISE,
                     interaction_type=InteractionType.GROUP_CONVERSATION,
-                    interaction_target=-1,
                     target_agent=self.agents[0].state.agent_id,
                 )
             self.emitted_cmd = True

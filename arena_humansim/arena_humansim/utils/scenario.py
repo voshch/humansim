@@ -10,7 +10,7 @@ import attrs
 import yaml
 
 from ..core.agents import AgentType, VarDef
-from .types import converter
+from .types import InteractionType, converter
 
 
 @attrs.define
@@ -44,6 +44,12 @@ class ModuleConfig:
 
 
 @attrs.define
+class ServiceSpec:
+    tag: str = ""
+    max_participants: int = -1
+
+
+@attrs.define
 class AgentConfig:
     agent_id: int = 0
     agent_type: str = "adult"
@@ -55,6 +61,8 @@ class AgentConfig:
     kind: int = 0  # 0=human, 1=robot (see AgentKind)
     policy: str = ""  # local planner name for robots; empty = teleport-only
     policy_params: str = ""  # opaque JSON blob forwarded to the planner
+    services: list[ServiceSpec] = attrs.Factory(list)
+    spawn_tick: int = 0  # deferred spawn; 0 = spawn on first tick
 
 
 @attrs.define
@@ -139,6 +147,7 @@ class WorldObjectConfig:
     capacity: int = 1
     satisfies: dict[str, float] = attrs.Factory(dict)
     formation: FormationConfig | None = None
+    interaction_radius: float | None = None
 
 
 @attrs.define
@@ -473,7 +482,7 @@ def _structure_manual(
     obstacles = [converter.structure(o, ObstacleSceneConfig) for o in data.get("obstacles", [])]
     event_scripts = [converter.structure(es, EventScript) for es in data.get("event_scripts", [])]
 
-    return ScenarioConfig(
+    config = ScenarioConfig(
         name=data.get("name", "unnamed"),
         description=data.get("description", ""),
         simulation=sim,
@@ -487,3 +496,41 @@ def _structure_manual(
         obstacles=obstacles,
         event_scripts=event_scripts,
     )
+
+    _validate_target_object_refs(config)
+    _validate_interaction_scripts(config)
+    return config
+
+
+def _validate_target_object_refs(config: ScenarioConfig) -> None:
+    world_types = {wo.type for wo in config.world_objects}
+    world_ids = {wo.object_id for wo in config.world_objects}
+    for atype_name, atype in config.agent_types.items():
+        for seq_name, seq in atype.sequences.items():
+            for step_name, step in seq.steps.items():
+                if step.target_object_id is not None and step.target_object_type is not None:
+                    raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: target_object_id and target_object_type are mutually exclusive")
+                if step.target_object_id is not None and step.target_object_id not in world_ids:
+                    raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: target_object_id={step.target_object_id!r} does not match any world_objects object_id")
+                if step.target_object_type is not None and step.target_object_type not in world_types:
+                    raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: target_object_type={step.target_object_type!r} does not match any world_objects type")
+        for action_name, action in atype.actions.items():
+            if action.target_object_id is not None and action.target_object_type is not None:
+                raise ValueError(f"agent_type={atype_name!r} action={action_name!r}: target_object_id and target_object_type are mutually exclusive")
+            if action.target_object_id is not None and action.target_object_id not in world_ids:
+                raise ValueError(f"agent_type={atype_name!r} action={action_name!r}: target_object_id={action.target_object_id!r} does not match any world_objects object_id")
+            if action.target_object_type is not None and action.target_object_type not in world_types:
+                raise ValueError(f"agent_type={atype_name!r} action={action_name!r}: target_object_type={action.target_object_type!r} does not match any world_objects type")
+
+
+def _validate_interaction_scripts(config: ScenarioConfig) -> None:
+    known_types = {it.name for it in InteractionType}
+    agent_ids = {a.agent_id for a in config.agents}
+    for i, script in enumerate(config.interaction_scripts):
+        if script.interaction_type not in known_types:
+            raise ValueError(f"interaction_scripts[{i}]: unknown interaction_type={script.interaction_type!r}; expected one of {sorted(known_types)}")
+        if script.duration_ticks < 0:
+            raise ValueError(f"interaction_scripts[{i}]: duration_ticks={script.duration_ticks} must be >= 0")
+        for pid in script.participants:
+            if pid not in agent_ids:
+                raise ValueError(f"interaction_scripts[{i}]: participant agent_id={pid} is not defined in scenario agents")

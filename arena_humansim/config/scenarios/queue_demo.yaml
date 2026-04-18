@@ -1,0 +1,117 @@
+# queue_demo.yaml
+# Office water-cooler scene: a group of colleagues stands around a gathering
+# spot holding a GROUP_CONVERSATION (F-formation). Occasionally an individual
+# gets thirsty and breaks off to queue at the water fountain (LINE + FIFO),
+# then returns to the conversation. Demonstrates both formation types and a
+# need-driven break-off transition.
+
+name: queue_demo
+description: >-
+  Five colleagues hold an F-formation conversation next to a water fountain.
+  A thirst need drives periodic break-offs: thirsty agents queue at the
+  fountain (LINE/FIFO), drink, and rejoin the group.
+
+simulation:
+  seed: 7
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 2000
+  execution_mode: master
+  formation_scale: 1.0
+
+modules:
+  perception: default
+  global_planner: dijkstra
+  local_planner: sfm
+  animation: kinematic
+
+world_objects:
+  - object_id: fountain
+    type: fountain
+    pose: {x: 4.0, y: 0.0, theta: 3.14159}   # faces west; line extends east
+    capacity: 1
+    satisfies: {thirst: 100.0}
+    formation:
+      type: line
+      params: {base_step: 1.0, front_offset: 0.8}
+
+  - object_id: gathering_area
+    type: gathering_area
+    pose: {x: -3.0, y: 0.0, theta: 0.0}
+    capacity: 0
+    formation:
+      type: f_formation
+      anchor: {kind: object, ref: gathering_area}
+      params: {base_radius: 0.8, radius_per_member: 0.12}
+
+agent_types:
+  colleague:
+    extends: adult
+    mode: behavior_tree
+    desired_velocity: {mean: 1.1, std: 0.2, clip_low: 0.7, clip_high: 1.5}
+    needs:
+      thirst:
+        initial: {mean: 55.0, std: 15.0, clip_low: 25.0, clip_high: 90.0}
+        decay_rate: {mean: 8.0, std: 2.0, clip_low: 4.0, clip_high: 14.0}
+    utility_weights:
+      thirst: 1.0
+    initial_sequence: chat
+    sequences:
+      chat:
+        steps:
+          hold_conversation:
+            target_object_type: gathering_area
+            interaction: GROUP_CONVERSATION
+            duration: {mean: 45.0, std: 15.0, clip_low: 15.0, clip_high: 90.0}
+            patience: {mean: 60.0, std: 10.0, clip_low: 30.0, clip_high: 120.0}
+        then: chat
+        transitions:
+          - when: {thirst: {below: 30.0}}
+            goto: drink
+      drink:
+        steps:
+          queue_and_drink:
+            target_object_type: fountain
+            interaction: USE
+            duration: {mean: 6.0, std: 1.5, clip_low: 3.0, clip_high: 12.0}
+            satisfies: {thirst: 100.0}
+        then: chat
+
+agents:
+  - agent_id: 1
+    agent_type: colleague
+    spawn_pose: {x: -3.8, y: 0.0, theta: 0.0}
+
+  - agent_id: 2
+    agent_type: colleague
+    spawn_pose: {x: -2.2, y: 0.7, theta: -1.57}
+
+  - agent_id: 3
+    agent_type: colleague
+    spawn_pose: {x: -2.2, y: -0.7, theta: 1.57}
+
+  - agent_id: 4
+    agent_type: colleague
+    spawn_pose: {x: -3.5, y: -0.6, theta: 0.5}
+
+  - agent_id: 5
+    agent_type: colleague
+    spawn_pose: {x: -3.5, y: 0.6, theta: -0.5}
+
+# Additional colleagues trickle in from a doorway east of the fountain.
+flow:
+  sources:
+    - pose: {x: 12.0, y: 0.0, theta: 3.14159}
+      shape: {type: circle, radius: 1.5}
+      rate_profile:
+        - {t: 0.0, rate: 0.4}
+        - {t: 25.0, rate: 0.0}
+      max_concurrent: -1
+      max_total: 5
+      agent_template:
+        agent_type: colleague
+        desired_velocity_min: 1.0
+        desired_velocity_max: 1.4
+        agent_radius: 0.35
+
+interaction_scripts: []

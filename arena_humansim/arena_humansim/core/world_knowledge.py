@@ -14,6 +14,7 @@ class WorldObject:
     capacity: int = 1
     satisfies: dict[str, float] = attrs.Factory(dict)
     formation: "FormationSpec | None" = None
+    interaction_radius: float | None = None
 
 
 _VALID_FORMATION_TYPES = ("line", "cluster", "f_formation", "dyad")
@@ -130,6 +131,9 @@ class WorldKnowledge(Loggable):
         for obj in self._by_type.get(object_type, []):
             total += self._queue_lengths.get(obj.object_id, 0)
         return total
+
+    def queue_length_for_object(self, object_id: str) -> int:
+        return self._queue_lengths.get(object_id, 0)
 
     def clear(self) -> None:
         self._objects.clear()

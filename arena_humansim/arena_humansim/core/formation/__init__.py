@@ -29,6 +29,9 @@ class Formation(Loggable, ABC):
     @abstractmethod
     def tick(self, dt: float) -> dict[int, Pose2D]: ...
 
+    def arrived(self, agent_id: int) -> bool:
+        return True
+
     @classmethod
     def register(cls, name: str) -> Callable[[Callable[[], type[Formation]]], Callable[[], type[Formation]]]:
         return _registry.register(name)

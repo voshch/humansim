@@ -57,7 +57,8 @@ class VarDef:
 class ActionDef:
     when: dict[str, NeedCondition] = attrs.Factory(dict)
     interaction: str | None = None
-    target_object: str | None = None
+    target_object_type: str | None = None
+    target_object_id: str | None = None
     duration: ParamDist | None = None
     patience: ParamDist | None = None
     satisfies: dict[str, float] = attrs.Factory(dict)
@@ -72,7 +73,8 @@ class TransitionDef:
 
 @attrs.frozen
 class StepDef:
-    target_object: str | None = None
+    target_object_type: str | None = None
+    target_object_id: str | None = None
     interaction: str | None = None
     duration: ParamDist | None = None
     patience: ParamDist | None = None
@@ -86,6 +88,8 @@ class StepDef:
     blocked_actions: tuple[str, ...] | None = None
 
     interruptible: bool | None = None
+
+    interaction_radius: float | None = None
 
 
 @attrs.frozen

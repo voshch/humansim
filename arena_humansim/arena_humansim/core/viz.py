@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import math
-import queue
-import threading
 from typing import TYPE_CHECKING
 
 from builtin_interfaces.msg import Time
@@ -181,29 +179,15 @@ class MarkerPublisher:
         self._scene: dict[tuple[str, int], Marker] = {}
         self._pool: dict[str, list[Marker]] = {}
         self._touched: set[tuple[str, int]] = set()
+        self._touched_ns: set[str] = set()
         self._dirty: set[tuple[str, int]] = set()
         self._ns_count: dict[str, int] = {}
-        self._queue: queue.SimpleQueue[list[MarkerArray] | None] = queue.SimpleQueue()
-        self._thread = threading.Thread(target=self._publish_loop, daemon=True)
-        self._thread.start()
-
-    def _publish_loop(self):
-        while True:
-            batch = self._queue.get()
-            if batch is None:
-                break
-            while not self._queue.empty():
-                next_batch = self._queue.get()
-                if next_batch is None:
-                    return
-                batch = next_batch
-            for ma in batch:
-                self._pub.publish(ma)
 
     def _stamp(self) -> Time:
         return self._node.get_clock().now().to_msg()
 
     def view(self, ns: str, mtype: int, count: int = 0, dirty: bool = True) -> MarkerView:
+        self._touched_ns.add(ns)
         have = self._ns_count.get(ns, 0)
         if count > have:
             pool = self._pool.setdefault(ns, [])
@@ -234,8 +218,7 @@ class MarkerPublisher:
 
     def flush(self):
         stamp = self._stamp()
-        touched_ns = {ns for ns, _ in self._touched}
-        stale = [(ns, mid) for ns, mid in self._scene if ns in touched_ns and (ns, mid) not in self._touched]
+        stale = [(ns, mid) for ns, mid in self._scene if ns in self._touched_ns and (ns, mid) not in self._touched]
 
         deletes: list[Marker] = []
         for ns, mid in stale:
@@ -255,20 +238,17 @@ class MarkerPublisher:
             m.header.stamp = stamp
             adds.append(m)
 
-        batch: list[MarkerArray] = []
         if deletes:
             ma = MarkerArray()
             ma.markers = deletes
-            batch.append(ma)
+            self._pub.publish(ma)
         if adds:
             ma = MarkerArray()
             ma.markers = adds
-            batch.append(ma)
-
-        if batch:
-            self._queue.put(batch)
+            self._pub.publish(ma)
 
         self._touched.clear()
+        self._touched_ns.clear()
         self._dirty.clear()
 
     def forget_all(self):
@@ -276,19 +256,25 @@ class MarkerPublisher:
         m.action = Marker.DELETEALL
         ma = MarkerArray()
         ma.markers = [m]
-        self._queue.put([ma])
+        self._pub.publish(ma)
         self._scene.clear()
         self._pool.clear()
         self._ns_count.clear()
         self._touched.clear()
+        self._touched_ns.clear()
         self._dirty.clear()
 
-    def shutdown(self):
-        self._queue.put(None)
-        self._thread.join(timeout=1.0)
 
-
-def publish_behavior(pub: MarkerPublisher, agents: Iterable[BaseAgent], cmds: dict[int, HighLevelCommand]) -> None:
+def publish_behavior(
+    pub: MarkerPublisher,
+    agents: Iterable[BaseAgent],
+    cmds: dict[int, HighLevelCommand],
+    interactions: dict[int, InteractionState] | None = None,
+) -> None:
+    in_interaction: set[int] = set()
+    if interactions:
+        for inter in interactions.values():
+            in_interaction.update(inter.participants)
     cmd_view = pub.view("cmd", Marker.TEXT_VIEW_FACING)
     for agent in agents:
         aid = agent.state.agent_id
@@ -300,7 +286,10 @@ def publish_behavior(pub: MarkerPublisher, agents: Iterable[BaseAgent], cmds: di
                 m.color = _C_CMD
             m.pose.position.x, m.pose.position.y, m.pose.position.z = x, y, 0.9
             m.scale.z = 0.2
-            m.text = _CMD_NAMES.get(cmd.type, str(cmd.type))
+            label = _CMD_NAMES.get(cmd.type, str(cmd.type))
+            if aid in in_interaction and cmd.type == 0:
+                label = "INTR"
+            m.text = label
         if agent.needs is not None:
             for i, (name, need) in enumerate(agent.needs.needs.items()):
                 clr = _NEED_COLORS[i % len(_NEED_COLORS)]

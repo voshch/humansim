@@ -46,10 +46,12 @@ def test_centroid_anchor_averages_member_poses() -> None:
         2: Pose2D(x=4.0, y=0.0),
         3: Pose2D(x=2.0, y=6.0),
     }
+    expected_x = sum(v.x for v in poses.values()) / len(poses)
+    expected_y = sum(v.y for v in poses.values()) / len(poses)
     a = CentroidAnchor(pose_lookup=poses.get, members_fn=lambda: [1, 2, 3])
     p = a.pose()
-    assert p.x == pytest.approx(2.0)
-    assert p.y == pytest.approx(2.0)
+    assert p.x == pytest.approx(expected_x)
+    assert p.y == pytest.approx(expected_y)
 
 
 def test_centroid_anchor_updates_as_members_change() -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+from arena_humansim.utils import DISTANCE_TOLERANCE
 from arena_humansim.utils.types import Pose2D
 
 from . import AgentLookup, Formation
@@ -63,3 +64,16 @@ class DyadFormation(Formation):
         out[a_id] = Pose2D(x=center.x - dx, y=center.y - dy, theta=self._axis_yaw)
         out[b_id] = Pose2D(x=center.x + dx, y=center.y + dy, theta=self._axis_yaw + math.pi)
         return out
+
+    def arrived(self, agent_id: int) -> bool:
+        if agent_id not in self._members:
+            return True
+        targets = self.tick(0.0)
+        slot = targets.get(agent_id)
+        if slot is None:
+            return True
+        agent = self.agent_lookup(agent_id)
+        if agent is None:
+            return True
+        pose = agent.state.pose
+        return math.hypot(pose.x - slot.x, pose.y - slot.y) < DISTANCE_TOLERANCE

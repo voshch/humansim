@@ -20,16 +20,11 @@ from arena_humansim.core.interaction_manager import (
 from arena_humansim.core.world_knowledge import FormationSpec, WorldKnowledge, WorldObject
 from arena_humansim.utils.rng import RNG
 from arena_humansim.utils.types import (
+    BehaviorTreeMovement,
     HighLevelCommand,
     InteractionType,
     Pose2D,
 )
-
-
-@dataclass
-class _FakeMovement:
-    command: HighLevelCommand | None = None
-    last_outcome: int | None = None
 
 
 @dataclass
@@ -49,7 +44,7 @@ class _FakeState:
 class _FakeAgent:
     state: _FakeState
     params: _FakeParams = field(default_factory=_FakeParams)
-    movement: _FakeMovement = field(default_factory=_FakeMovement)
+    movement: BehaviorTreeMovement = field(default_factory=BehaviorTreeMovement)
 
 
 def _mk_manager(agents: dict[int, _FakeAgent], world: WorldKnowledge | None = None) -> InteractionManager:
@@ -59,19 +54,9 @@ def _mk_manager(agents: dict[int, _FakeAgent], world: WorldKnowledge | None = No
 
 
 def _advertise(mgr: InteractionManager, agent_id: int, itype: int, object_id: str | None = None) -> int:
-    if object_id is not None:
-        iid = mgr.next_interaction_id
-        mgr._create_interaction(int(itype), agent_id, object_id=object_id)
-        return iid
-    cmd = HighLevelCommand(
-        agent_id=agent_id,
-        type=int(CommandType.ADVERTISE),
-        interaction_type=int(itype),
-    )
-    mgr.update({agent_id: cmd})
-    ads = mgr._advertisements.get(agent_id, [])
-    assert ads and ads[-1].interaction_id is not None
-    return ads[-1].interaction_id
+    """Create an interaction with `agent_id` as creator, bypassing the matcher."""
+    interaction = mgr._create_interaction(int(itype), agent_id, object_id=object_id)
+    return interaction.id
 
 
 def test_resolve_formation_uses_object_metadata_override() -> None:
@@ -183,8 +168,9 @@ def test_tick_formations_writes_navigate_to_member() -> None:
     agents = {1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D()))}
     mgr = _mk_manager(agents, world=wk)
     iid = _advertise(mgr, 1, InteractionType.QUEUE_USE, object_id="atm")
-    # Run another update to tick formations after creation
-    mgr.update({}, dt=0.05)
+    _, formation_targets, _ = mgr.update({}, dt=0.05)
+    assert 1 in formation_targets
+    assert formation_targets[1] == Pose2D(x=5.0, y=0.0, theta=0.0)
     cmd = agents[1].movement.command
     assert cmd is not None
     assert cmd.type == int(CommandType.NAVIGATE)

@@ -62,9 +62,15 @@ def test_interpolate_rate_endpoints() -> None:
 
 
 def test_interpolate_rate_linear_midpoint() -> None:
-    profile = [RateKeyframe(t=0.0, rate=2.0), RateKeyframe(t=4.0, rate=6.0)]
-    assert SpawnScheduler._interpolate_rate(profile, 2.0) == pytest.approx(4.0)
-    assert SpawnScheduler._interpolate_rate(profile, 1.0) == pytest.approx(3.0)
+    t_start, rate_start = 0.0, 2.0
+    t_end, rate_end = 4.0, 6.0
+    profile = [RateKeyframe(t=t_start, rate=rate_start), RateKeyframe(t=t_end, rate=rate_end)]
+
+    def lerp(t: float) -> float:
+        return rate_start + (rate_end - rate_start) * (t - t_start) / (t_end - t_start)
+
+    assert SpawnScheduler._interpolate_rate(profile, 2.0) == pytest.approx(lerp(2.0))
+    assert SpawnScheduler._interpolate_rate(profile, 1.0) == pytest.approx(lerp(1.0))
 
 
 def test_interpolate_rate_zero_dt_tie() -> None:

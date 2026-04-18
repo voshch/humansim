@@ -31,6 +31,7 @@ class InteractionType(enum.IntEnum):
     QUEUE_USE = 6
     WAVE_AT = 7
     BLOCK = 8
+    SERVICE = 9
 
 
 class InteractionOutcome(enum.IntEnum):
@@ -115,6 +116,7 @@ class InteractionState:
     state: dict[str, Any] = attrs.Factory(dict)
     object_id: str | None = None
     outcome: int = 0  # InteractionOutcome.FORMING
+    member_durations: dict[int, float] = attrs.Factory(dict)
 
 
 @attrs.define
@@ -126,7 +128,10 @@ class HighLevelCommand:
     interaction_target: int = -1
     interaction_type: int = 0
     target_agent: int = -1  # -1 = broadcast; >= 0 = only this agent can accept
-    interaction_duration: float = -1.0  # seconds; -1 = no contract-level timeout
+    interaction_duration: float | None = None  # seconds; None = no contract-level timeout
+    object_id: str | None = None
+    service_tag: str | None = None
+    max_participants: int | None = None
 
 
 @attrs.define

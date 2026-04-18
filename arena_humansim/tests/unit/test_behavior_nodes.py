@@ -26,6 +26,7 @@ from arena_humansim.core.behavior.nodes import (
     _at_target,
     _interaction_command,
     _nav_command,
+    _resolve_interaction_radius,
     _sample_param_dist,
     check_condition,
     preconditions_met,
@@ -124,7 +125,7 @@ def test_score_actions_queue_penalty(world: WorldKnowledge) -> None:
 
     needs = {"rest": NeedState(value=0.0)}
     actions = {
-        "sit": ActionDef(target_object="chair", satisfies={"rest": 100.0}),
+        "sit": ActionDef(target_object_type="chair", satisfies={"rest": 100.0}),
         "stand": ActionDef(satisfies={"rest": 100.0}),
     }
     scored = dict(score_actions(needs, actions, {}, world))
@@ -138,7 +139,7 @@ def test_score_actions_queue_penalty_floor(world: WorldKnowledge) -> None:
     world.set_queue_length("c1", 100)
 
     needs = {"rest": NeedState(value=0.0)}
-    actions = {"sit": ActionDef(target_object="chair", satisfies={"rest": 100.0})}
+    actions = {"sit": ActionDef(target_object_type="chair", satisfies={"rest": 100.0})}
     scored = dict(score_actions(needs, actions, {}, world))
     assert scored["sit"] == pytest.approx(0.2)
 
@@ -223,20 +224,43 @@ def _concrete_node(
     duration: ParamDist | None = None,
     patience: ParamDist | None = None,
     interaction: str | None = None,
-    target_object: str | None = None,
+    target_object_type: str | None = None,
+    target_object_id: str | None = None,
     satisfies: dict[str, float] | None = None,
+    interaction_radius: float | None = None,
     dt: float = 0.5,
 ) -> ConcreteStepNode:
     step = StepDef(
-        target_object=target_object,
+        target_object_type=target_object_type,
+        target_object_id=target_object_id,
         interaction=interaction,
         duration=duration,
         patience=patience,
         satisfies=satisfies or {},
+        interaction_radius=interaction_radius,
     )
     node = ConcreteStepNode("step", step, agent, world, rng, dt=dt)
     node.initialise()
     return node
+
+
+def test_concrete_target_object_id_resolves_to_specific_not_nearest(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
+    agent = _agent_with_bt(agent_factory, x=0.0, y=0.0)
+    # near_atm is closest by distance; far_atm is farther but named explicitly
+    world.add_object(WorldObject(object_id="near_atm", type="atm", pose=Pose2D(x=1.0, y=0.0)))
+    world.add_object(WorldObject(object_id="far_atm", type="atm", pose=Pose2D(x=10.0, y=0.0)))
+    node = _concrete_node(
+        agent,
+        world,
+        rng_np,
+        target_object_id="far_atm",
+        patience=ParamDist(30.0),
+    )
+    node.update()
+    cmd = _mv(agent).command
+    assert cmd is not None
+    assert cmd.type == CommandType.NAVIGATE
+    assert cmd.target_pose.x == pytest.approx(10.0)
 
 
 def test_concrete_interaction_completed_success(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
@@ -264,7 +288,7 @@ def test_concrete_navigates_when_not_at_target(agent_factory: Callable[..., Base
         agent,
         world,
         rng_np,
-        target_object="bench",
+        target_object_type="bench",
         duration=ParamDist(1.0),
         patience=ParamDist(10.0),
     )
@@ -282,14 +306,14 @@ def test_concrete_patience_triggers_failure_during_nav(agent_factory: Callable[.
         agent,
         world,
         rng_np,
-        target_object="bench",
+        target_object_type="bench",
         patience=ParamDist(0.4),
         dt=0.5,
     )
     assert node.update() == py_trees.common.Status.FAILURE
 
 
-def test_concrete_interaction_after_arrival_runs_then_succeeds(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
+def test_concrete_interaction_advertises_then_awaits_outcome(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
     agent = _agent_with_bt(agent_factory, x=0.0, y=0.0)
     agent.needs = _needs(energy=30.0)
     node = _concrete_node(
@@ -297,7 +321,7 @@ def test_concrete_interaction_after_arrival_runs_then_succeeds(agent_factory: Ca
         world,
         rng_np,
         interaction="TALK_TO",
-        duration=ParamDist(1.0),
+        patience=ParamDist(10.0),
         satisfies={"energy": 20.0},
         dt=0.5,
     )
@@ -307,13 +331,111 @@ def test_concrete_interaction_after_arrival_runs_then_succeeds(agent_factory: Ca
     assert cmd is not None
     assert cmd.type == CommandType.ADVERTISE
 
-    s2 = node.update()
-    assert s2 == py_trees.common.Status.RUNNING
+    assert node.update() == py_trees.common.Status.RUNNING
 
-    s3 = node.update()
-    assert s3 == py_trees.common.Status.SUCCESS
+    _mv(agent).last_outcome = InteractionOutcome.COMPLETED
+    assert node.update() == py_trees.common.Status.SUCCESS
     assert agent.needs is not None
     assert agent.needs.needs["energy"].value == pytest.approx(50.0)
+
+
+def test_concrete_interaction_advertise_carries_sampled_duration(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
+    agent = _agent_with_bt(agent_factory, x=0.0, y=0.0)
+    node = _concrete_node(
+        agent,
+        world,
+        rng_np,
+        interaction="TALK_TO",
+        duration=ParamDist(3.0),
+        patience=ParamDist(10.0),
+        dt=0.5,
+    )
+    node.update()
+    cmd = _mv(agent).command
+    assert cmd is not None
+    assert cmd.type == CommandType.ADVERTISE
+    assert cmd.interaction_duration == pytest.approx(3.0)
+
+
+def test_concrete_interaction_advertises_once_then_stays_silent(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
+    agent = _agent_with_bt(agent_factory, x=0.0, y=0.0)
+    node = _concrete_node(
+        agent,
+        world,
+        rng_np,
+        interaction="TALK_TO",
+        patience=ParamDist(10.0),
+        dt=0.5,
+    )
+    assert node.update() == py_trees.common.Status.RUNNING
+    first_cmd = _mv(agent).command
+    assert first_cmd is not None
+    assert first_cmd.type == CommandType.ADVERTISE
+
+    _mv(agent).command = None
+    assert node.update() == py_trees.common.Status.RUNNING
+    assert _mv(agent).command is None
+
+
+def test_interaction_step_navigates_before_advertising(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
+    agent = _agent_with_bt(agent_factory, x=10.0, y=10.0)
+    world.add_object(WorldObject(object_id="atm1", type="atm", pose=Pose2D(x=0.0, y=0.0)))
+    node = _concrete_node(
+        agent,
+        world,
+        rng_np,
+        interaction="USE",
+        target_object_type="atm",
+        patience=ParamDist(120.0),
+        dt=0.5,
+    )
+    assert node.update() == py_trees.common.Status.RUNNING
+    cmd = _mv(agent).command
+    assert cmd is not None
+    assert cmd.type == CommandType.NAVIGATE
+    assert cmd.target_pose.x == pytest.approx(0.0)
+    assert cmd.target_pose.y == pytest.approx(0.0)
+
+    agent.state.pose.x = 0.1
+    agent.state.pose.y = 0.0
+    assert node.update() == py_trees.common.Status.RUNNING
+    cmd = _mv(agent).command
+    assert cmd is not None
+    assert cmd.type == CommandType.ADVERTISE
+
+
+def test_interaction_radius_cascade() -> None:
+    type_default = 2.0  # TALK_TO
+    step_plain = StepDef(interaction="TALK_TO")
+    assert _resolve_interaction_radius(step_plain, None) == pytest.approx(type_default)
+
+    obj_with_override = WorldObject(object_id="b", type="bench", pose=Pose2D(), interaction_radius=1.25)
+    assert _resolve_interaction_radius(step_plain, obj_with_override) == pytest.approx(1.25)
+
+    step_with_override = StepDef(interaction="TALK_TO", interaction_radius=0.75)
+    assert _resolve_interaction_radius(step_with_override, obj_with_override) == pytest.approx(0.75)
+
+    step_no_interaction = StepDef()
+    assert _resolve_interaction_radius(step_no_interaction, None) == pytest.approx(0.5)
+
+
+def test_concrete_interaction_local_duration_does_not_force_success(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
+    agent = _agent_with_bt(agent_factory, x=0.0, y=0.0)
+    agent.needs = _needs(energy=30.0)
+    node = _concrete_node(
+        agent,
+        world,
+        rng_np,
+        interaction="TALK_TO",
+        duration=ParamDist(1.0),
+        patience=ParamDist(10.0),
+        satisfies={"energy": 20.0},
+        dt=0.5,
+    )
+    for _ in range(4):
+        assert node.update() == py_trees.common.Status.RUNNING
+    assert agent.needs is not None
+    assert agent.needs.needs["energy"].value == pytest.approx(30.0)
 
 
 def test_concrete_no_interaction_no_duration_immediate_success(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
@@ -415,7 +537,7 @@ def test_autonomous_picks_best_target_object(agent_factory: Callable[..., BaseAg
     agent.needs = _needs(rest=0.0)
     world.add_object(WorldObject(object_id="c1", type="chair", pose=Pose2D(x=2.0, y=0.0)))
 
-    actions = {"sit": ActionDef(target_object="chair", satisfies={"rest": 100.0})}
+    actions = {"sit": ActionDef(target_object_type="chair", satisfies={"rest": 100.0})}
     node = _auto_node(agent, world, event_bus, rng_np, actions=actions)
     status = node.update()
     assert status == py_trees.common.Status.RUNNING
@@ -462,16 +584,16 @@ def test_needs_decay_calls_decay(agent_factory: Callable[..., BaseAgent]) -> Non
     agent.needs.needs["energy"].decay_rate = 10.0
     node = NeedsDecayNode("decay", agent, dt=1.0)
     status = node.update()
-    assert status == py_trees.common.Status.SUCCESS
+    assert status == py_trees.common.Status.RUNNING
     assert agent.needs is not None
     assert agent.needs.needs["energy"].value == pytest.approx(40.0)
 
 
-def test_needs_decay_no_needs_still_success(agent_factory: Callable[..., BaseAgent]) -> None:
+def test_needs_decay_no_needs_still_running(agent_factory: Callable[..., BaseAgent]) -> None:
     agent = agent_factory(agent_id=1)
     agent.needs = None
     node = NeedsDecayNode("decay", agent, dt=1.0)
-    assert node.update() == py_trees.common.Status.SUCCESS
+    assert node.update() == py_trees.common.Status.RUNNING
 
 
 class _StubChild(py_trees.behaviour.Behaviour):

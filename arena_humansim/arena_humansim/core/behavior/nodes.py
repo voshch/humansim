@@ -12,8 +12,8 @@ from arena_humansim.core.agents import (
     SequenceDef,
     StepDef,
 )
-from arena_humansim.core.interaction_manager import CommandType
-from arena_humansim.core.world_knowledge import WorldKnowledge
+from arena_humansim.core.interaction_manager import CommandType, interaction_radius_for
+from arena_humansim.core.world_knowledge import WorldKnowledge, WorldObject
 from arena_humansim.utils import DISTANCE_TOLERANCE, DT
 from arena_humansim.utils.event_bus import EventBus
 from arena_humansim.utils.types import (
@@ -71,8 +71,12 @@ def score_actions(
             utility += urgency * weight * (delta / 100.0)
 
         # Queue length penalty for object-targeted actions
-        if action.target_object:
-            q_len = world.queue_length(action.target_object)
+        if action.target_object_id:
+            q_len = world.queue_length_for_object(action.target_object_id)
+            penalty = q_len * 0.05
+            utility *= max(0.2, 1.0 - penalty)
+        elif action.target_object_type:
+            q_len = world.queue_length(action.target_object_type)
             penalty = q_len * 0.05
             utility *= max(0.2, 1.0 - penalty)
 
@@ -101,22 +105,40 @@ def _interaction_command(
     agent: BaseAgent,
     interaction_name: str,
     target_agent: int = -1,
-    duration: float = -1.0,
+    interaction_target: int = -1,
+    duration: float | None = None,
+    object_id: str | None = None,
+    target_pose: Pose2D | None = None,
 ) -> HighLevelCommand:
-    return HighLevelCommand(
+    cmd = HighLevelCommand(
         agent_id=agent.state.agent_id,
         type=CommandType.ADVERTISE,
         desired_velocity=agent.state.desired_velocity,
         interaction_type=InteractionType[interaction_name].value,
         target_agent=target_agent,
+        interaction_target=interaction_target,
         interaction_duration=duration,
+        object_id=object_id,
     )
+    if target_pose is not None:
+        cmd.target_pose = target_pose
+    return cmd
 
 
-def _at_target(agent: BaseAgent, target_pose: Pose2D) -> bool:
+def _at_target(agent: BaseAgent, target_pose: Pose2D, tolerance: float = DISTANCE_TOLERANCE) -> bool:
     dx = agent.state.pose.x - target_pose.x
     dy = agent.state.pose.y - target_pose.y
-    return math.hypot(dx, dy) < DISTANCE_TOLERANCE
+    return math.hypot(dx, dy) < tolerance
+
+
+def _resolve_interaction_radius(step: StepDef, target_object: WorldObject | None) -> float:
+    if step.interaction_radius is not None:
+        return step.interaction_radius
+    if target_object is not None and target_object.interaction_radius is not None:
+        return target_object.interaction_radius
+    if step.interaction is not None:
+        return interaction_radius_for(InteractionType[step.interaction])
+    return DISTANCE_TOLERANCE
 
 
 class ConcreteStepNode(py_trees.behaviour.Behaviour):
@@ -140,54 +162,92 @@ class ConcreteStepNode(py_trees.behaviour.Behaviour):
         self._patience: float | None = None
         self._elapsed: float = 0.0
         self._target_pose: Pose2D | None = None
+        self._target_object_id: str | None = None
+        self._interaction_radius: float = DISTANCE_TOLERANCE
+        self._advertised: bool = False
 
     def initialise(self) -> None:
         self._elapsed = 0.0
         self._duration = _sample_param_dist(self._step.duration, self._rng) if self._step.duration is not None else None
         self._patience = _sample_param_dist(self._step.patience, self._rng) if self._step.patience is not None else None
         self._target_pose = None
+        self._target_object_id = None
+        self._advertised = False
         self._clear_outcome()
 
-        if self._step.target_object:
-            obj = self._world.nearest_object(self._step.target_object, self._agent.state.pose)
-            if obj is not None:
-                self._target_pose = obj.pose
+        obj: WorldObject | None = None
+        if self._step.target_object_id:
+            obj = self._world.get(self._step.target_object_id)
+            if obj is None:
+                _bt_logger.warning(f"Agent {self._agent.state.agent_id}: step {self.name} could not resolve target_object_id={self._step.target_object_id!r}")
+        elif self._step.target_object_type:
+            obj = self._world.nearest_object(self._step.target_object_type, self._agent.state.pose, exclude_full=False)
+            if obj is None:
+                _bt_logger.warning(f"Agent {self._agent.state.agent_id}: step {self.name} could not resolve target_object_type={self._step.target_object_type!r}")
+
+        if obj is not None:
+            self._target_pose = obj.pose
+            self._target_object_id = obj.object_id
+
+        self._interaction_radius = _resolve_interaction_radius(self._step, obj)
 
     def update(self) -> py_trees.common.Status:
-        outcome = self._read_outcome()
-        if outcome == InteractionOutcome.COMPLETED:
-            self._apply_satisfaction()
-            return py_trees.common.Status.SUCCESS
-        if outcome == InteractionOutcome.INTERRUPTED:
-            return py_trees.common.Status.FAILURE
+        if self._step.interaction is not None:
+            outcome = self._read_outcome()
+            if outcome == InteractionOutcome.COMPLETED:
+                self._apply_satisfaction()
+                return py_trees.common.Status.SUCCESS
+            if outcome == InteractionOutcome.INTERRUPTED:
+                return py_trees.common.Status.FAILURE
+
+            if not self._advertised:
+                if self._target_pose is not None and not _at_target(self._agent, self._target_pose, self._interaction_radius):
+                    self._agent.movement.command = _nav_command(self._agent, self._target_pose)
+                    self._elapsed += self._dt
+                    return py_trees.common.Status.FAILURE if self._patience_expired() else py_trees.common.Status.RUNNING
+                self._agent.movement.command = _interaction_command(
+                    self._agent,
+                    self._step.interaction,
+                    duration=self._duration,
+                    object_id=self._target_object_id,
+                    target_pose=self._target_pose,
+                )
+                self._advertised = True
+
+            self._elapsed += self._dt
+            return py_trees.common.Status.FAILURE if self._patience_expired() else py_trees.common.Status.RUNNING
 
         if self._target_pose is not None and not _at_target(self._agent, self._target_pose):
             self._agent.movement.command = _nav_command(self._agent, self._target_pose)
             self._elapsed += self._dt
-            if self._patience is not None and self._elapsed >= self._patience:
-                return py_trees.common.Status.FAILURE
-            return py_trees.common.Status.RUNNING
-
-        if self._step.interaction is not None:
-            self._agent.movement.command = _interaction_command(self._agent, self._step.interaction)
+            return py_trees.common.Status.FAILURE if self._patience_expired() else py_trees.common.Status.RUNNING
 
         if self._duration is not None:
             if self._elapsed >= self._duration:
                 self._apply_satisfaction()
                 return py_trees.common.Status.SUCCESS
             self._elapsed += self._dt
-            if self._patience is not None and self._elapsed >= self._patience:
-                return py_trees.common.Status.FAILURE
-            return py_trees.common.Status.RUNNING
+            return py_trees.common.Status.FAILURE if self._patience_expired() else py_trees.common.Status.RUNNING
 
-        if self._step.interaction is None:
-            self._apply_satisfaction()
-            return py_trees.common.Status.SUCCESS
+        self._apply_satisfaction()
+        return py_trees.common.Status.SUCCESS
 
-        self._elapsed += self._dt
-        if self._patience is not None and self._elapsed >= self._patience:
-            return py_trees.common.Status.FAILURE
-        return py_trees.common.Status.RUNNING
+    def terminate(self, new_status: py_trees.common.Status) -> None:
+        # When a transition yanks us out of an interaction-based step, the agent
+        # still holds its participant slot in the interaction manager. Emit a
+        # STOP so it gets released; otherwise the formation keeps tugging them
+        # back to their old slot while the next step tries to navigate away.
+        if self._step.interaction is None or not self._advertised:
+            return
+        self._agent.movement.command = HighLevelCommand(
+            agent_id=self._agent.state.agent_id,
+            type=CommandType.STOP,
+            interaction_target=-1,
+        )
+        self._advertised = False
+
+    def _patience_expired(self) -> bool:
+        return self._patience is not None and self._elapsed >= self._patience
 
     def _apply_satisfaction(self) -> None:
         if self._step.satisfies and self._agent.needs is not None:
@@ -269,10 +329,18 @@ class AutonomousNode(py_trees.behaviour.Behaviour):
             best_name, _score = scored[0]
             best_action = self._actions[best_name]
 
-            if best_action.target_object:
-                obj = self._world.nearest_object(best_action.target_object, self._agent.state.pose)
+            if best_action.target_object_id:
+                obj = self._world.get(best_action.target_object_id)
                 if obj is not None:
                     self._agent.movement.command = _nav_command(self._agent, obj.pose)
+                else:
+                    _bt_logger.warning(f"Agent {agent_id}: step {self.name} could not resolve target_object_id={best_action.target_object_id!r}")
+            elif best_action.target_object_type:
+                obj = self._world.nearest_object(best_action.target_object_type, self._agent.state.pose)
+                if obj is not None:
+                    self._agent.movement.command = _nav_command(self._agent, obj.pose)
+                else:
+                    _bt_logger.warning(f"Agent {agent_id}: step {self.name} could not resolve target_object_type={best_action.target_object_type!r}")
             elif best_action.interaction:
                 self._agent.movement.command = _interaction_command(self._agent, best_action.interaction)
             else:
@@ -293,7 +361,7 @@ class NeedsDecayNode(py_trees.behaviour.Behaviour):
     def update(self) -> py_trees.common.Status:
         if self._agent.needs is not None:
             self._agent.needs.decay(self._dt)
-        return py_trees.common.Status.SUCCESS
+        return py_trees.common.Status.RUNNING
 
 
 class SequenceStateMachine(py_trees.behaviour.Behaviour):
@@ -319,24 +387,21 @@ class SequenceStateMachine(py_trees.behaviour.Behaviour):
         self._current_node.initialise()
 
     def update(self) -> py_trees.common.Status:
-        # 1. Check conditional transitions
         redirect = self._check_transitions()
         if redirect is not None:
             return self._goto(redirect)
 
-        # 2. Tick current sequence
-        status = self._current_node.update()
+        self._current_node.tick_once()
+        status = self._current_node.status
 
         if status == py_trees.common.Status.SUCCESS:
             seq_def = self._sequence_defs[self._current_name]
-            self._current_node.terminate(status)
             if seq_def.then is None:
                 return py_trees.common.Status.SUCCESS
             return self._goto(seq_def.then)
 
         if status == py_trees.common.Status.FAILURE:
             seq_def = self._sequence_defs[self._current_name]
-            self._current_node.terminate(status)
             if seq_def.on_failure is None:
                 return py_trees.common.Status.FAILURE
             return self._goto(seq_def.on_failure)

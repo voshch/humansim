@@ -78,6 +78,7 @@ def generate_launch_description():
         package="arena_humansim",
         executable="arena_humansim_node",
         name="arena_humansim",
+        namespace="arena_humansim",
         parameters=[
             {"mode": LaunchConfiguration("mode"),
              "use_sim_time": LaunchConfiguration("use_sim_time"),
@@ -90,6 +91,15 @@ def generate_launch_description():
              "rtf": ParameterValue(LaunchConfiguration("rtf"), value_type=float)},
         ],
         output="screen",
+    )
+
+    map_tf = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="arena_humansim_map_tf",
+        arguments=["--frame-id", "world", "--child-frame-id", "map"],
+        parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
+        output="log",
     )
 
     kill_rviz = ExecuteProcess(cmd=["pkill", "-INT", "-f", "rviz2.*arena_humansim.rviz"], output="log")
@@ -108,6 +118,7 @@ def generate_launch_description():
         DeclareLaunchArgument("time", default_value="0.0", description="stop after N seconds of sim time (ignored if ticks is set)"),
         DeclareLaunchArgument("rtf", default_value="1.0", description="real-time factor (0 = unthrottled, 1.0 = real-time)"),
         OpaqueFunction(function=_compute_record_dir),
+        map_tf,
         node,
         OpaqueFunction(function=_rviz_action),
         RegisterEventHandler(OnProcessExit(

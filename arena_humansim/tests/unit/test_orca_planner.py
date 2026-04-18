@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import attrs
 import numpy as np
 import pytest
 
@@ -32,6 +33,31 @@ def test_orca_at_goal_zero_velocity(agent_factory: Callable[..., BaseAgent]) -> 
     goals = {1: Pose2D(x=2.0, y=2.0, theta=0.0)}
     out = planner.compute([agent], goals, dt=0.1)
     assert out[1] == (0.0, 0.0)
+
+
+def test_orca_at_goal_with_neighbor_pressure_produces_nonzero_velocity(agent_factory: Callable[..., BaseAgent]) -> None:
+    planner = ORCAPlanner(time_horizon=5.0)
+    settled = agent_factory(agent_id=1, x=0.0, y=0.0)
+    pusher = agent_factory(agent_id=2, x=0.3, y=0.0)
+    pusher.state.velocity = (-1.0, 0.0)
+    goals = {
+        1: Pose2D(x=0.0, y=0.0, theta=0.0),
+        2: Pose2D(x=-10.0, y=0.0, theta=0.0),
+    }
+    out = planner.compute([settled, pusher], goals, dt=0.1)
+    vx, vy = out[1]
+    assert abs(vx) + abs(vy) > 1e-6
+
+
+def test_orca_max_speed_independent_of_desired_velocity(agent_factory: Callable[..., BaseAgent]) -> None:
+    planner = ORCAPlanner()
+    agent = agent_factory(agent_id=1, x=0.0, y=0.0)
+    agent.params = attrs.evolve(agent.params, desired_velocity=0.0, max_velocity=1.2)
+    goals = {1: Pose2D(x=10.0, y=0.0, theta=0.0)}
+    out = planner.compute([agent], goals, dt=0.1)
+    vx, vy = out[1]
+    assert vx == pytest.approx(0.0, abs=1e-9)
+    assert vy == pytest.approx(0.0, abs=1e-9)
 
 
 def test_orca_single_agent_pref_velocity_toward_goal(agent_factory: Callable[..., BaseAgent]) -> None:

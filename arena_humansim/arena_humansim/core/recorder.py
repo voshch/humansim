@@ -31,34 +31,26 @@ class BagRecorder:
             ConverterOptions(input_serialization_format="cdr", output_serialization_format="cdr"),
         )
 
-        self._topics = [
-            ("/agent_states", "arena_humansim_msgs/msg/AgentStates", AgentStatesMsg, QoSProfile(depth=10)),
-            ("/world_geometry", "arena_humansim_msgs/msg/WorldGeometry", WorldGeometryMsg, QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)),
+        ns = node.get_namespace().rstrip("/")
+        topics = [
+            ("agent_states", "arena_humansim_msgs/msg/AgentStates", AgentStatesMsg, QoSProfile(depth=10)),
+            ("world_geometry", "arena_humansim_msgs/msg/WorldGeometry", WorldGeometryMsg, QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)),
             ("/clock", "rosgraph_msgs/msg/Clock", Clock, QoSProfile(depth=10)),
         ]
-        for i, (topic_name, type_name, _, _) in enumerate(self._topics):
-            self._writer.create_topic(
-                TopicMetadata(
-                    id=i,
-                    name=topic_name,
-                    type=type_name,
-                    serialization_format="cdr",
-                )
-            )
-
-        self._subs = [node.create_subscription(msg_type, topic_name, self._make_cb(topic_name), qos) for topic_name, _, msg_type, qos in self._topics]
+        self._subs = []
+        for i, (topic_name, type_name, msg_type, qos) in enumerate(topics):
+            resolved = topic_name if topic_name.startswith("/") else f"{ns}/{topic_name}"
+            sub = node.create_subscription(msg_type, topic_name, lambda msg, t=resolved: self._write(t, msg), qos)
+            self._writer.create_topic(TopicMetadata(id=i, name=resolved, type=type_name, serialization_format="cdr"))
+            self._subs.append(sub)
 
         self._closed = False
         node.get_logger().info(f"BagRecorder writing to {self._bag_dir}")
 
-    def _make_cb(self, topic_name: str):
-        def cb(msg) -> None:
-            if self._closed:
-                return
-            stamp = self._node.get_clock().now().nanoseconds
-            self._writer.write(topic_name, serialize_message(msg), stamp)
-
-        return cb
+    def _write(self, topic_name: str, msg) -> None:
+        if self._closed:
+            return
+        self._writer.write(topic_name, serialize_message(msg), self._node.get_clock().now().nanoseconds)
 
     @property
     def record_dir(self) -> Path:

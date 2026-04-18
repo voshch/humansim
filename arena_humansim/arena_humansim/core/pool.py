@@ -53,6 +53,9 @@ class AgentPool:
 
         self.goal_pos = np.zeros((capacity, 2), dtype=np.float64)
         self.has_goal = np.zeros(capacity, dtype=np.bool_)
+        self.goal_theta = np.zeros(capacity, dtype=np.float64)
+        self.has_goal_theta = np.zeros(capacity, dtype=np.bool_)
+        self.latched = np.zeros(capacity, dtype=np.bool_)
 
         self.kind = np.zeros(capacity, dtype=np.uint8)
         self.policy_idx = np.full(capacity, -1, dtype=np.int32)
@@ -99,6 +102,8 @@ class AgentPool:
         self.vision_fov[i] = perc.vision_fov
 
         self.has_goal[i] = False
+        self.has_goal_theta[i] = False
+        self.latched[i] = False
         self.prev_vel[i] = self.vel[i]
         self.kind[i] = 0
         self.policy_idx[i] = -1
@@ -127,6 +132,9 @@ class AgentPool:
                 self.vision_range,
                 self.vision_fov,
                 self.has_goal,
+                self.goal_theta,
+                self.has_goal_theta,
+                self.latched,
                 self.kind,
                 self.policy_idx,
             ):
@@ -159,6 +167,15 @@ class AgentPool:
             self.goal_pos[idx, 1] = goal.y
             self.has_goal[idx] = True
 
+    def set_heading_goals(self, headings: dict[int, float]) -> None:
+        self.has_goal_theta[: self.n] = False
+        for aid, theta in headings.items():
+            idx = self._id_to_idx.get(aid)
+            if idx is None:
+                continue
+            self.goal_theta[idx] = theta
+            self.has_goal_theta[idx] = True
+
     def store_prev_vel(self) -> None:
         n = self.n
         self.prev_vel[:n] = self.vel[:n]
@@ -166,6 +183,16 @@ class AgentPool:
     def set_neighbor_csr(self, indptr: np.ndarray, indices: np.ndarray) -> None:
         self.neighbor_indptr = indptr
         self.neighbor_indices = indices
+
+    def visible_agent_ids(self, agent_id: int) -> set[int]:
+        idx = self._id_to_idx.get(agent_id)
+        if idx is None or idx + 1 >= len(self.neighbor_indptr):
+            return set()
+        start = int(self.neighbor_indptr[idx])
+        stop = int(self.neighbor_indptr[idx + 1])
+        if stop <= start:
+            return set()
+        return {int(self.agent_ids[i]) for i in self.neighbor_indices[start:stop]}
 
     def _grow(self, min_capacity: int) -> None:
         new_cap = max(min_capacity, self.capacity * 2)
@@ -201,6 +228,9 @@ class AgentPool:
         self.vision_fov = _resize_1d(self.vision_fov)
         self.goal_pos = _resize_2d(self.goal_pos)
         self.has_goal = _resize_1d(self.has_goal)
+        self.goal_theta = _resize_1d(self.goal_theta)
+        self.has_goal_theta = _resize_1d(self.has_goal_theta)
+        self.latched = _resize_1d(self.latched)
         kind_new = np.zeros(new_cap, dtype=self.kind.dtype)
         kind_new[:old] = self.kind[:old]
         self.kind = kind_new

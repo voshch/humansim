@@ -23,6 +23,9 @@ class _FakeAgent:
     state: _FakeState
 
 
+SEPARATION = 2.0
+
+
 def _lookup(poses: dict[int, Pose2D]) -> Callable[[int], _FakeAgent | None]:
     def inner(aid: int) -> _FakeAgent | None:
         p = poses.get(aid)
@@ -35,13 +38,13 @@ def test_dyad_pair_separation_matches_configured() -> None:
     f = DyadFormation(
         anchor=CentroidAnchor(pose_lookup=lambda aid: poses.get(aid), members_fn=lambda: [1, 2]),
         agent_lookup=_lookup(poses),
-        separation=2.0,
+        separation=SEPARATION,
     )
     f.on_join(1)
     f.on_join(2)
     targets = f.tick(dt=0.01)
     d = math.hypot(targets[1].x - targets[2].x, targets[1].y - targets[2].y)
-    assert d == pytest.approx(2.0)
+    assert d == pytest.approx(SEPARATION)
 
 
 def test_dyad_members_face_each_other() -> None:
@@ -49,7 +52,7 @@ def test_dyad_members_face_each_other() -> None:
     f = DyadFormation(
         anchor=CentroidAnchor(pose_lookup=lambda aid: poses.get(aid), members_fn=lambda: [1, 2]),
         agent_lookup=_lookup(poses),
-        separation=2.0,
+        separation=SEPARATION,
     )
     f.on_join(1)
     f.on_join(2)

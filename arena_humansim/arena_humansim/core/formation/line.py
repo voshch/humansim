@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import attrs
 
+from arena_humansim.utils import DISTANCE_TOLERANCE
 from arena_humansim.utils.types import Pose2D
 
 from . import AgentLookup, Formation
@@ -49,12 +50,32 @@ class LineFormation(Formation):
         agent_lookup: AgentLookup,
         base_step: float = 1.0,
         formation_scale: float = 1.0,
+        front_offset: float = 0.0,
     ) -> None:
         self.anchor = anchor
         self.agent_lookup = agent_lookup
         self.base_step = base_step
         self.formation_scale = formation_scale
+        self.front_offset = front_offset
         self._slots: list[_Slot] = []
+        self._cached_front_key: tuple[float, float, float] | None = None
+        self._cached_front_pose: Pose2D | None = None
+
+    def _front_pose(self, anchor_pose: Pose2D) -> Pose2D:
+        key = (anchor_pose.x, anchor_pose.y, anchor_pose.theta)
+        if key == self._cached_front_key and self._cached_front_pose is not None:
+            return self._cached_front_pose
+        if self.front_offset == 0.0:
+            result = Pose2D(x=anchor_pose.x, y=anchor_pose.y, theta=anchor_pose.theta)
+        else:
+            result = Pose2D(
+                x=anchor_pose.x - self.front_offset * math.cos(anchor_pose.theta),
+                y=anchor_pose.y - self.front_offset * math.sin(anchor_pose.theta),
+                theta=anchor_pose.theta,
+            )
+        self._cached_front_key = key
+        self._cached_front_pose = result
+        return result
 
     def _spacing_for(self, agent_id: int) -> float:
         agent = self.agent_lookup(agent_id)
@@ -73,7 +94,7 @@ class LineFormation(Formation):
             return
         anchor_pose = self.anchor.pose()
         if not self._slots:
-            target = Pose2D(x=anchor_pose.x, y=anchor_pose.y, theta=anchor_pose.theta)
+            target = self._front_pose(anchor_pose)
         else:
             tail = self._slots[-1].target
             dx, dy = self._backward_offset(self._spacing_for(agent_id), tail.theta)
@@ -100,9 +121,10 @@ class LineFormation(Formation):
 
         if self._slots:
             front = self._slots[0]
-            if _pose_differs(front.target, anchor_pose):
+            front_target = self._front_pose(anchor_pose)
+            if _pose_differs(front.target, front_target):
                 front.prev_target = front.target
-                front.target = Pose2D(x=anchor_pose.x, y=anchor_pose.y, theta=anchor_pose.theta)
+                front.target = front_target
                 front.target_changed_tick = True
                 front.reaction_left = 0.0
                 front.pending_target = None
@@ -131,3 +153,13 @@ class LineFormation(Formation):
                     cur.reaction_left = 0.0
 
         return {s.agent_id: s.target for s in self._slots}
+
+    def arrived(self, agent_id: int) -> bool:
+        slot = next((s for s in self._slots if s.agent_id == agent_id), None)
+        if slot is None:
+            return True
+        agent = self.agent_lookup(agent_id)
+        if agent is None:
+            return True
+        pose = agent.state.pose
+        return math.hypot(pose.x - slot.target.x, pose.y - slot.target.y) < DISTANCE_TOLERANCE

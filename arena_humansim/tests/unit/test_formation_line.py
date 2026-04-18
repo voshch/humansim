@@ -12,6 +12,9 @@ from arena_humansim.core.formation.anchor import PoseAnchor
 from arena_humansim.core.formation.line import SITE_COEF_SHUFFLE, LineFormation
 from arena_humansim.utils.types import Pose2D
 
+FRONT_OFFSET = 0.8
+BASE_STEP = 1.0
+
 
 @dataclass
 class _FakeParams:
@@ -118,3 +121,89 @@ def test_line_yaw_controls_growth_direction() -> None:
     targets = f.tick(dt=0.01)
     assert targets[2].x == pytest.approx(0.0, abs=1e-6)
     assert targets[2].y == pytest.approx(-1.0)
+
+
+def test_line_front_offset_places_slot0_on_queue_side_of_anchor() -> None:
+    anchor_x = 4.0
+    anchor = PoseAnchor(fixed=Pose2D(x=anchor_x, y=0.0, theta=math.pi))
+    f = LineFormation(anchor=anchor, agent_lookup=_mk_lookup(), base_step=BASE_STEP, front_offset=FRONT_OFFSET)
+    f.on_join(1)
+    f.on_join(2)
+    targets = f.tick(dt=0.01)
+    assert targets[1].x == pytest.approx(anchor_x + FRONT_OFFSET)
+    assert targets[1].y == pytest.approx(0.0)
+    assert targets[2].x == pytest.approx(anchor_x + FRONT_OFFSET + BASE_STEP)
+    assert targets[2].y == pytest.approx(0.0)
+
+
+def test_line_front_offset_flips_with_anchor_yaw() -> None:
+    anchor = PoseAnchor(fixed=Pose2D(x=0.0, y=0.0, theta=0.0))
+    f = LineFormation(anchor=anchor, agent_lookup=_mk_lookup(), base_step=BASE_STEP, front_offset=FRONT_OFFSET)
+    f.on_join(1)
+    f.on_join(2)
+    targets = f.tick(dt=0.01)
+    assert targets[1].x == pytest.approx(-FRONT_OFFSET)
+    assert targets[2].x == pytest.approx(-FRONT_OFFSET - BASE_STEP)
+
+
+def test_line_front_offset_zero_preserves_legacy_behavior() -> None:
+    anchor = PoseAnchor(fixed=Pose2D(x=4.0, y=0.0, theta=math.pi))
+    f = LineFormation(anchor=anchor, agent_lookup=_mk_lookup(), base_step=1.0)
+    f.on_join(1)
+    targets = f.tick(dt=0.01)
+    assert targets[1].x == pytest.approx(4.0)
+
+
+def test_line_join_leave_churn_does_not_leak_slots() -> None:
+    anchor = PoseAnchor(fixed=Pose2D())
+    f = LineFormation(anchor=anchor, agent_lookup=_mk_lookup(), base_step=1.0)
+    for _ in range(10):
+        f.on_join(1)
+        f.on_join(2)
+        f.on_leave(1)
+        f.on_leave(2)
+    assert f._slots == []
+    f.on_join(7)
+    targets = f.tick(dt=0.01)
+    assert set(targets.keys()) == {7}
+
+
+def test_line_front_pose_caches_across_ticks() -> None:
+    anchor = PoseAnchor(fixed=Pose2D(x=4.0, y=0.0, theta=math.pi))
+    f = LineFormation(anchor=anchor, agent_lookup=_mk_lookup(), base_step=BASE_STEP, front_offset=FRONT_OFFSET)
+    f.on_join(1)
+    first = f.tick(dt=0.01)
+    second = f.tick(dt=0.01)
+    assert second[1] is first[1]  # identity — cache hit
+
+
+def test_line_front_pose_invalidates_on_anchor_change() -> None:
+    import attrs
+    new_anchor_x = 10.0
+    initial = Pose2D(x=4.0, y=0.0, theta=math.pi)
+    anchor = PoseAnchor(fixed=initial)
+    f = LineFormation(anchor=anchor, agent_lookup=_mk_lookup(), base_step=BASE_STEP, front_offset=FRONT_OFFSET)
+    f.on_join(1)
+    before = f.tick(dt=0.01)[1]
+    anchor.fixed = attrs.evolve(initial, x=new_anchor_x)
+    after = f.tick(dt=0.01)[1]
+    assert after is not before
+    assert after.x == pytest.approx(new_anchor_x + FRONT_OFFSET)
+
+
+def test_line_arrived_flips_true_within_tolerance() -> None:
+    agents: dict[int, _FakeAgent] = {1: _FakeAgent(state=_FakeState(pose=Pose2D(x=5.0, y=0.0)))}
+    anchor = PoseAnchor(fixed=Pose2D(x=0.0, y=0.0, theta=0.0))
+    f = LineFormation(anchor=anchor, agent_lookup=lambda aid: agents.get(aid), base_step=1.0)
+    f.on_join(1)
+    f.tick(dt=0.01)
+    assert not f.arrived(1)
+    agents[1].state.pose = Pose2D(x=0.1, y=0.0)
+    assert f.arrived(1)
+
+
+def test_line_arrived_true_for_unknown_agent() -> None:
+    agents: dict[int, _FakeAgent] = {}
+    anchor = PoseAnchor(fixed=Pose2D(x=0.0, y=0.0, theta=0.0))
+    f = LineFormation(anchor=anchor, agent_lookup=lambda aid: agents.get(aid), base_step=1.0)
+    assert f.arrived(999)

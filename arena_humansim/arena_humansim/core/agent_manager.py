@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import time
+from collections import deque
 from collections.abc import Callable, Hashable, Iterable
 from pathlib import Path
 from typing import Any
@@ -64,6 +65,7 @@ from arena_humansim.core.logger import SimulationLogger
 from arena_humansim.core.pool import AgentPool
 from arena_humansim.core.recorder import BagRecorder, default_record_dir
 from arena_humansim.core.replay import ReplayManager, ReplayResult
+from arena_humansim.core.robot_services import RobotServiceAdvertiser
 from arena_humansim.core.spawn_scheduler import SpawnScheduler
 from arena_humansim.core.viz import MarkerPublisher, publish_behavior, publish_global_plan, publish_infrastructure, publish_interaction, publish_local_plan, publish_module_markers, publish_perception, publish_waypoints
 from arena_humansim.core.world_knowledge import FormationSpec, WorldKnowledge, WorldObject
@@ -73,13 +75,15 @@ from arena_humansim.perception import Perception
 from arena_humansim.utils import RNG
 from arena_humansim.utils.event_bus import EventBus
 from arena_humansim.utils.loggable import Loggable
-from arena_humansim.utils.scenario import EventScript, ScenarioConfig
+from arena_humansim.utils.scenario import EventScript, InteractionScript, ScenarioConfig
 from arena_humansim.utils.types import (
+    AgentKind,
     AgentState,
     BehaviorTreeMovement,
     BeliefState,
     HighLevelCommand,
     InteractionOutcome,
+    InteractionType,
     Pose2D,
     Segments,
     Shape,
@@ -128,6 +132,37 @@ def _group_by[K: Hashable](agents: Iterable[BaseAgent], key: Callable[[BaseAgent
     return groups.items()
 
 
+def arrival_latch_step(pool: AgentPool, r_enter: float, r_exit: float) -> None:
+    n = pool.n
+    if n == 0:
+        return
+    pos = pool.pos[:n]
+    goal = pool.goal_pos[:n]
+    has_goal = pool.has_goal[:n]
+    latched = pool.latched[:n]
+
+    d_goal = np.hypot(goal[:, 0] - pos[:, 0], goal[:, 1] - pos[:, 1])
+
+    release = latched & (d_goal > r_exit)
+    enter = (~latched) & has_goal & (d_goal < r_enter)
+    new_latched = np.where(release, False, np.where(enter, True, latched))
+    pool.latched[:n] = new_latched
+
+    pool.goal_pos[:n] = np.where(new_latched[:, None], pos, goal)
+    pool.has_goal[:n] = has_goal & (~new_latched)
+
+
+def arrival_damp_step(pool: AgentPool, dt: float, tau_brake: float) -> None:
+    n = pool.n
+    if n == 0:
+        return
+    latched = pool.latched[:n]
+    if not np.any(latched):
+        return
+    decay = float(np.exp(-dt / tau_brake))
+    pool.vel[:n] = np.where(latched[:, None], pool.vel[:n] * decay, pool.vel[:n])
+
+
 class AgentManager(Node):
     MODE_MASTER = "master"
     MODE_SUBSYSTEM = "subsystem"
@@ -150,6 +185,9 @@ class AgentManager(Node):
         self.declare_parameter("replay_mode", "")
         self.declare_parameter("waypoint_threshold", 0.1)
         self.declare_parameter("min_speed_for_heading", 0.1)
+        self.declare_parameter("arrival_r_enter", 0.15)
+        self.declare_parameter("arrival_r_exit", 0.30)
+        self.declare_parameter("arrival_tau_brake", 0.15)
         self.declare_parameter("publish_markers", 0)
         self.declare_parameter("profile_phases", False)
         self.declare_parameter("profile_interval", 0)
@@ -169,6 +207,14 @@ class AgentManager(Node):
         replay_mode = self.get_parameter("replay_mode").value
         self._waypoint_threshold = self.get_parameter("waypoint_threshold").value
         self._min_speed_for_heading = self.get_parameter("min_speed_for_heading").value
+        self._arrival_r_enter = float(self.get_parameter("arrival_r_enter").value)
+        self._arrival_r_exit = float(self.get_parameter("arrival_r_exit").value)
+        self._arrival_tau_brake = float(self.get_parameter("arrival_tau_brake").value)
+        if not (0.0 < self._arrival_r_enter < self._arrival_r_exit):
+            raise ValueError(f"arrival_r_enter ({self._arrival_r_enter}) must be >0 and < arrival_r_exit ({self._arrival_r_exit})")
+        if self._arrival_tau_brake < self._dt:
+            self._logger.warning(f"arrival_tau_brake ({self._arrival_tau_brake}) < dt ({self._dt}); clamping to dt")
+            self._arrival_tau_brake = float(self._dt)
         self._ticks_limit = int(self.get_parameter("ticks").value)
         time_limit = float(self.get_parameter("time").value)
         if self._ticks_limit == 0 and time_limit > 0.0:
@@ -234,10 +280,13 @@ class AgentManager(Node):
         self._interaction_manager.set_context(
             world_knowledge=self._world_knowledge,
             agent_lookup=lambda aid: self._agents.get(aid),
+            visibility_lookup=lambda aid: self._pool.visible_agent_ids(aid),
         )
         self._event_bus = EventBus()
         self._event_scripts: list[EventScript] = []
         self._event_scripts_by_tick: dict[int, list] = {}
+        self._interaction_scripts: list[InteractionScript] = []
+        self._interaction_scripts_by_tick: dict[int, list[InteractionScript]] = {}
 
         self._waypoint_rng = self._rng.get_substream("waypoint_advance")
         self._spawn_scheduler = SpawnScheduler(
@@ -258,6 +307,7 @@ class AgentManager(Node):
         self._marker_pub = MarkerPublisher(self) if self._publish_markers > 0 else None
         self._tick_count: int = 0
         self._sim_time_ns: int = 0
+        self._pending_scenario_spawns: deque[tuple[int, AgentStateMsg]] = deque()
         self._agent_states_pool = _AgentStateMsgPool()
         self._tick_phases: dict[str, float] = {}
         self._overrun_count: int = 0
@@ -265,6 +315,7 @@ class AgentManager(Node):
         self._tick_wall_start: float | None = None
         self._total_tick_compute_s: float = 0.0
         self._high_level_cmds: dict[int, HighLevelCommand] = {}
+        self._robot_service_advertiser = RobotServiceAdvertiser()
         self._cached_intermediate_goals: dict[int, Pose2D] = {}
         self._next_agent_id: int = 1
 
@@ -505,11 +556,23 @@ class AgentManager(Node):
                 obs_req.obstacles.append(m)
             self._add_obstacles_callback(obs_req, AddObstacles.Response())
 
+        self._init_scenario_agents(scenario)
+
+    def _init_scenario_agents(self, scenario: ScenarioConfig) -> None:
         if not scenario.agents:
             return
 
-        req = SpawnAgents.Request()
+        from arena_humansim_msgs.msg import Waypoint as WaypointMsg
+        from arena_humansim_msgs.msg import Waypoints as WaypointsMsg
+
+        immediate = SpawnAgents.Request()
+        pending: list[tuple[int, AgentStateMsg]] = []
         for a in scenario.agents:
+            if int(a.agent_id) <= 0:
+                a.agent_id = self._next_agent_id
+                self._next_agent_id += 1
+            if int(a.kind) == int(AgentKind.ROBOT) and a.services:
+                self._robot_service_advertiser.register(int(a.agent_id), a.services)
             msg = AgentStateMsg()
             msg.agent_id = int(a.agent_id)
             msg.pose = Pose2DMsg(x=a.spawn_pose.x, y=a.spawn_pose.y, theta=a.spawn_pose.theta)
@@ -520,8 +583,6 @@ class AgentManager(Node):
             msg.kind = int(a.kind)
             msg.policy = a.policy
             msg.policy_params = a.policy_params
-            from arena_humansim_msgs.msg import Waypoint as WaypointMsg
-            from arena_humansim_msgs.msg import Waypoints as WaypointsMsg
 
             wps = WaypointsMsg()
             wps.mode = WaypointsMsg.MODE_ONCE
@@ -531,13 +592,24 @@ class AgentManager(Node):
                 w.radius = 0.0
                 wps.points.append(w)
             msg.waypoints = wps
-            req.agents.append(msg)
 
-        resp = self._spawn_agents_callback(req, SpawnAgents.Response())
-        if not resp.success:
-            self._logger.error(f"scenario spawn failed: {resp.message}")
-        else:
-            self._logger.info(f"scenario spawned {len(resp.spawned_ids)} agent(s)")
+            if a.spawn_tick > 0:
+                pending.append((int(a.spawn_tick), msg))
+            else:
+                immediate.agents.append(msg)
+
+        pending.sort(key=lambda item: item[0])
+        self._pending_scenario_spawns.extend(pending)
+
+        if immediate.agents:
+            resp = self._spawn_agents_callback(immediate, SpawnAgents.Response())
+            if not resp.success:
+                self._logger.error(f"scenario spawn failed: {resp.message}")
+            else:
+                self._logger.info(f"scenario spawned {len(resp.spawned_ids)} agent(s) immediately")
+
+        if self._pending_scenario_spawns:
+            self._logger.info(f"scenario has {len(self._pending_scenario_spawns)} deferred agent(s)")
 
     def _init_world_knowledge(self, scenario: ScenarioConfig) -> None:
         if scenario.agent_types:
@@ -550,14 +622,68 @@ class AgentManager(Node):
                 pose=Pose2D(x=wo_cfg.pose.x, y=wo_cfg.pose.y, theta=wo_cfg.pose.theta),
                 capacity=wo_cfg.capacity,
                 satisfies=dict(wo_cfg.satisfies),
-                formation=FormationSpec.from_config(getattr(wo_cfg, "formation", None)),
+                formation=FormationSpec.from_config(wo_cfg.formation),
+                interaction_radius=wo_cfg.interaction_radius,
             )
             self._world_knowledge.add_object(obj)
         self._event_scripts = list(scenario.event_scripts)
         self._event_scripts_by_tick: dict[int, list[EventScript]] = {}
         for script in self._event_scripts:
             self._event_scripts_by_tick.setdefault(script.tick, []).append(script)
+        self._interaction_scripts = list(scenario.interaction_scripts)
+        self._interaction_scripts_by_tick = {}
+        for iscript in self._interaction_scripts:
+            self._interaction_scripts_by_tick.setdefault(iscript.tick, []).append(iscript)
+        self._init_flow(scenario)
         self._publish_world_geometry()
+
+    def _init_flow(self, scenario: ScenarioConfig) -> None:
+        flow = scenario.flow
+        if flow is None or (not flow.sources and not flow.sinks):
+            return
+        from arena_humansim.utils.scenario import ShapeModel
+        from arena_humansim.utils.types import AgentTemplate, RateKeyframe, Shape, ShapeType, SinkAffinity, SinkConfig, SourceConfig
+
+        def _shape_from_cfg(cfg: ShapeModel) -> Shape:
+            try:
+                stype = ShapeType(cfg.type) if cfg.type else ShapeType.POLYGON
+            except ValueError:
+                stype = ShapeType.POLYGON
+            return Shape(type=stype, radius=float(cfg.radius))
+
+        sinks: dict[str, SinkConfig] = {}
+        for i, sink_cfg in enumerate(flow.sinks):
+            name = f"sink_{i}"
+            sink = SinkConfig(
+                name=name,
+                pose=Pose2D(x=sink_cfg.pose.x, y=sink_cfg.pose.y, theta=sink_cfg.pose.theta),
+                shape=_shape_from_cfg(sink_cfg.shape),
+                absorption_radius=float(sink_cfg.absorption_radius),
+                capacity=int(sink_cfg.capacity),
+            )
+            sinks[name] = sink
+            self._despawn_monitor.add_sink(sink)
+        if sinks:
+            self._spawn_scheduler.set_sinks(sinks)
+
+        for i, src_cfg in enumerate(flow.sources):
+            tmpl = src_cfg.agent_template
+            src = SourceConfig(
+                name=f"source_{i}",
+                pose=Pose2D(x=src_cfg.pose.x, y=src_cfg.pose.y, theta=src_cfg.pose.theta),
+                shape=_shape_from_cfg(src_cfg.shape),
+                rate_profile=[RateKeyframe(t=float(kf.t), rate=float(kf.rate)) for kf in src_cfg.rate_profile],
+                max_concurrent=int(src_cfg.max_concurrent),
+                max_total=int(src_cfg.max_total),
+                agent=AgentTemplate(
+                    desired_velocity_min=float(tmpl.desired_velocity_min),
+                    desired_velocity_max=float(tmpl.desired_velocity_max),
+                    agent_radius=float(tmpl.agent_radius),
+                    agent_type=tmpl.agent_type,
+                    sink_affinity=[SinkAffinity(sink_name=f"sink_{sa.sink_idx}", weight=float(sa.weight)) for sa in tmpl.sink_affinity],
+                ),
+            )
+            self._spawn_scheduler.add_source(src)
 
     def _build_base_agent(
         self,
@@ -567,7 +693,7 @@ class AgentManager(Node):
     ) -> BaseAgent:
         import attrs
 
-        type_name = getattr(agent_msg, "agent_type", "") or "adult"
+        type_name = agent_msg.agent_type or "adult"
 
         state = AgentState(
             agent_id=aid,
@@ -605,19 +731,15 @@ class AgentManager(Node):
             agent = create_agent_from_params(params, state, self._module_pool)
 
         overrides = {}
-        radius_val = getattr(agent_msg, "radius", 0.0)
-        if radius_val > 0.0:
-            overrides["agent_radius"] = radius_val
+        if agent_msg.radius > 0.0:
+            overrides["agent_radius"] = agent_msg.radius
         vel_val = agent_msg.desired_velocity
         if vel_val > 0.0:
             overrides["desired_velocity"] = vel_val
 
         perception_overrides = {}
-        for field_name, msg_attr in [
-            ("vision_range", "vision_range"),
-            ("vision_fov", "vision_fov"),
-        ]:
-            val = getattr(agent_msg, msg_attr, 0.0)
+        for field_name in ("vision_range", "vision_fov"):
+            val = getattr(agent_msg, field_name)
             if val > 0.0:
                 perception_overrides[field_name] = val
         if perception_overrides:
@@ -627,12 +749,8 @@ class AgentManager(Node):
             )
 
         lp_overrides = {}
-        for field_name, msg_attr in [
-            ("relaxation_time", "relaxation_time"),
-            ("repulsion_strength", "repulsion_strength"),
-            ("repulsion_range", "repulsion_range"),
-        ]:
-            val = getattr(agent_msg, msg_attr, 0.0)
+        for field_name in ("relaxation_time", "repulsion_strength", "repulsion_range"):
+            val = getattr(agent_msg, field_name)
             if val > 0.0:
                 lp_overrides[field_name] = val
         if lp_overrides:
@@ -705,6 +823,7 @@ class AgentManager(Node):
             self._pool_agent_ids.pop()
         self._high_level_cmds.pop(aid, None)
         self._behavior_trees.pop(aid, None)
+        self._robot_service_advertiser.unregister(aid)
         self._interaction_manager.force_stop(aid)
         self._event_bus.clear_agent(aid)
         self._rng.remove_agent_substreams(aid)
@@ -769,6 +888,14 @@ class AgentManager(Node):
                 )
         self._phase_end("despawn", t0)
 
+        if self._pending_scenario_spawns and self._pending_scenario_spawns[0][0] <= self._tick_count:
+            due = SpawnAgents.Request()
+            while self._pending_scenario_spawns and self._pending_scenario_spawns[0][0] <= self._tick_count:
+                due.agents.append(self._pending_scenario_spawns.popleft()[1])
+            resp = self._spawn_agents_callback(due, SpawnAgents.Response())
+            if not resp.success:
+                self._logger.error(f"deferred scenario spawn failed at tick {self._tick_count}: {resp.message}")
+
         t0 = time.perf_counter()
         spawn_requests = self._spawn_scheduler.tick(self._tick_count, self._dt)
         for spawn_req in spawn_requests:
@@ -814,8 +941,6 @@ class AgentManager(Node):
         if default_layer is not None and default_layer.supports_pool:
             default_layer.compute_pool(pool)
 
-        n = pool.n
-
         # build beliefs only for BT agents or agents with extra perception
         if is_bt_tick or any(len(a.perception) > 1 for a in agents):
             indptr = pool.neighbor_indptr
@@ -846,7 +971,6 @@ class AgentManager(Node):
             for agent_id in self._pool_agent_ids:
                 bt = self._behavior_trees.get(agent_id)
                 if bt is not None:
-                    bt: BehaviourTree
                     bt.tick()
 
             for agent_id, agent in self._agents.items():
@@ -863,7 +987,7 @@ class AgentManager(Node):
             for i in range(pool.n):
                 pidx = int(pool.policy_idx[i])
                 planner = self._policies[pidx] if 0 <= pidx < len(self._policies) else None
-                if planner is None or getattr(planner, "needs_global_subgoal", True):
+                if planner is None or planner.needs_global_subgoal:
                     needs_subgoal_ids.add(int(pool.agent_ids[i]))
             subgoal_agents = [a for a in agents if a.state.agent_id in needs_subgoal_ids]
             for planner, group in _group_by(subgoal_agents, key=lambda a: a.global_planner):
@@ -879,6 +1003,7 @@ class AgentManager(Node):
                     self._cached_intermediate_goals[aid] = cmd.target_pose
 
             pool.set_goals(self._cached_intermediate_goals)
+            self._apply_arrival_latch(pool)
             self._phase_end("global_plan", t0)
 
         # --- LOCAL PLAN (vectorized SFM or per-agent fallback) ---
@@ -927,14 +1052,44 @@ class AgentManager(Node):
 
         # --- INTERACTIONS (sequential, unchanged) ---
         t0 = time.perf_counter()
-        interactions = self._interaction_manager.update(
+        self._process_interaction_scripts()
+        robot_service_cmds = self._robot_service_advertiser.emit(self._agents)
+        interactions, formation_targets, departed_agents = self._interaction_manager.update(
             self._high_level_cmds,
             dt=self._dt,
+            extra_commands=robot_service_cmds,
         )
+
+        for aid, pose in formation_targets.items():
+            agent = self._agents.get(aid)
+            if agent is None:
+                continue
+            self._high_level_cmds[aid] = HighLevelCommand(
+                agent_id=aid,
+                type=CommandType.NAVIGATE,
+                target_pose=pose,
+                desired_velocity=agent.state.desired_velocity,
+            )
+        pool.set_heading_goals({aid: pose.theta for aid, pose in formation_targets.items()})
+
+        for aid in departed_agents:
+            agent = self._agents.get(aid)
+            if agent is None:
+                continue
+            mv = agent.movement
+            if isinstance(mv, WaypointMovement) and mv.waypoints:
+                self._high_level_cmds[aid] = HighLevelCommand(
+                    agent_id=aid,
+                    type=CommandType.NAVIGATE,
+                    target_pose=mv.waypoints[mv.index],
+                    desired_velocity=agent.state.desired_velocity,
+                )
+            else:
+                self._high_level_cmds.pop(aid, None)
 
         for interaction in interactions.values():
             if interaction.outcome != InteractionOutcome.ACTIVE:
-                for pid in interaction.participants:
+                for pid in (*interaction.participants, *interaction.contract.queue):
                     agent = self._agents.get(pid)
                     if agent is not None and isinstance(agent.movement, BehaviorTreeMovement):
                         agent.movement.last_outcome = interaction.outcome
@@ -947,6 +1102,7 @@ class AgentManager(Node):
 
         # --- KINEMATICS (vectorized) ---
         t0 = time.perf_counter()
+        self._apply_arrival_damp(pool)
         self._apply_kinematic_constraints_vectorized(pool)
         self._phase_end("kinematics", t0)
 
@@ -977,7 +1133,7 @@ class AgentManager(Node):
         if self._marker_pub is not None:
             pool.sync_back(agents)
             mlvl = self._publish_markers
-            publish_behavior(self._marker_pub, agents, self._high_level_cmds)
+            publish_behavior(self._marker_pub, agents, self._high_level_cmds, interactions)
             publish_interaction(self._marker_pub, agents, interactions)
             publish_infrastructure(
                 self._marker_pub,
@@ -1024,6 +1180,16 @@ class AgentManager(Node):
                 self._phase_accum.setdefault(name, []).append(ms)
             if self._profile_interval > 0 and self._tick_count % self._profile_interval == 0:
                 self._flush_profile()
+
+    def _apply_arrival_latch(self, pool: AgentPool) -> None:
+        arrival_latch_step(
+            pool,
+            r_enter=self._arrival_r_enter,
+            r_exit=self._arrival_r_exit,
+        )
+
+    def _apply_arrival_damp(self, pool: AgentPool) -> None:
+        arrival_damp_step(pool, dt=self._dt, tau_brake=self._arrival_tau_brake)
 
     def _apply_kinematic_constraints_vectorized(self, pool: AgentPool) -> None:
         n = pool.n
@@ -1130,7 +1296,11 @@ class AgentManager(Node):
 
         speed = np.linalg.norm(vel, axis=1)
         moving = speed > self._min_speed_for_heading
-        target_theta = np.arctan2(vel[:, 1], vel[:, 0])
+        vel_theta = np.arctan2(vel[:, 1], vel[:, 0])
+        goal_theta = pool.goal_theta[:n]
+        has_goal_theta = pool.has_goal_theta[:n]
+        target_theta = np.where(moving, vel_theta, goal_theta)
+        rotating = moving | has_goal_theta
         delta = np.arctan2(
             np.sin(target_theta - theta),
             np.cos(target_theta - theta),
@@ -1139,7 +1309,7 @@ class AgentManager(Node):
         w_pivot = pool.pivot_angular_velocity[:n]
         max_d = np.maximum(w_pivot, speed / np.maximum(r_min, 1e-9)) * dt
         delta = np.clip(delta, -max_d, max_d)
-        theta += np.where(moving, delta, 0.0)
+        theta += np.where(rotating, delta, 0.0)
 
     def _advance_waypoints(self, agents: Iterable[BaseAgent], pool: AgentPool) -> None:
         for i, agent in enumerate(agents):
@@ -1214,6 +1384,37 @@ class AgentManager(Node):
                 self._event_bus.fire_broadcast(script.event)
             else:
                 self._event_bus.fire(script.event, script.target_agent)
+
+    def _process_interaction_scripts(self) -> None:
+        """Force-create scripted interactions directly on the InteractionManager.
+
+        Scripted interactions are scenario-authoring primitives, not runtime intent.
+        They bypass the matcher and call `_create_interaction` / `accept` directly so
+        every participant is seated atomically on the script's fire tick.
+        """
+        for script in self._interaction_scripts_by_tick.get(self._tick_count, ()):
+            if not script.participants:
+                continue
+            itype = InteractionType[script.interaction_type]
+            duration_s = script.duration_ticks * self._dt if script.duration_ticks > 0 else None
+            object_id = script.metadata.get("object_id") if script.metadata else None
+            creator = script.participants[0]
+            if self._agents.get(creator) is None:
+                continue
+            interaction = self._interaction_manager._create_interaction(
+                int(itype),
+                creator,
+                object_id=object_id,
+                duration=duration_s,
+            )
+            if duration_s is not None and duration_s > 0:
+                interaction.member_durations[creator] = duration_s
+            for pid in script.participants[1:]:
+                if self._agents.get(pid) is None:
+                    continue
+                self._interaction_manager.accept(pid, interaction.id)
+                if duration_s is not None and duration_s > 0:
+                    interaction.member_durations[pid] = duration_s
 
     def run_replay(self) -> ReplayResult | None:
         if self._replay is None:
@@ -1389,9 +1590,9 @@ class AgentManager(Node):
             waypoints = [Pose2D(x=pt.pose.x, y=pt.pose.y, theta=pt.pose.theta) for pt in agent_msg.waypoints.points]
             radii = [pt.radius for pt in agent_msg.waypoints.points]
 
-            kind = int(getattr(agent_msg, "kind", 0))
-            policy_name = getattr(agent_msg, "policy", "") or ""
-            policy_params = getattr(agent_msg, "policy_params", "") or ""
+            kind = int(agent_msg.kind)
+            policy_name = agent_msg.policy
+            policy_params = agent_msg.policy_params
             if policy_name:
                 policy_idx = self._resolve_policy_idx(policy_name)
             else:
@@ -1482,7 +1683,7 @@ class AgentManager(Node):
 
     def _reset_callback(
         self,
-        request: ResetSimulation.Request,
+        _request: ResetSimulation.Request,
         response: ResetSimulation.Response,
     ) -> ResetSimulation.Response:
         self._agents.clear()
@@ -1499,6 +1700,8 @@ class AgentManager(Node):
         self._event_bus.clear()
         self._event_scripts.clear()
         self._event_scripts_by_tick.clear()
+        self._interaction_scripts.clear()
+        self._interaction_scripts_by_tick.clear()
         self._walls.clear()
         self._obstacles.clear()
         for subsystem in self._wall_aware:
