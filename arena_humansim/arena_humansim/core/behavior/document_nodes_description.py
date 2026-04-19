@@ -1,56 +1,52 @@
+import inspect
 import json
 from pathlib import Path
 
-from pydantic import BaseModel
+import py_trees
 
-BaseModel.model_config["arbitrary_types_allowed"] = True
+from arena_humansim.core.behavior import nodes
 
 
-def document_nodes_descriptions(output_path: str | Path):
-    from .action_nodes import schemas
+def _format_annotation(annotation: object) -> str:
+    if annotation is inspect.Parameter.empty:
+        return "Any"
+    if hasattr(annotation, "__name__") and not hasattr(annotation, "__args__"):
+        return annotation.__name__
+    return str(annotation).replace("typing.", "")
 
-    behavior_library = {}
 
-    for schema in schemas:
-        node_description = schema.__doc__.strip() if schema.__doc__ else "No description"
+def _node_classes() -> list[type]:
+    result = []
+    for name in nodes.__all__:
+        obj = getattr(nodes, name)
+        if isinstance(obj, type) and issubclass(obj, py_trees.behaviour.Behaviour):
+            result.append(obj)
+    result.sort(key=lambda c: c.__name__)
+    return result
 
-        params = {}
-        for field_name, field_info in schema.model_fields.items():
-            # Get the full annotation string
-            annotation = field_info.annotation
 
-            if annotation is None:
-                type_str = "Any"
-            else:
-                # str(annotation) handles List[BaseAgent], Optional[float], etc.
-                # We strip "typing." to keep it clean if you prefer
-                type_str = str(annotation).replace("typing.", "")
-
-                # Clean up the common " <class '...'> " formatting for basic types
-                if type_str.startswith("<class"):
-                    type_str = getattr(annotation, "__name__", type_str)
-
-            params[field_name] = {
-                "type": type_str,
-                "description": field_info.description or "No description provided",
+def document_nodes_descriptions(output_path: str | Path) -> None:
+    library: dict[str, dict[str, object]] = {}
+    for cls in _node_classes():
+        sig = inspect.signature(cls.__init__)
+        params: dict[str, dict[str, object]] = {}
+        for pname, param in sig.parameters.items():
+            if pname in ("self", "name"):
+                continue
+            params[pname] = {
+                "type": _format_annotation(param.annotation),
+                "required": param.default is inspect.Parameter.empty,
+                "default": None if param.default is inspect.Parameter.empty else repr(param.default),
             }
-
-        behavior_library[schema.__name__] = {
-            "Purpose": node_description,
-            "Parameters": params,
+        library[cls.__name__] = {
+            "purpose": (cls.__doc__ or "").strip() or "No description",
+            "parameters": params,
         }
-
-    # Save to file
-    try:
-        output_path = Path(output_path)
-        with open(output_path, "w") as file:
-            json.dump(behavior_library, file, indent=2)
-
-        print(f"Saved behavior nodes description to {output_path.absolute()}")
-
-    except Exception as e:
-        print(e)
+    out = Path(output_path)
+    out.write_text(json.dumps(library, indent=2) + "\n")
+    print(f"Saved behavior nodes description to {out.resolve()}")
 
 
 if __name__ == "__main__":
-    document_nodes_descriptions("/opt/arena_ws/src/deps/humansim/arena_humansim/arena_humansim/behavior/behavior_nodes_library.json")
+    default_out = Path(__file__).parent / "behavior_nodes_library.json"
+    document_nodes_descriptions(default_out)

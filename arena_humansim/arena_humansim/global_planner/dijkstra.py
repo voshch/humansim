@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 
 import numpy as np
 from scipy.ndimage import binary_dilation
@@ -12,6 +12,14 @@ from arena_humansim.core.agents import BaseAgent
 from arena_humansim.utils.types import HighLevelCommand, Pose2D, Segment, Segments
 
 from . import GlobalPlanner
+from ._grid import (
+    grid_to_world,
+    needs_replan,
+    next_waypoint,
+    push_from_walls,
+    simplify_with_los,
+    world_to_grid,
+)
 
 _SQRT2 = math.sqrt(2)
 
@@ -162,7 +170,7 @@ class DijkstraPlanner(GlobalPlanner):
     def __init__(
         self,
         replan_distance: float = 1.0,
-        inflation_radius: float = 0.5,
+        inflation_radius: float = 0.3,
     ):
         self._replan_distance = replan_distance
         self._inflation_radius = inflation_radius
@@ -225,122 +233,6 @@ class DijkstraPlanner(GlobalPlanner):
     def get_cached_paths(self) -> dict[int, list[Pose2D]]:
         return {aid: wps for aid, (_, wps, _) in self._path_cache.items()}
 
-    def _world_to_grid(self, wx: float, wy: float) -> tuple[int, int]:
-        col = int(round((wx - self._origin.x) / self._resolution))
-        row = int(round((wy - self._origin.y) / self._resolution))
-        return row, col
-
-    def _grid_to_world(self, row: int, col: int) -> Pose2D:
-        wx = col * self._resolution + self._origin.x
-        wy = row * self._resolution + self._origin.y
-        return Pose2D(x=wx, y=wy)
-
-    def _needs_replan(
-        self,
-        agent_id: int,
-        goal: Pose2D,
-        agent_pos: Pose2D,
-    ) -> bool:
-        if agent_id not in self._path_cache:
-            return True
-
-        cached_goal, waypoints, _ = self._path_cache[agent_id]
-        goal_key = (round(goal.x, 3), round(goal.y, 3))
-
-        if cached_goal != goal_key:
-            return True
-
-        if not waypoints:
-            return True
-
-        min_dist = self._min_distance_to_path(agent_pos, waypoints)
-        if min_dist > self._replan_distance:
-            return True
-
-        return False
-
-    @staticmethod
-    def _min_distance_to_path(pos: Pose2D, waypoints: Iterable[Pose2D]) -> float:
-        best = math.inf
-        for wp in waypoints:
-            d = math.hypot(pos.x - wp.x, pos.y - wp.y)
-            if d < best:
-                best = d
-        return best
-
-    def _line_of_sight(self, p1: Pose2D, p2: Pose2D) -> bool:
-        grid = self._occupancy_grid
-        if grid is None:
-            return True
-        r1, c1 = self._world_to_grid(p1.x, p1.y)
-        r2, c2 = self._world_to_grid(p2.x, p2.y)
-        rows, cols = grid.shape
-        # step count must cover both axes to avoid skipping thin walls diagonally
-        steps = abs(r2 - r1) + abs(c2 - c1)
-        if steps == 0:
-            return True
-        for i in range(steps + 1):
-            t = i / steps
-            r = int(round(r1 + t * (r2 - r1)))
-            c = int(round(c1 + t * (c2 - c1)))
-            if not (0 <= r < rows and 0 <= c < cols) or grid[r, c] != 0:
-                return False
-        return True
-
-    def _simplify_with_los(self, waypoints: list[Pose2D]) -> list[Pose2D]:
-        if len(waypoints) <= 2:
-            return waypoints
-        result = [waypoints[0]]
-        i = 0
-        while i < len(waypoints) - 1:
-            farthest = i + 1
-            for j in range(len(waypoints) - 1, i + 1, -1):
-                if self._line_of_sight(waypoints[i], waypoints[j]):
-                    farthest = j
-                    break
-            result.append(waypoints[farthest])
-            i = farthest
-        return result
-
-    def _push_from_walls(self, waypoints: list[Pose2D]) -> list[Pose2D]:
-        if len(waypoints) <= 2:
-            return waypoints
-        margin = self._inflation_radius
-        margin_sq = margin * margin
-        segs = self._wall_segments
-        result = [waypoints[0]]
-        for wp in waypoints[1:-1]:
-            px, py = wp.x, wp.y
-            push_x, push_y = 0.0, 0.0
-            for (x1, y1), (x2, y2) in segs:
-                sx, sy = x2 - x1, y2 - y1
-                seg_len_sq = sx * sx + sy * sy
-                if seg_len_sq < 1e-12:
-                    cx, cy = x1, y1
-                else:
-                    t = max(0.0, min(1.0, ((px - x1) * sx + (py - y1) * sy) / seg_len_sq))
-                    cx, cy = x1 + t * sx, y1 + t * sy
-                dx, dy = px - cx, py - cy
-                dist_sq = dx * dx + dy * dy
-                if dist_sq < margin_sq and dist_sq > 1e-12:
-                    dist = math.sqrt(dist_sq)
-                    nx, ny = dx / dist, dy / dist
-                    push_x += nx * (margin - dist)
-                    push_y += ny * (margin - dist)
-            result.append(Pose2D(x=px + push_x, y=py + push_y))
-        result.append(waypoints[-1])
-        return result
-
-    def _next_waypoint(
-        self,
-        waypoints: Sequence[Pose2D],
-        idx: int,
-    ) -> Pose2D:
-        target = idx + 1
-        if target < len(waypoints):
-            return waypoints[target]
-        return waypoints[-1]
-
     def compute(
         self,
         agents: Iterable[BaseAgent],
@@ -365,15 +257,15 @@ class DijkstraPlanner(GlobalPlanner):
                 goals[agent_id] = target
                 continue
 
-            if not self._needs_replan(agent_id, target, agent_pos):
+            if not needs_replan(self._path_cache, agent_id, target, agent_pos, self._replan_distance):
                 cached_goal, waypoints, idx = self._path_cache[agent_id]
                 idx = self.advance_along_path(agent_pos, waypoints, idx)
                 self._path_cache[agent_id] = (cached_goal, waypoints, idx)
-                goals[agent_id] = self._next_waypoint(waypoints, idx)
+                goals[agent_id] = next_waypoint(waypoints, idx)
                 continue
 
-            start_rc = self._world_to_grid(agent_pos.x, agent_pos.y)
-            goal_rc = self._world_to_grid(target.x, target.y)
+            start_rc = world_to_grid(self._origin, self._resolution, agent_pos.x, agent_pos.y)
+            goal_rc = world_to_grid(self._origin, self._resolution, target.x, target.y)
 
             raw_path = _dijkstra_path(self._grid_graph, self._occupancy_grid, start_rc, goal_rc)
 
@@ -383,17 +275,17 @@ class DijkstraPlanner(GlobalPlanner):
                 self._path_cache.pop(agent_id, None)
                 continue
 
-            waypoints = [self._grid_to_world(r, c) for r, c in raw_path]
+            waypoints = [grid_to_world(self._origin, self._resolution, r, c) for r, c in raw_path]
             waypoints[0] = Pose2D(x=agent_pos.x, y=agent_pos.y)
             waypoints[-1] = Pose2D(x=target.x, y=target.y)
-            waypoints = self._simplify_with_los(waypoints)
+            waypoints = simplify_with_los(self._occupancy_grid, self._origin, self._resolution, waypoints)
             if self._wall_segments:
-                waypoints = self._push_from_walls(waypoints)
+                waypoints = push_from_walls(self._wall_segments, self._inflation_radius, waypoints)
 
             goal_key = (round(target.x, 3), round(target.y, 3))
             idx = self.advance_along_path(agent_pos, waypoints, 0)
             self._path_cache[agent_id] = (goal_key, waypoints, idx)
-            goals[agent_id] = self._next_waypoint(waypoints, idx)
+            goals[agent_id] = next_waypoint(waypoints, idx)
 
         self._cached_results = goals
         return goals

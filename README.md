@@ -5,20 +5,22 @@ Modular, deterministic pedestrian simulator for the [Arena](https://github.com/A
 ## Architecture
 
 ```
-AgentManager (ROS 2 Node)
+AgentManager (ROS 2 Node)                    [core/]
 ├── AgentPool          Vectorized NumPy state for all agents
-├── Perception         KDTree neighbor queries + FOV filtering
-├── Behavior Trees     py_trees-based decision making + needs system
-├── Global Planner     A* pathfinding on inflated occupancy grid
-├── Local Planner      SFM or ORCA collision avoidance
-├── Animation          Kinematic forward integration
-├── Collision          Wall projection overlap resolution
+├── Perception         KDTree neighbor queries + FOV filtering       [perception/]
+├── Behavior Trees     py_trees decision making + needs system       [core/behavior/]
+├── Global Planner     A* pathfinding on inflated occupancy grid     [global_planner/]
+├── Local Planner      SFM or ORCA collision avoidance               [local_planner/]
+├── Animation          Kinematic forward integration                 [animation/]
+├── Collision          Wall projection overlap resolution            [collision/]
 ├── SpawnScheduler     Poisson-process agent spawning at sources
 ├── DespawnMonitor     Sink-based agent removal with TTL
-├── InteractionManager Social interactions (talk, follow, queue, ...)
+├── InteractionManager Social interactions (talk, follow, queue, …)  [core/]
 ├── EventBus           Event-driven scripting
 └── SimulationLogger   JSON replay logging
 ```
+
+Per-module READMEs: [core](arena_humansim/arena_humansim/core/README.md) · [core/behavior](arena_humansim/arena_humansim/core/behavior/README.md) · [core/behavior/nodes](arena_humansim/arena_humansim/core/behavior/nodes/README.md) · [perception](arena_humansim/arena_humansim/perception/README.md) · [global_planner](arena_humansim/arena_humansim/global_planner/README.md) · [local_planner](arena_humansim/arena_humansim/local_planner/README.md) · [animation](arena_humansim/arena_humansim/animation/README.md) · [collision](arena_humansim/arena_humansim/collision/README.md).
 
 ### Tick Loop
 
@@ -41,15 +43,15 @@ All modules are swappable via a plugin registry.
 
 | Layer | Options | Default |
 |---|---|---|
-| Global Planner | `dijkstra` | `dijkstra` |
-| Local Planner | `sfm`, `orca` | `sfm` |
-| Perception | `default` | `default` |
-| Animation | `noop`, `kinematic` | `noop` |
-| Collision | `wall_projection`, `noop` | `wall_projection` |
+| [Global Planner](arena_humansim/arena_humansim/global_planner/README.md) | `dijkstra` | `dijkstra` |
+| [Local Planner](arena_humansim/arena_humansim/local_planner/README.md) | `sfm`, `orca` | `sfm` |
+| [Perception](arena_humansim/arena_humansim/perception/README.md) | `default` | `default` |
+| [Animation](arena_humansim/arena_humansim/animation/README.md) | `noop`, `kinematic` | `noop` |
+| [Collision](arena_humansim/arena_humansim/collision/README.md) | `wall_projection`, `noop` | `wall_projection` |
 
 ## Agent Types
 
-Defined in YAML under `config/agent_types/`. Each type specifies distributions over physical and behavioral parameters:
+Defined in YAML under [`config/agent_types/`](arena_humansim/config/agent_types/README.md). Each type specifies distributions over physical and behavioral parameters:
 
 ```yaml
 name: adult
@@ -76,9 +78,15 @@ Agents can operate in two movement modes:
 - **Waypoint** — follow an explicit waypoint list (repeat / reverse / once / random)
 - **Behavior Tree** — py_trees decision tree driven by needs, perceptions, and events
 
-BTs are compiled from the agent type's `sequences` and `actions` definitions. Needs decay over time and trigger actions when thresholds are crossed (e.g., hunger drops below 30 → eat).
+BTs are compiled from the agent type's `sequences`, `actions`, and `needs`. Needs decay over time and trigger actions when thresholds are crossed (e.g. hunger < 30 → eat).
+
+**Authoring the YAML:** [`config/agent_types/README.md`](arena_humansim/config/agent_types/README.md#behavior-trees) documents `needs`, `actions`, `sequences`, `steps`, `transitions`, accept steps, and autonomous steps with full field tables and examples.
+
+**Internals / extending primitives:** [`core/behavior/README.md`](arena_humansim/arena_humansim/core/behavior/README.md) covers cross-node invariants (nav-before-advertise, patience, accept semantics). [`core/behavior/nodes/README.md`](arena_humansim/arena_humansim/core/behavior/nodes/README.md) covers adding new `py_trees.Behaviour` primitives.
 
 ## Interactions
+
+Matcher semantics (advertise/search/accept, visibility gating, queueing, service binding) live in [`core/README.md`](arena_humansim/arena_humansim/core/README.md). The `interaction_radius` cascade is documented in [`config/scenarios/README.md`](arena_humansim/config/scenarios/README.md).
 
 This is very early-stage now, needs expansion.
 
@@ -118,6 +126,8 @@ ros2 launch arena_humansim arena_humansim.launch.py \
   rviz:=true
 ```
 
+Scenarios (world objects, agents, flow, walls) are authored under [`config/scenarios/`](arena_humansim/config/scenarios/README.md).
+
 ### Run node directly
 
 ```bash
@@ -130,6 +140,8 @@ ros2 run arena_humansim arena_humansim_node \
 ```bash
 ros2 run arena_humansim benchmark
 ```
+
+Config format and stage semantics: [`config/benchmark/README.md`](arena_humansim/config/benchmark/README.md).
 
 ### Parameters
 
@@ -162,6 +174,8 @@ ros2 run arena_humansim benchmark
 - `reset` — clear all simulation state
 
 ## Development
+
+Test layout (unit / contracts / integration / ros / perf / replay): [`arena_humansim/tests/README.md`](arena_humansim/tests/README.md).
 
 ### Linting
 

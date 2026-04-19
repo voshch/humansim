@@ -15,7 +15,7 @@ simulation:
   seed: 7
   dt: 0.05
   bt_tick_interval: 5
-  max_ticks: 2000
+  # max_ticks: 2000
   execution_mode: master
   formation_scale: 1.0
 
@@ -113,5 +113,8 @@ flow:
         desired_velocity_min: 1.0
         desired_velocity_max: 1.4
         agent_radius: 0.35
+
+walls:
+  - {name: fountain_back, start: {x: 3.8, y: -0.3}, end: {x: 3.8, y: 0.3}}
 
 interaction_scripts: []

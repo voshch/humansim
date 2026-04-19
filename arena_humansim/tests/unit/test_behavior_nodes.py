@@ -20,13 +20,11 @@ from arena_humansim.core.agents.types import (
 )
 from arena_humansim.core.behavior.nodes import (
     AutonomousNode,
-    ConcreteStepNode,
     NeedsDecayNode,
     SequenceStateMachine,
     _at_target,
     _interaction_command,
     _nav_command,
-    _resolve_interaction_radius,
     _sample_param_dist,
     check_condition,
     preconditions_met,
@@ -37,7 +35,6 @@ from arena_humansim.core.world_knowledge import WorldKnowledge, WorldObject
 from arena_humansim.utils.event_bus import EventBus
 from arena_humansim.utils.types import (
     BehaviorTreeMovement,
-    InteractionOutcome,
     InteractionType,
     NeedsState,
     NeedState,
@@ -216,250 +213,6 @@ def test_at_target_outside_tolerance(agent_factory: Callable[..., BaseAgent]) ->
     assert _at_target(agent, Pose2D(x=5.0, y=0.0)) is False
 
 
-def _concrete_node(
-    agent: BaseAgent,
-    world: WorldKnowledge,
-    rng: np.random.Generator,
-    *,
-    duration: ParamDist | None = None,
-    patience: ParamDist | None = None,
-    interaction: str | None = None,
-    target_object_type: str | None = None,
-    target_object_id: str | None = None,
-    satisfies: dict[str, float] | None = None,
-    interaction_radius: float | None = None,
-    dt: float = 0.5,
-) -> ConcreteStepNode:
-    step = StepDef(
-        target_object_type=target_object_type,
-        target_object_id=target_object_id,
-        interaction=interaction,
-        duration=duration,
-        patience=patience,
-        satisfies=satisfies or {},
-        interaction_radius=interaction_radius,
-    )
-    node = ConcreteStepNode("step", step, agent, world, rng, dt=dt)
-    node.initialise()
-    return node
-
-
-def test_concrete_target_object_id_resolves_to_specific_not_nearest(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
-    agent = _agent_with_bt(agent_factory, x=0.0, y=0.0)
-    # near_atm is closest by distance; far_atm is farther but named explicitly
-    world.add_object(WorldObject(object_id="near_atm", type="atm", pose=Pose2D(x=1.0, y=0.0)))
-    world.add_object(WorldObject(object_id="far_atm", type="atm", pose=Pose2D(x=10.0, y=0.0)))
-    node = _concrete_node(
-        agent,
-        world,
-        rng_np,
-        target_object_id="far_atm",
-        patience=ParamDist(30.0),
-    )
-    node.update()
-    cmd = _mv(agent).command
-    assert cmd is not None
-    assert cmd.type == CommandType.NAVIGATE
-    assert cmd.target_pose.x == pytest.approx(10.0)
-
-
-def test_concrete_interaction_completed_success(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
-    agent = _agent_with_bt(agent_factory)
-    agent.needs = _needs(hunger=50.0)
-    node = _concrete_node(agent, world, rng_np, interaction="TALK_TO", satisfies={"hunger": 20.0})
-    _mv(agent).last_outcome = InteractionOutcome.COMPLETED
-    status = node.update()
-    assert status == py_trees.common.Status.SUCCESS
-    assert agent.needs is not None
-    assert agent.needs.needs["hunger"].value == pytest.approx(70.0)
-
-
-def test_concrete_interaction_interrupted_failure(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
-    agent = _agent_with_bt(agent_factory)
-    node = _concrete_node(agent, world, rng_np, interaction="TALK_TO")
-    _mv(agent).last_outcome = InteractionOutcome.INTERRUPTED
-    assert node.update() == py_trees.common.Status.FAILURE
-
-
-def test_concrete_navigates_when_not_at_target(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
-    agent = _agent_with_bt(agent_factory, x=0.0, y=0.0)
-    world.add_object(WorldObject(object_id="b1", type="bench", pose=Pose2D(x=10.0, y=0.0)))
-    node = _concrete_node(
-        agent,
-        world,
-        rng_np,
-        target_object_type="bench",
-        duration=ParamDist(1.0),
-        patience=ParamDist(10.0),
-    )
-    status = node.update()
-    assert status == py_trees.common.Status.RUNNING
-    cmd = _mv(agent).command
-    assert cmd is not None
-    assert cmd.type == CommandType.NAVIGATE
-
-
-def test_concrete_patience_triggers_failure_during_nav(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
-    agent = _agent_with_bt(agent_factory, x=0.0, y=0.0)
-    world.add_object(WorldObject(object_id="b1", type="bench", pose=Pose2D(x=10.0, y=0.0)))
-    node = _concrete_node(
-        agent,
-        world,
-        rng_np,
-        target_object_type="bench",
-        patience=ParamDist(0.4),
-        dt=0.5,
-    )
-    assert node.update() == py_trees.common.Status.FAILURE
-
-
-def test_concrete_interaction_advertises_then_awaits_outcome(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
-    agent = _agent_with_bt(agent_factory, x=0.0, y=0.0)
-    agent.needs = _needs(energy=30.0)
-    node = _concrete_node(
-        agent,
-        world,
-        rng_np,
-        interaction="TALK_TO",
-        patience=ParamDist(10.0),
-        satisfies={"energy": 20.0},
-        dt=0.5,
-    )
-    s1 = node.update()
-    assert s1 == py_trees.common.Status.RUNNING
-    cmd = _mv(agent).command
-    assert cmd is not None
-    assert cmd.type == CommandType.ADVERTISE
-
-    assert node.update() == py_trees.common.Status.RUNNING
-
-    _mv(agent).last_outcome = InteractionOutcome.COMPLETED
-    assert node.update() == py_trees.common.Status.SUCCESS
-    assert agent.needs is not None
-    assert agent.needs.needs["energy"].value == pytest.approx(50.0)
-
-
-def test_concrete_interaction_advertise_carries_sampled_duration(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
-    agent = _agent_with_bt(agent_factory, x=0.0, y=0.0)
-    node = _concrete_node(
-        agent,
-        world,
-        rng_np,
-        interaction="TALK_TO",
-        duration=ParamDist(3.0),
-        patience=ParamDist(10.0),
-        dt=0.5,
-    )
-    node.update()
-    cmd = _mv(agent).command
-    assert cmd is not None
-    assert cmd.type == CommandType.ADVERTISE
-    assert cmd.interaction_duration == pytest.approx(3.0)
-
-
-def test_concrete_interaction_advertises_once_then_stays_silent(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
-    agent = _agent_with_bt(agent_factory, x=0.0, y=0.0)
-    node = _concrete_node(
-        agent,
-        world,
-        rng_np,
-        interaction="TALK_TO",
-        patience=ParamDist(10.0),
-        dt=0.5,
-    )
-    assert node.update() == py_trees.common.Status.RUNNING
-    first_cmd = _mv(agent).command
-    assert first_cmd is not None
-    assert first_cmd.type == CommandType.ADVERTISE
-
-    _mv(agent).command = None
-    assert node.update() == py_trees.common.Status.RUNNING
-    assert _mv(agent).command is None
-
-
-def test_interaction_step_navigates_before_advertising(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
-    agent = _agent_with_bt(agent_factory, x=10.0, y=10.0)
-    world.add_object(WorldObject(object_id="atm1", type="atm", pose=Pose2D(x=0.0, y=0.0)))
-    node = _concrete_node(
-        agent,
-        world,
-        rng_np,
-        interaction="USE",
-        target_object_type="atm",
-        patience=ParamDist(120.0),
-        dt=0.5,
-    )
-    assert node.update() == py_trees.common.Status.RUNNING
-    cmd = _mv(agent).command
-    assert cmd is not None
-    assert cmd.type == CommandType.NAVIGATE
-    assert cmd.target_pose.x == pytest.approx(0.0)
-    assert cmd.target_pose.y == pytest.approx(0.0)
-
-    agent.state.pose.x = 0.1
-    agent.state.pose.y = 0.0
-    assert node.update() == py_trees.common.Status.RUNNING
-    cmd = _mv(agent).command
-    assert cmd is not None
-    assert cmd.type == CommandType.ADVERTISE
-
-
-def test_interaction_radius_cascade() -> None:
-    type_default = 2.0  # TALK_TO
-    step_plain = StepDef(interaction="TALK_TO")
-    assert _resolve_interaction_radius(step_plain, None) == pytest.approx(type_default)
-
-    obj_with_override = WorldObject(object_id="b", type="bench", pose=Pose2D(), interaction_radius=1.25)
-    assert _resolve_interaction_radius(step_plain, obj_with_override) == pytest.approx(1.25)
-
-    step_with_override = StepDef(interaction="TALK_TO", interaction_radius=0.75)
-    assert _resolve_interaction_radius(step_with_override, obj_with_override) == pytest.approx(0.75)
-
-    step_no_interaction = StepDef()
-    assert _resolve_interaction_radius(step_no_interaction, None) == pytest.approx(0.5)
-
-
-def test_concrete_interaction_local_duration_does_not_force_success(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
-    agent = _agent_with_bt(agent_factory, x=0.0, y=0.0)
-    agent.needs = _needs(energy=30.0)
-    node = _concrete_node(
-        agent,
-        world,
-        rng_np,
-        interaction="TALK_TO",
-        duration=ParamDist(1.0),
-        patience=ParamDist(10.0),
-        satisfies={"energy": 20.0},
-        dt=0.5,
-    )
-    for _ in range(4):
-        assert node.update() == py_trees.common.Status.RUNNING
-    assert agent.needs is not None
-    assert agent.needs.needs["energy"].value == pytest.approx(30.0)
-
-
-def test_concrete_no_interaction_no_duration_immediate_success(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
-    agent = _agent_with_bt(agent_factory)
-    agent.needs = _needs(rest=50.0)
-    node = _concrete_node(agent, world, rng_np, satisfies={"rest": 10.0})
-    assert node.update() == py_trees.common.Status.SUCCESS
-    assert agent.needs is not None
-    assert agent.needs.needs["rest"].value == pytest.approx(60.0)
-
-
-def test_concrete_patience_without_duration_triggers_failure(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
-    agent = _agent_with_bt(agent_factory)
-    node = _concrete_node(
-        agent,
-        world,
-        rng_np,
-        interaction="TALK_TO",
-        patience=ParamDist(0.4),
-        dt=0.5,
-    )
-    assert node.update() == py_trees.common.Status.FAILURE
-
-
 def _auto_node(
     agent: BaseAgent,
     world: WorldKnowledge,
@@ -630,7 +383,7 @@ def test_state_machine_transition_fires_goto(agent_factory: Callable[..., BaseAg
     assert sm.update() == py_trees.common.Status.RUNNING
     assert sm._current_name == "b"
     assert b.initialised >= 1
-    assert py_trees.common.Status.FAILURE in a.terminated_with
+    assert py_trees.common.Status.INVALID in a.terminated_with
 
 
 def test_state_machine_success_chain_then(agent_factory: Callable[..., BaseAgent]) -> None:
@@ -714,6 +467,37 @@ def test_state_machine_terminate_forwards_to_current(agent_factory: Callable[...
     sm.initialise()
     sm.terminate(py_trees.common.Status.INVALID)
     assert py_trees.common.Status.INVALID in a.terminated_with
+
+
+def test_state_machine_transition_cascades_into_composite_subtree(agent_factory: Callable[..., BaseAgent]) -> None:
+    # If the current node is a composite (Parallel/Sequence), `_goto` must cascade the
+    # teardown down to the leaf — calling terminate() on a composite is a no-op hook
+    # that skips children. Guards the AdvertiseInteractionNode.terminate → STOP chain
+    # that releases formation participant slots on transitions.
+    agent = agent_factory(agent_id=1)
+    agent.needs = _needs(energy=5.0)
+    recorder = _StubChild("recorder", py_trees.common.Status.RUNNING)
+    inner = py_trees.composites.Sequence(name="inner", memory=True, children=[recorder])
+    outer = py_trees.composites.Parallel(
+        name="outer",
+        policy=py_trees.common.ParallelPolicy.SuccessOnOne(),
+        children=[inner],
+    )
+    fallback = _StubChild("fallback", py_trees.common.Status.RUNNING)
+    seq_defs = {
+        "a": SequenceDef(
+            steps={"s": StepDef()},
+            transitions=(TransitionDef(when={"energy": NeedCondition(below=10.0)}, goto="b"),),
+        ),
+        "b": SequenceDef(steps={"s": StepDef()}),
+    }
+    sm = SequenceStateMachine("sm", {"a": outer, "b": fallback}, seq_defs, "a", agent)
+    sm.initialise()
+    outer.tick_once()
+
+    assert sm.update() == py_trees.common.Status.RUNNING
+    assert sm._current_name == "b"
+    assert recorder.terminated_with, "leaf terminate() must fire when SM transitions out of a composite subtree"
 
 
 def test_pool_kind_filter_excludes_robots(agent_factory: Callable[..., BaseAgent]) -> None:

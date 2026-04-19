@@ -19,8 +19,6 @@ from arena_humansim.core.agents.types import (
 )
 from arena_humansim.core.behavior.compiler import compile_agent_behavior
 from arena_humansim.core.behavior.nodes import (
-    AutonomousNode,
-    ConcreteStepNode,
     NeedsDecayNode,
     SequenceStateMachine,
 )
@@ -95,21 +93,6 @@ def test_string_transition_raises_value_error(agent_factory: Callable[..., BaseA
         compile_agent_behavior(agent_type, agent, world, event_bus, rng_np, 0.05)
 
 
-def test_single_step_inlined_no_sequence_wrapper(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
-    sequences = {"default": SequenceDef(steps={"only": _concrete_step()})}
-    agent_type = _agent_type(sequences=sequences)
-    agent = agent_factory(agent_id=1)
-
-    bt = compile_agent_behavior(agent_type, agent, world, event_bus, rng_np, 0.05)
-    assert bt is not None
-
-    root = bt.root
-    assert isinstance(root, SequenceStateMachine)
-    compiled = root._sequences["default"]
-    assert isinstance(compiled, ConcreteStepNode)
-    assert not isinstance(compiled, py_trees.composites.Sequence)
-
-
 def test_multi_step_wraps_in_sequence_with_memory(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
     sequences = {
         "default": SequenceDef(
@@ -160,23 +143,6 @@ def test_no_needs_uses_state_machine_as_root(agent_factory: Callable[..., BaseAg
     assert bt is not None
     assert isinstance(bt.root, SequenceStateMachine)
     assert not isinstance(bt.root, py_trees.composites.Parallel)
-
-
-def test_autonomous_vs_concrete_recipe_dispatch(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
-    """Autonomous StepDef compiles to AutonomousNode; non-autonomous to ConcreteStepNode."""
-    sequences = {
-        "auto_seq": SequenceDef(steps={"s": _autonomous_step()}),
-        "concrete_seq": SequenceDef(steps={"s": _concrete_step()}),
-    }
-    agent_type = _agent_type(sequences=sequences, initial_sequence="auto_seq")
-    agent = agent_factory(agent_id=1)
-
-    bt = compile_agent_behavior(agent_type, agent, world, event_bus, rng_np, 0.05)
-    assert bt is not None
-    sm = bt.root
-    assert isinstance(sm, SequenceStateMachine)
-    assert isinstance(sm._sequences["auto_seq"], AutonomousNode)
-    assert isinstance(sm._sequences["concrete_seq"], ConcreteStepNode)
 
 
 def test_transitions_with_need_condition_compile(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:

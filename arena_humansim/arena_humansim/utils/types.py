@@ -272,15 +272,12 @@ class NeedsState:
                 self.needs[name].value = min(100.0, self.needs[name].value + amount)
 
 
-# ---------------------------------------------------------------------------
-# cattrs converter with hooks for agent type deserialization
-# ---------------------------------------------------------------------------
-
 import cattrs
 
 from arena_humansim.core.agents.types import (
     ActionDef,
     AgentType,
+    GoToStepDef,
     LocalPlannerDist,
     NeedCondition,
     NeedDist,
@@ -347,10 +344,37 @@ def _structure_action_def(val: object, _: type) -> ActionDef:
 converter.register_structure_hook(ActionDef, _structure_action_def)
 
 
+_STEP_KINDS = ("object_interact", "go_to")
+
+
+def _structure_go_to_step_def(val: object, _: type) -> GoToStepDef:
+    if isinstance(val, GoToStepDef):
+        return val
+    d = dict(val)
+    d.pop("kind", None)
+    if "target_pose" not in d:
+        raise ValueError("go_to step requires 'target_pose: {x, y}' field")
+    pose = d["target_pose"]
+    if isinstance(pose, Pose2D):
+        d["target_pose"] = pose
+    else:
+        pose_d = dict(pose)
+        d["target_pose"] = Pose2D(x=float(pose_d["x"]), y=float(pose_d["y"]), theta=float(pose_d.get("theta", 0.0)))
+    if "duration" in d and d["duration"] is not None:
+        d["duration"] = converter.structure(d["duration"], ParamDist)
+    if "patience" in d and d["patience"] is not None:
+        d["patience"] = converter.structure(d["patience"], ParamDist)
+    return GoToStepDef(**d)
+
+
+converter.register_structure_hook(GoToStepDef, _structure_go_to_step_def)
+
+
 def _structure_step_def(val: object, _: type) -> StepDef:
     if isinstance(val, StepDef):
         return val
     d = dict(val)
+    d.pop("kind", None)
     if "duration" in d and d["duration"] is not None:
         d["duration"] = converter.structure(d["duration"], ParamDist)
     if "patience" in d and d["patience"] is not None:
@@ -365,6 +389,17 @@ def _structure_step_def(val: object, _: type) -> StepDef:
 
 
 converter.register_structure_hook(StepDef, _structure_step_def)
+
+
+def _structure_step_variant(val: object) -> StepDef | GoToStepDef:
+    if isinstance(val, (StepDef, GoToStepDef)):
+        return val
+    kind = dict(val).get("kind", "object_interact")
+    if kind == "go_to":
+        return converter.structure(val, GoToStepDef)
+    if kind == "object_interact":
+        return converter.structure(val, StepDef)
+    raise ValueError(f"unknown step kind {kind!r}; expected one of {_STEP_KINDS}")
 
 
 def _structure_transition_def(val: object, _: type) -> TransitionDef:
@@ -386,7 +421,7 @@ def _structure_sequence_def(val: object, _: type) -> SequenceDef:
         return val
     d = dict(val)
     if "steps" in d:
-        d["steps"] = {k: converter.structure(v, StepDef) for k, v in d["steps"].items()}
+        d["steps"] = {k: _structure_step_variant(v) for k, v in d["steps"].items()}
     if "transitions" in d:
         d["transitions"] = tuple(converter.structure(t, TransitionDef) for t in d["transitions"])
     else:

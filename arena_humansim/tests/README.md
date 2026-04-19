@@ -42,7 +42,6 @@ Declared once at the tests root, visible everywhere:
 - **New plugin under `local_planner/`, `global_planner/`, `perception/`, `animation/`, `collision/`** → add coverage to the matching `contracts/` and `efficacy/` file. Both iterate `_registry`; registering the plugin is enough for the contract test to find it.
 - **New invariant on pool, RNG, collision, or scenario** → prefer `property/` over a single hand-picked example. Hypothesis catches edge cases worth catching.
 - **New service, topic, or parameter on the ROS interface** → add a `ros/` test using `RosTestSystem`. Integration tests go in `integration/` only if you need a full tick loop.
-- **Direct imports of `action_nodes` pydantic `Schema`s fail** in tests due to deferred schema build. Exercise them via pool helpers or a full BT tick — see the [pydantic schema gotcha memory](../../CLAUDE.md) / `test_behavior_nodes.py` for the pattern.
 - **Determinism is assumed.** Any new test that reads wall-clock time, `random` (not seeded `RNG`), or system state is wrong. Fix the test, don't loosen the assertion.
 
 ## Efficacy vs contract: what goes where

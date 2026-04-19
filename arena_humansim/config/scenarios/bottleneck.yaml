@@ -23,7 +23,7 @@ modules:
   animation: kinematic
 
 agents:
-  # --- Eastbound (west room -> east room) ---
+  # Eastbound (west room -> east room)
   - agent_id: 0
     spawn_pose: {x: -8.0, y:  2.5, theta: 0.0}
     goal_sequence: [{x: 8.0, y:  2.5}]
@@ -54,7 +54,7 @@ agents:
     goal_sequence: [{x: 8.0, y:  3.5}]
     desired_velocity: 1.1
 
-  # --- Westbound (east room -> west room) ---
+  # Westbound (east room -> west room)
   - agent_id: 6
     spawn_pose: {x: 8.0, y:  2.5, theta: 3.14159}
     goal_sequence: [{x: -8.0, y:  2.5}]
@@ -91,7 +91,7 @@ walls:
   - {name: south,      start: {x: -10.0, y: -5.0}, end: {x: 10.0, y: -5.0}}
   - {name: west,       start: {x: -10.0, y: -5.0}, end: {x: -10.0, y:  5.0}}
   - {name: east,       start: {x:  10.0, y: -5.0}, end: {x:  10.0, y:  5.0}}
-  # Dividing wall with a 1.2 m doorway centred at y = 0
+  # Dividing wall with a 1.2 m doorway centered at y = 0
   - {name: divider_n,  start: {x:   0.0, y:  0.6}, end: {x:   0.0, y:  5.0}}
   - {name: divider_s,  start: {x:   0.0, y: -0.6}, end: {x:   0.0, y: -5.0}}
 

@@ -580,11 +580,6 @@ def test_duration_expiry_rotates_fifo_queue() -> None:
     assert not mgr.is_in_interaction(2)
 
 
-# ---------------------------------------------------------------------------
-# Matcher tests (rules 1-4 of _try_bind).
-# ---------------------------------------------------------------------------
-
-
 def _mk_matcher_mgr(
     agents: dict[int, Any],
     visibility: dict[int, set[int]] | None = None,
@@ -745,11 +740,6 @@ def test_anchorless_sit_on_anchor_falls_back_to_creator_pose() -> None:
     pose = anchor.pose()
     assert pose.x == pytest.approx(7.0)
     assert pose.y == pytest.approx(3.0)
-
-
-# ---------------------------------------------------------------------------
-# SERVICE matcher tests.
-# ---------------------------------------------------------------------------
 
 
 class _FakeRobotAgent:

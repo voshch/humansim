@@ -10,6 +10,7 @@ import attrs
 import yaml
 
 from ..core.agents import AgentType, VarDef
+from ..core.agents.types import GoToStepDef
 from .types import InteractionType, converter
 
 
@@ -505,15 +506,36 @@ def _structure_manual(
 def _validate_target_object_refs(config: ScenarioConfig) -> None:
     world_types = {wo.type for wo in config.world_objects}
     world_ids = {wo.object_id for wo in config.world_objects}
+    agent_ids = {a.agent_id for a in config.agents}
     for atype_name, atype in config.agent_types.items():
         for seq_name, seq in atype.sequences.items():
             for step_name, step in seq.steps.items():
+                if isinstance(step, GoToStepDef):
+                    continue
                 if step.target_object_id is not None and step.target_object_type is not None:
                     raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: target_object_id and target_object_type are mutually exclusive")
                 if step.target_object_id is not None and step.target_object_id not in world_ids:
                     raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: target_object_id={step.target_object_id!r} does not match any world_objects object_id")
                 if step.target_object_type is not None and step.target_object_type not in world_types:
                     raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: target_object_type={step.target_object_type!r} does not match any world_objects type")
+                if step.accept:
+                    if step.interaction is None:
+                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: accept=true requires interaction")
+                    if step.target_object_id is not None or step.target_object_type is not None:
+                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: accept steps cannot also target an object; drop target_object_* or use a regular interaction step")
+                    if step.autonomous:
+                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: accept and autonomous are mutually exclusive")
+                    if step.target_agent is not None:
+                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: accept and target_agent are mutually exclusive")
+                if step.service_tag is not None and not step.accept:
+                    raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: service_tag requires accept=true")
+                if step.target_agent is not None:
+                    if step.target_object_id is not None or step.target_object_type is not None:
+                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: target_agent cannot be combined with target_object_*")
+                    if step.autonomous:
+                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: target_agent and autonomous are mutually exclusive")
+                    if step.target_agent not in agent_ids:
+                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: target_agent={step.target_agent} does not match any scenario agents[].agent_id")
         for action_name, action in atype.actions.items():
             if action.target_object_id is not None and action.target_object_type is not None:
                 raise ValueError(f"agent_type={atype_name!r} action={action_name!r}: target_object_id and target_object_type are mutually exclusive")

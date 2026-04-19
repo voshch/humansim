@@ -5,7 +5,6 @@ The simulator's central subsystems live here: the agent pool, the tick-schedulin
 This README focuses on **`InteractionManager`** — the only piece of core with non-obvious behavior that isn't already covered by a sibling readme. See also:
 
 - [behavior/README.md](behavior/README.md) — behavior-tree node invariants (ADVERTISE, patience, SERVICE accept).
-- [behavior/action_nodes/README.md](behavior/action_nodes/README.md) — decentralization rules for authoring new BT action nodes.
 
 ## InteractionManager
 
@@ -46,6 +45,6 @@ Defaults: formation `f_formation`, `interaction_radius` 3.0.
 
 ## What lives elsewhere
 
-- **Proximity gating for anchored `ADVERTISE`** — `ConcreteStepNode` in `behavior/nodes.py` navigates to within `interaction_radius` before emitting. IM trusts the ad.
+- **Proximity gating for anchored `ADVERTISE`** — the compiler emits `ResolveObjectNode` → `GoToNode` → `AdvertiseInteractionNode` for interaction steps; `GoToNode` only returns SUCCESS once within `interaction_radius`, so `AdvertiseInteractionNode` never fires before the agent has arrived. IM trusts the ad.
 - **Formation defaults per interaction type** — `DEFAULT_FORMATION_BY_INTERACTION` (same file), keyed by `InteractionType`. Overridden by `WorldObject.formation` when present.
 - **Approach-tolerance defaults per interaction type** — `DEFAULT_INTERACTION_RADIUS` (same file). See [config/scenarios/README.md](../../config/scenarios/README.md) for the full cascade.

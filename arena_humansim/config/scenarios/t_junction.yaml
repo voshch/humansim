@@ -24,7 +24,7 @@ modules:
   animation: kinematic
 
 agents:
-  # --- Eastbound through the horizontal corridor ---
+  # Eastbound through the horizontal corridor
   - agent_id: 0
     spawn_pose: {x: -12.0, y:  0.4, theta: 0.0}
     goal_sequence: [{x: 12.0, y:  0.4}]
@@ -40,7 +40,7 @@ agents:
     goal_sequence: [{x: 12.0, y: -0.4}]
     desired_velocity: 1.15
 
-  # --- Westbound through the horizontal corridor ---
+  # Westbound through the horizontal corridor
   - agent_id: 3
     spawn_pose: {x: 12.0, y:  0.4, theta: 3.14159}
     goal_sequence: [{x: -12.0, y:  0.4}]
@@ -56,7 +56,7 @@ agents:
     goal_sequence: [{x: -12.0, y:  0.0}]
     desired_velocity: 1.1
 
-  # --- From the southern stub, entering the junction and turning ---
+  # From the southern stub, entering the junction and turning
   - agent_id: 6
     spawn_pose: {x: -0.4, y: -10.0, theta: 1.5708}
     goal_sequence:

@@ -1,6 +1,7 @@
 __all__ = [
     "ActionDef",
     "AgentType",
+    "GoToStepDef",
     "LocalPlannerDist",
     "NeedCondition",
     "NeedDist",
@@ -22,6 +23,8 @@ from pathlib import Path
 
 import attrs
 import numpy as np
+
+from arena_humansim.utils.types import Pose2D
 
 
 @attrs.frozen
@@ -91,10 +94,25 @@ class StepDef:
 
     interaction_radius: float | None = None
 
+    accept: bool = False
+    service_tag: str | None = None
+
+    target_agent: int | None = None
+
+
+@attrs.frozen
+class GoToStepDef:
+    target_pose: Pose2D
+    duration: ParamDist | None = None
+    patience: ParamDist | None = None
+    satisfies: dict[str, float] = attrs.Factory(dict)
+    on_failure: str = "abort"
+    interruptible: bool | None = None
+
 
 @attrs.frozen
 class SequenceDef:
-    steps: dict[str, StepDef]
+    steps: dict[str, StepDef | GoToStepDef]
     then: str | None = None
     on_failure: str | None = None
     interruptible: bool = True

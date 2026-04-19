@@ -23,7 +23,7 @@ modules:
   animation: kinematic
 
 agents:
-  # --- Eastbound (left to right) ---
+  # Eastbound (left to right)
   - agent_id: 0
     spawn_pose: {x: -15.0, y: -0.6, theta: 0.0}
     goal_sequence: [{x: 15.0, y: -0.6}]
@@ -49,7 +49,7 @@ agents:
     goal_sequence: [{x: 15.0, y: 0.6}]
     desired_velocity: 1.25
 
-  # --- Westbound (right to left) ---
+  # Westbound (right to left)
   - agent_id: 5
     spawn_pose: {x: 15.0, y: 0.6, theta: 3.14159}
     goal_sequence: [{x: -15.0, y: 0.6}]

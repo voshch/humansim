@@ -185,3 +185,132 @@ def test_none_target_object_type_skips_validation() -> None:
     )
     scn = _structure_manual(data)
     assert scn.agent_types["walker"].sequences["idle"].steps["pause"].target_object_type is None
+
+
+def _with_accept_step(fields: dict) -> dict:
+    return _minimal(
+        {
+            "agent_types": {
+                "walker": {
+                    "mode": "behavior_tree",
+                    "sequences": {
+                        "default": {
+                            "steps": {"step": fields}
+                        }
+                    },
+                }
+            },
+        }
+    )
+
+
+def test_accept_without_interaction_raises() -> None:
+    with pytest.raises(ValueError, match="accept=true requires interaction"):
+        _structure_manual(_with_accept_step({"accept": True}))
+
+
+def test_accept_with_target_object_raises() -> None:
+    data = _minimal(
+        {
+            "world_objects": [{"object_id": "b1", "type": "bench", "pose": {"x": 0.0, "y": 0.0, "theta": 0.0}, "capacity": 1}],
+            "agent_types": {
+                "walker": {
+                    "mode": "behavior_tree",
+                    "sequences": {"default": {"steps": {"step": {"accept": True, "interaction": "SIT_ON", "target_object_type": "bench"}}}},
+                }
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="accept steps cannot also target an object"):
+        _structure_manual(data)
+
+
+def test_accept_with_autonomous_raises() -> None:
+    with pytest.raises(ValueError, match="accept and autonomous are mutually exclusive"):
+        _structure_manual(_with_accept_step({"accept": True, "interaction": "TALK_TO", "autonomous": True}))
+
+
+def test_accept_with_target_agent_raises() -> None:
+    data = _minimal(
+        {
+            "agents": [{"agent_id": 1, "agent_type": "walker"}, {"agent_id": 2, "agent_type": "walker"}],
+            "agent_types": {
+                "walker": {
+                    "mode": "behavior_tree",
+                    "sequences": {"default": {"steps": {"step": {"accept": True, "interaction": "TALK_TO", "target_agent": 2}}}},
+                }
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="accept and target_agent are mutually exclusive"):
+        _structure_manual(data)
+
+
+def test_service_tag_without_accept_raises() -> None:
+    with pytest.raises(ValueError, match="service_tag requires accept=true"):
+        _structure_manual(_with_accept_step({"interaction": "SERVICE", "service_tag": "water"}))
+
+
+def test_block_with_valid_target_agent_loads() -> None:
+    data = _minimal(
+        {
+            "agents": [{"agent_id": 1, "agent_type": "walker"}, {"agent_id": 99, "agent_type": "walker"}],
+            "agent_types": {
+                "walker": {
+                    "mode": "behavior_tree",
+                    "sequences": {"default": {"steps": {"pursue": {"target_agent": 99, "duration": {"mean": 5.0, "std": 0.0, "clip_low": 0.1, "clip_high": 30.0}}}}},
+                }
+            },
+        }
+    )
+    scn = _structure_manual(data)
+    assert scn.agent_types["walker"].sequences["default"].steps["pursue"].target_agent == 99
+
+
+def test_block_with_unknown_target_agent_raises() -> None:
+    data = _minimal(
+        {
+            "agents": [{"agent_id": 1, "agent_type": "walker"}],
+            "agent_types": {
+                "walker": {
+                    "mode": "behavior_tree",
+                    "sequences": {"default": {"steps": {"pursue": {"target_agent": 99}}}},
+                }
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="target_agent=99 does not match"):
+        _structure_manual(data)
+
+
+def test_block_with_target_object_raises() -> None:
+    data = _minimal(
+        {
+            "agents": [{"agent_id": 1, "agent_type": "walker"}, {"agent_id": 99, "agent_type": "walker"}],
+            "world_objects": [{"object_id": "b1", "type": "bench", "pose": {"x": 0.0, "y": 0.0, "theta": 0.0}, "capacity": 1}],
+            "agent_types": {
+                "walker": {
+                    "mode": "behavior_tree",
+                    "sequences": {"default": {"steps": {"pursue": {"target_agent": 99, "target_object_type": "bench"}}}},
+                }
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="target_agent cannot be combined with target_object"):
+        _structure_manual(data)
+
+
+def test_block_with_autonomous_raises() -> None:
+    data = _minimal(
+        {
+            "agents": [{"agent_id": 1, "agent_type": "walker"}, {"agent_id": 99, "agent_type": "walker"}],
+            "agent_types": {
+                "walker": {
+                    "mode": "behavior_tree",
+                    "sequences": {"default": {"steps": {"pursue": {"target_agent": 99, "autonomous": True}}}},
+                }
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="target_agent and autonomous are mutually exclusive"):
+        _structure_manual(data)

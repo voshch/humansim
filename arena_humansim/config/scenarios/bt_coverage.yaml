@@ -1,14 +1,13 @@
 # bt_coverage.yaml
-# Exercises behavior-tree compilation and action_nodes paths.
-# Defines an agent_type with actions covering go_to (target_object) and
-# interaction-based actions (idle, look_at, wave_at, talk_to).
-# The initial sequence chains multiple steps so BT ticks exercise the
-# compiler, ConcreteStepNode, AutonomousNode, and SequenceStateMachine paths.
+# Exercises behavior-tree compilation paths.
+# Defines an agent_type with an object-interaction action and a sequence that
+# chains a nav step, a pure-wait, and an autonomous selection — covering the
+# compiler's object_nav, pure_wait, AutonomousNode, and SequenceStateMachine paths.
 
 name: bt_coverage
 description: >-
-  Minimal behavior-tree scenario exercising action_nodes coverage. Three
-  agents walk through a sequence of steps driven by a compiled BT.
+  Minimal behavior-tree scenario. Three agents walk through a sequence of
+  steps driven by a compiled BT.
 
 simulation:
   seed: 42

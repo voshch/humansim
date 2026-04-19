@@ -10,7 +10,6 @@ markers = [
 omit = [
     "*/benchmark.py",
     "*/behavior/document_nodes_description.py",
-    "*/behavior/action_nodes/*",
 ]
 
 [tool.ruff]

@@ -71,6 +71,7 @@ class WorldKnowledge(Loggable):
         self._objects: dict[str, WorldObject] = {}
         self._by_type: dict[str, list[WorldObject]] = {}
         self._queue_lengths: dict[str, int] = {}
+        self._participants_counts: dict[str, int] = {}
 
     def add_object(self, obj: WorldObject) -> None:
         self._objects[obj.object_id] = obj
@@ -86,6 +87,7 @@ class WorldKnowledge(Loggable):
                 if not type_list:
                     del self._by_type[obj.type]
             self._queue_lengths.pop(object_id, None)
+            self._participants_counts.pop(object_id, None)
         return obj
 
     def get(self, object_id: str) -> WorldObject | None:
@@ -135,10 +137,17 @@ class WorldKnowledge(Loggable):
     def queue_length_for_object(self, object_id: str) -> int:
         return self._queue_lengths.get(object_id, 0)
 
+    def set_participants_count(self, object_id: str, count: int) -> None:
+        self._participants_counts[object_id] = count
+
+    def participants_count_for_object(self, object_id: str) -> int:
+        return self._participants_counts.get(object_id, 0)
+
     def clear(self) -> None:
         self._objects.clear()
         self._by_type.clear()
         self._queue_lengths.clear()
+        self._participants_counts.clear()
 
     def __len__(self) -> int:
         return len(self._objects)

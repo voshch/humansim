@@ -808,6 +808,7 @@ class AgentManager(Node):
             event_bus=self._event_bus,
             rng=self._rng.get_agent_substream(aid, "behavior"),
             dt=self._dt,
+            agent_lookup=lambda aid: self._agents.get(aid),
         )
         self._behavior_trees[aid] = bt
         if bt is not None:
@@ -935,7 +936,6 @@ class AgentManager(Node):
 
         world_state = self._consume_world_state()
 
-        # --- SENSE (vectorized perception -> CSR) ---
         t0 = time.perf_counter()
         default_layer = next(iter(self._perception_cache.values()), None)
         if default_layer is not None and default_layer.supports_pool:
@@ -961,7 +961,6 @@ class AgentManager(Node):
         self._run_extra_modules(agents, TickPhase.SENSE)
         self._phase_end("sense", t0)
 
-        # --- DECIDE (BT tick, per-agent) ---
         if is_bt_tick:
             t0 = time.perf_counter()
             pool.sync_back(agents)
@@ -981,7 +980,6 @@ class AgentManager(Node):
             self._event_bus.clear()
             self._phase_end("decide", t0)
 
-            # --- GLOBAL PLAN ---
             t0 = time.perf_counter()
             needs_subgoal_ids: set[int] = set()
             for i in range(pool.n):
@@ -1006,7 +1004,6 @@ class AgentManager(Node):
             self._apply_arrival_latch(pool)
             self._phase_end("global_plan", t0)
 
-        # --- LOCAL PLAN (vectorized SFM or per-agent fallback) ---
         t0 = time.perf_counter()
         pool.store_prev_vel()
         n = pool.n
@@ -1050,7 +1047,6 @@ class AgentManager(Node):
         self._run_extra_modules(agents, TickPhase.PLAN)
         self._phase_end("local_plan", t0)
 
-        # --- INTERACTIONS (sequential, unchanged) ---
         t0 = time.perf_counter()
         self._process_interaction_scripts()
         robot_service_cmds = self._robot_service_advertiser.emit(self._agents)
@@ -1098,15 +1094,17 @@ class AgentManager(Node):
                     interaction.object_id,
                     interaction.contract.queue_length,
                 )
+                self._world_knowledge.set_participants_count(
+                    interaction.object_id,
+                    len(interaction.participants),
+                )
         self._phase_end("interactions", t0)
 
-        # --- KINEMATICS (vectorized) ---
         t0 = time.perf_counter()
         self._apply_arrival_damp(pool)
         self._apply_kinematic_constraints_vectorized(pool)
         self._phase_end("kinematics", t0)
 
-        # --- ANIMATION ---
         t0 = time.perf_counter()
         for anim, _ in _group_by(agents, key=lambda a: a.animation):
             anim.compute_batch_pool(pool, interactions, self._dt)
@@ -1114,17 +1112,14 @@ class AgentManager(Node):
         self._run_extra_modules(agents, TickPhase.ACT)
         self._phase_end("animation", t0)
 
-        # --- INTEGRATION (vectorized) ---
         t0 = time.perf_counter()
         self._integrate_state_vectorized(pool)
         self._phase_end("integrate", t0)
 
-        # --- COLLISION RESOLVE ---
         t0 = time.perf_counter()
         self._collision.resolve(pool)
         self._phase_end("collision", t0)
 
-        # --- WAYPOINTS + PUBLISH (read from pool, no sync needed) ---
         t0 = time.perf_counter()
         self._advance_waypoints(agents, pool)
         msg = self._build_agent_states_msg()
