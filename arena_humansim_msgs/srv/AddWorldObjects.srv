@@ -1,0 +1,6 @@
+# Register anchor objects (reception desks, exam chairs, queue endpoints, ...)
+# that actions and steps can reference via target_object_id / target_object_type.
+arena_humansim_msgs/WorldObjectInfo[] objects
+---
+bool success
+string message

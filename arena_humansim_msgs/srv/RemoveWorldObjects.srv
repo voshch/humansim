@@ -1,0 +1,5 @@
+# Remove anchor objects by id. Empty list = remove all.
+string[] object_ids
+---
+bool success
+string message

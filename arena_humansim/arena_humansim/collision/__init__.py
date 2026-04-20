@@ -14,7 +14,7 @@ _registry: ModuleRegistry[CollisionResolver] = ModuleRegistry()
 
 class CollisionResolver(WallAware, Loggable, ABC):
     @abstractmethod
-    def resolve(self, pool: AgentPool) -> None: ...
+    def resolve(self, pool: AgentPool) -> set[int]: ...
 
     @classmethod
     def register(cls, name: str) -> Callable[[Callable[[], type[CollisionResolver]]], Callable[[], type[CollisionResolver]]]:
@@ -30,8 +30,8 @@ class CollisionResolver(WallAware, Loggable, ABC):
 
 
 class NoopCollisionResolver(CollisionResolver):
-    def resolve(self, pool: AgentPool) -> None:
-        pass
+    def resolve(self, pool: AgentPool) -> set[int]:
+        return set()
 
 
 def _load_noop() -> type[CollisionResolver]:

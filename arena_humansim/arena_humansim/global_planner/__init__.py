@@ -81,6 +81,12 @@ class GlobalPlanner(WallAware, Loggable, ABC):
     def get_cached_paths(self) -> dict[int, list[Pose2D]]:
         return {}
 
+    def invalidate_paths(self, agent_ids: Iterable[int]) -> None:
+        pass
+
+    def snap_terminal(self, pose: Pose2D) -> Pose2D:
+        return pose
+
     def publish_markers(self, pub: MarkerPublisher) -> None:
         pass
 

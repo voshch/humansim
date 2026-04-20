@@ -23,6 +23,7 @@ from arena_humansim_msgs.srv import (
     AddSink,
     AddSource,
     AddWalls,
+    AddWorldObjects,
     Feedback,
     GetProfile,
     RemoveAgents,
@@ -30,6 +31,7 @@ from arena_humansim_msgs.srv import (
     RemoveSink,
     RemoveSource,
     RemoveWalls,
+    RemoveWorldObjects,
     ResetSimulation,
     SetFlow,
     SetWaypoints,
@@ -137,14 +139,17 @@ def arrival_latch_step(pool: AgentPool, r_enter: float, r_exit: float) -> None:
     if n == 0:
         return
     pos = pool.pos[:n]
+    # Must run after pool.set_goals / pool.set_terminals — reads fresh goal_pos on release.
     goal = pool.goal_pos[:n]
     has_goal = pool.has_goal[:n]
+    term = pool.terminal_pos[:n]
+    has_term = pool.has_terminal[:n]
     latched = pool.latched[:n]
 
-    d_goal = np.hypot(goal[:, 0] - pos[:, 0], goal[:, 1] - pos[:, 1])
+    d_term = np.hypot(term[:, 0] - pos[:, 0], term[:, 1] - pos[:, 1])
 
-    release = latched & (d_goal > r_exit)
-    enter = (~latched) & has_goal & (d_goal < r_enter)
+    release = latched & (d_term > r_exit)
+    enter = (~latched) & has_term & (d_term < r_enter)
     new_latched = np.where(release, False, np.where(enter, True, latched))
     pool.latched[:n] = new_latched
 
@@ -404,6 +409,16 @@ class AgentManager(Node):
             RemoveObstacles,
             "remove_obstacles",
             self._remove_obstacles_callback,
+        )
+        self._add_world_objects_srv = self.create_service(
+            AddWorldObjects,
+            "add_world_objects",
+            self._add_world_objects_callback,
+        )
+        self._remove_world_objects_srv = self.create_service(
+            RemoveWorldObjects,
+            "remove_world_objects",
+            self._remove_world_objects_callback,
         )
         self._reset_srv = self.create_service(
             ResetSimulation,
@@ -809,6 +824,7 @@ class AgentManager(Node):
             rng=self._rng.get_agent_substream(aid, "behavior"),
             dt=self._dt,
             agent_lookup=lambda aid: self._agents.get(aid),
+            pool=self._pool,
         )
         self._behavior_trees[aid] = bt
         if bt is not None:
@@ -941,22 +957,19 @@ class AgentManager(Node):
         if default_layer is not None and default_layer.supports_pool:
             default_layer.compute_pool(pool)
 
-        # build beliefs only for BT agents or agents with extra perception
         if is_bt_tick or any(len(a.perception) > 1 for a in agents):
             indptr = pool.neighbor_indptr
             indices = pool.neighbor_indices
             any_extra = any(len(a.perception) > 1 for a in agents)
             agent_states = {aid: agent.state for aid, agent in self._agents.items()} if any_extra else None
             for i, agent in enumerate(agents):
-                has_bt = self._behavior_trees.get(agent.state.agent_id) is not None
-                has_extra = len(agent.perception) > 1
-                if has_bt or has_extra:
-                    belief = BeliefState(agent_id=agent.state.agent_id)
-                    nbr_idxs = indices[indptr[i] : indptr[i + 1]].tolist()
-                    belief.observed_agents = [agents[j].state for j in nbr_idxs]
+                belief = BeliefState(agent_id=agent.state.agent_id)
+                nbr_idxs = indices[indptr[i] : indptr[i + 1]].tolist()
+                belief.observed_agents = [agents[j].state for j in nbr_idxs]
+                if len(agent.perception) > 1:
                     for layer in agent.perception[1:]:
                         belief = layer.compute(agent, agent_states, world_state, belief)
-                    agent.belief = belief
+                agent.belief = belief
 
         self._run_extra_modules(agents, TickPhase.SENSE)
         self._phase_end("sense", t0)
@@ -1000,7 +1013,15 @@ class AgentManager(Node):
                     cmd = self._high_level_cmds[aid]
                     self._cached_intermediate_goals[aid] = cmd.target_pose
 
+            terminals: dict[int, Pose2D] = {}
+            for aid, cmd in self._high_level_cmds.items():
+                agent = self._agents.get(aid)
+                if agent is not None:
+                    terminals[aid] = agent.global_planner.snap_terminal(cmd.target_pose)
+                else:
+                    terminals[aid] = cmd.target_pose
             pool.set_goals(self._cached_intermediate_goals)
+            pool.set_terminals(terminals)
             self._apply_arrival_latch(pool)
             self._phase_end("global_plan", t0)
 
@@ -1117,7 +1138,9 @@ class AgentManager(Node):
         self._phase_end("integrate", t0)
 
         t0 = time.perf_counter()
-        self._collision.resolve(pool)
+        corrected = self._collision.resolve(pool)
+        if corrected:
+            self._global_planner.invalidate_paths(corrected)
         self._phase_end("collision", t0)
 
         t0 = time.perf_counter()
@@ -1934,6 +1957,11 @@ class AgentManager(Node):
             info.capacity = int(obj.capacity)
             info.satisfies_keys = list(obj.satisfies.keys())
             info.satisfies_values = [float(v) for v in obj.satisfies.values()]
+            info.interaction_radius = float(obj.interaction_radius) if obj.interaction_radius is not None else 0.0
+            if obj.formation is not None:
+                info.formation_type = obj.formation.type
+                info.formation_param_keys = list(obj.formation.params.keys())
+                info.formation_param_values = [float(v) for v in obj.formation.params.values()]
             msg.world_objects.append(info)
 
         self._world_geometry_pub.publish(msg)
@@ -2036,6 +2064,49 @@ class AgentManager(Node):
                 self._obstacles.pop(name, None)
             response.message = f"Removed {len(request.names)} obstacle(s), remaining {len(self._obstacles)}"
         self._refresh_planners()
+        self._publish_world_geometry()
+        response.success = True
+        self._logger.debug(response.message)
+        return response
+
+    def _add_world_objects_callback(self, request: AddWorldObjects.Request, response: AddWorldObjects.Response) -> AddWorldObjects.Response:
+        added = 0
+        for info in request.objects:
+            satisfies = {k: float(v) for k, v in zip(info.satisfies_keys, info.satisfies_values, strict=True)}
+            interaction_radius = float(info.interaction_radius) if info.interaction_radius > 0.0 else None
+            formation: FormationSpec | None = None
+            if info.formation_type:
+                params = {k: float(v) for k, v in zip(info.formation_param_keys, info.formation_param_values, strict=True)}
+                formation = FormationSpec(type=info.formation_type, params=params)
+            self._world_knowledge.add_object(
+                WorldObject(
+                    object_id=info.object_id,
+                    type=info.type,
+                    pose=Pose2D(x=float(info.pose.x), y=float(info.pose.y), theta=float(info.pose.theta)),
+                    capacity=int(info.capacity),
+                    satisfies=satisfies,
+                    interaction_radius=interaction_radius,
+                    formation=formation,
+                )
+            )
+            added += 1
+        self._publish_world_geometry()
+        response.success = True
+        response.message = f"Added {added} world object(s), total {len(self._world_knowledge)}"
+        self._logger.debug(response.message)
+        return response
+
+    def _remove_world_objects_callback(self, request: RemoveWorldObjects.Request, response: RemoveWorldObjects.Response) -> RemoveWorldObjects.Response:
+        if not request.object_ids:
+            removed = len(self._world_knowledge)
+            self._world_knowledge.clear()
+            response.message = f"Removed all {removed} world object(s)"
+        else:
+            removed = 0
+            for object_id in request.object_ids:
+                if self._world_knowledge.remove_object(object_id) is not None:
+                    removed += 1
+            response.message = f"Removed {removed} world object(s), remaining {len(self._world_knowledge)}"
         self._publish_world_geometry()
         response.success = True
         self._logger.debug(response.message)

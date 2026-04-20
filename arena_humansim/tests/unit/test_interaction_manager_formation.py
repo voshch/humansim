@@ -22,6 +22,7 @@ from arena_humansim.utils.rng import RNG
 from arena_humansim.utils.types import (
     BehaviorTreeMovement,
     HighLevelCommand,
+    InteractionOutcome,
     InteractionType,
     Pose2D,
 )
@@ -187,3 +188,90 @@ def test_tick_formations_skips_when_agent_lookup_returns_none() -> None:
     mgr._create_interaction(int(InteractionType.QUEUE_USE), 99, object_id="atm")
     mgr.update({}, dt=0.05)
     assert 99 in mgr._formation_targets
+
+
+def test_follow_default_formation_is_line_anchored_on_leader() -> None:
+    agents = {
+        1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D(x=0.0, y=0.0, theta=0.0))),
+        2: _FakeAgent(state=_FakeState(agent_id=2, pose=Pose2D(x=-0.8, y=0.0, theta=0.0))),
+    }
+    mgr = _mk_manager(agents)
+    interaction = mgr._create_interaction(int(InteractionType.FOLLOW), 1, object_id=None)
+    iid = interaction.id
+    assert mgr.accept(2, iid) is True
+
+    formation = mgr.interactions[iid].contract.formation
+    assert formation is not None
+    assert type(formation).__name__ == "LineFormation"
+    assert isinstance(formation.anchor, AgentAnchor)
+    assert formation.anchor.agent_id == 1
+
+
+def test_follow_tick_skips_leader_and_trails_follower() -> None:
+    agents = {
+        1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D(x=0.0, y=0.0, theta=0.0))),
+        2: _FakeAgent(state=_FakeState(agent_id=2, pose=Pose2D(x=-0.8, y=0.0, theta=0.0))),
+    }
+    mgr = _mk_manager(agents)
+    interaction = mgr._create_interaction(int(InteractionType.FOLLOW), 1, object_id=None)
+    assert mgr.accept(2, interaction.id) is True
+
+    _, targets, _ = mgr.update({}, dt=0.05)
+    assert 1 not in targets
+    assert 2 in targets
+    assert agents[1].movement.command is None
+    follower_cmd = agents[2].movement.command
+    assert follower_cmd is not None
+    assert follower_cmd.type == int(CommandType.NAVIGATE)
+
+    initial_follower_target = targets[2]
+    assert initial_follower_target.x == pytest.approx(-0.8)
+
+    agents[1].state.pose = Pose2D(x=2.0, y=0.0, theta=0.0)
+    # Advance past the shuffle reaction delay (SITE_COEF_SHUFFLE * reaction_time).
+    _, targets2, _ = mgr.update({}, dt=0.5)
+    assert 1 not in targets2
+    # Follower's target is a delayed echo of the leader's prior front pose (origin),
+    # which is a step forward from where the follower was (-0.8).
+    assert targets2[2].x > initial_follower_target.x
+
+
+def test_group_conversation_releases_formation_on_duration_expiry() -> None:
+    # For 2-member F-formation with defaults: radius = base_radius + radius_per_member*(n-1) = 0.82.
+    # Placing agents on that circle makes arrived() true so _tick_durations actually ticks.
+    wk = WorldKnowledge()
+    wk.add_object(WorldObject(
+        object_id="gathering",
+        type="gathering_area",
+        pose=Pose2D(x=0.0, y=0.0),
+        formation=FormationSpec(type="f_formation", anchor_kind="pose", anchor_pose=Pose2D(x=0.0, y=0.0)),
+    ))
+    agents = {
+        1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D(x=0.82, y=0.0))),
+        2: _FakeAgent(state=_FakeState(agent_id=2, pose=Pose2D(x=-0.82, y=0.0))),
+    }
+    mgr = _mk_manager(agents, world=wk)
+    interaction = mgr._create_interaction(
+        int(InteractionType.GROUP_CONVERSATION),
+        1,
+        object_id="gathering",
+        duration=0.2,
+    )
+    iid = interaction.id
+    assert mgr.accept(2, iid) is True
+    assert mgr.interactions[iid].outcome == InteractionOutcome.ACTIVE
+
+    _, targets, departed = mgr.update({}, dt=0.15)
+    assert iid in mgr.interactions
+    assert set(targets.keys()) == {1, 2}
+    assert departed == set()
+
+    _, targets, departed = mgr.update({}, dt=0.15)
+    assert iid not in mgr.interactions
+    assert departed == {1, 2}
+    assert targets == {}
+    assert mgr._formation_targets == {}
+
+    _, targets, departed = mgr.update({}, dt=0.05)
+    assert targets == {}
+    assert departed == set()

@@ -18,11 +18,11 @@ class WallProjectionResolver(CollisionResolver):
         else:
             self._wall_segments_np = np.empty((0, 2, 2), dtype=np.float64)
 
-    def resolve(self, pool: AgentPool) -> None:
+    def resolve(self, pool: AgentPool) -> set[int]:
         n = pool.n
         W = self._wall_segments_np.shape[0]
         if n == 0 or W == 0:
-            return
+            return set()
 
         pos = pool.pos[:n]
         radii = pool.agent_radius[:n]
@@ -31,6 +31,8 @@ class WallProjectionResolver(CollisionResolver):
         A = self._wall_segments_np[:, 0, :]  # (W, 2)
         AB = self._wall_segments_np[:, 1, :] - A  # (W, 2)
         ab_sq = np.einsum("ij,ij->i", AB, AB)  # (W,)
+
+        corrected = np.zeros(n, dtype=bool)
 
         for _ in range(3):
             AP = pos[:, np.newaxis, :] - A[np.newaxis, :, :]  # (N, W, 2)
@@ -45,6 +47,8 @@ class WallProjectionResolver(CollisionResolver):
 
             if not penetrating.any():
                 break
+
+            corrected |= penetrating.any(axis=1)
 
             safe_dist = np.where(dist > 1e-9, dist, 1e-9)
             normal = diff / safe_dist[:, :, np.newaxis]  # (N, W, 2)
@@ -61,3 +65,7 @@ class WallProjectionResolver(CollisionResolver):
                     proj = v[0] * wn[0] + v[1] * wn[1]
                     if proj < 0:
                         vel[i] -= proj * wn
+
+        if not corrected.any():
+            return set()
+        return {int(aid) for aid in pool.agent_ids[:n][corrected]}

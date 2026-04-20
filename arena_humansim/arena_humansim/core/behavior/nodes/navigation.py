@@ -1,4 +1,5 @@
 import math
+from typing import TYPE_CHECKING
 
 import py_trees
 
@@ -13,6 +14,9 @@ from arena_humansim.core.behavior.step_context import StepContext
 from arena_humansim.core.world_knowledge import WorldKnowledge, WorldObject
 from arena_humansim.utils import DISTANCE_TOLERANCE
 from arena_humansim.utils.types import Pose2D
+
+if TYPE_CHECKING:
+    from arena_humansim.core.pool import AgentPool
 
 
 def _approach_pose_for(obj: WorldObject, world: WorldKnowledge) -> Pose2D:
@@ -86,6 +90,7 @@ class GoToNode(py_trees.behaviour.Behaviour):
         target_pose: Pose2D | None = None,
         ctx: StepContext | None = None,
         world: WorldKnowledge | None = None,
+        pool: "AgentPool | None" = None,
     ) -> None:
         super().__init__(name)
         if target_pose is None and ctx is None:
@@ -94,6 +99,7 @@ class GoToNode(py_trees.behaviour.Behaviour):
         self._literal_pose = target_pose
         self._ctx = ctx
         self._world = world
+        self._pool = pool
 
     def _target(self) -> tuple[Pose2D | None, float]:
         if self._literal_pose is not None:
@@ -105,11 +111,19 @@ class GoToNode(py_trees.behaviour.Behaviour):
                 self._ctx.target_pose = _approach_pose_for(obj, self._world)
         return self._ctx.target_pose, self._ctx.interaction_radius
 
+    def _arrived(self, target: Pose2D, tolerance: float) -> bool:
+        # Literal go_to: couple to the physics-level arrival latch so "done" matches the stop condition.
+        if self._literal_pose is not None and self._pool is not None:
+            idx = self._pool._id_to_idx.get(self._agent.state.agent_id)
+            if idx is not None:
+                return bool(self._pool.latched[idx])
+        return _at_target(self._agent, target, tolerance)
+
     def update(self) -> py_trees.common.Status:
         target, tolerance = self._target()
         if target is None:
             return py_trees.common.Status.FAILURE
-        if _at_target(self._agent, target, tolerance):
+        if self._arrived(target, tolerance):
             return py_trees.common.Status.SUCCESS
         # Formations clobber command every tick; re-emit unconditionally.
         self._agent.movement.command = _nav_command(agent=self._agent, target_pose=target)

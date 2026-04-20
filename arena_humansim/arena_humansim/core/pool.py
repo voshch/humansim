@@ -53,6 +53,8 @@ class AgentPool:
 
         self.goal_pos = np.zeros((capacity, 2), dtype=np.float64)
         self.has_goal = np.zeros(capacity, dtype=np.bool_)
+        self.terminal_pos = np.zeros((capacity, 2), dtype=np.float64)
+        self.has_terminal = np.zeros(capacity, dtype=np.bool_)
         self.goal_theta = np.zeros(capacity, dtype=np.float64)
         self.has_goal_theta = np.zeros(capacity, dtype=np.bool_)
         self.latched = np.zeros(capacity, dtype=np.bool_)
@@ -102,6 +104,7 @@ class AgentPool:
         self.vision_fov[i] = perc.vision_fov
 
         self.has_goal[i] = False
+        self.has_terminal[i] = False
         self.has_goal_theta[i] = False
         self.latched[i] = False
         self.prev_vel[i] = self.vel[i]
@@ -132,6 +135,7 @@ class AgentPool:
                 self.vision_range,
                 self.vision_fov,
                 self.has_goal,
+                self.has_terminal,
                 self.goal_theta,
                 self.has_goal_theta,
                 self.latched,
@@ -139,7 +143,7 @@ class AgentPool:
                 self.policy_idx,
             ):
                 arr[idx] = arr[last]
-            for arr in (self.pos, self.vel, self.prev_vel, self.goal_pos):
+            for arr in (self.pos, self.vel, self.prev_vel, self.goal_pos, self.terminal_pos):
                 arr[idx] = arr[last]
         else:
             swapped_id = None
@@ -166,6 +170,16 @@ class AgentPool:
             self.goal_pos[idx, 0] = goal.x
             self.goal_pos[idx, 1] = goal.y
             self.has_goal[idx] = True
+
+    def set_terminals(self, terminals: dict[int, Pose2D]) -> None:
+        self.has_terminal[: self.n] = False
+        for aid, pose in terminals.items():
+            idx = self._id_to_idx.get(aid)
+            if idx is None:
+                continue
+            self.terminal_pos[idx, 0] = pose.x
+            self.terminal_pos[idx, 1] = pose.y
+            self.has_terminal[idx] = True
 
     def set_heading_goals(self, headings: dict[int, float]) -> None:
         self.has_goal_theta[: self.n] = False
@@ -228,6 +242,8 @@ class AgentPool:
         self.vision_fov = _resize_1d(self.vision_fov)
         self.goal_pos = _resize_2d(self.goal_pos)
         self.has_goal = _resize_1d(self.has_goal)
+        self.terminal_pos = _resize_2d(self.terminal_pos)
+        self.has_terminal = _resize_1d(self.has_terminal)
         self.goal_theta = _resize_1d(self.goal_theta)
         self.has_goal_theta = _resize_1d(self.has_goal_theta)
         self.latched = _resize_1d(self.latched)

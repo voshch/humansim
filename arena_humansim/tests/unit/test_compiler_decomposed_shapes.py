@@ -164,6 +164,39 @@ def test_object_interact_interaction_no_satisfy(agent_factory: Callable[..., Bas
     assert [type(c) for c in inner.children] == [ClearOutcomeNode, ResolveObjectNode, GoToNode, AdvertiseInteractionNode]
 
 
+def test_floating_advertise_has_no_resolve_or_goto(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
+    step = StepDef(
+        interaction="FOLLOW",
+        duration=ParamDist(5.0),
+        satisfies={"company": 1.0},
+    )
+    sequences = {"default": SequenceDef(steps={"lead": step})}
+    agent_type = _agent_type(sequences)
+    agent = agent_factory(agent_id=20)
+
+    root = _compiled_root(agent_type, agent, world, event_bus, rng_np)
+    _, inner = _assert_outer_shape(root, "default", "lead")
+
+    assert [type(c) for c in inner.children] == [ClearOutcomeNode, AdvertiseInteractionNode, SatisfyNode]
+    assert [c.name for c in inner.children] == [
+        "default/lead/clear_outcome",
+        "default/lead/advertise",
+        "default/lead/satisfy",
+    ]
+
+
+def test_floating_advertise_minimal(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
+    step = StepDef(interaction="FOLLOW")
+    sequences = {"default": SequenceDef(steps={"lead2": step})}
+    agent_type = _agent_type(sequences)
+    agent = agent_factory(agent_id=21)
+
+    root = _compiled_root(agent_type, agent, world, event_bus, rng_np)
+    _, inner = _assert_outer_shape(root, "default", "lead2")
+
+    assert [type(c) for c in inner.children] == [ClearOutcomeNode, AdvertiseInteractionNode]
+
+
 def test_object_nav_only_shape(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
     step = StepDef(
         target_object_type="fountain",

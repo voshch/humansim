@@ -9,7 +9,7 @@ from arena_humansim.utils import DISTANCE_TOLERANCE
 from arena_humansim.utils.types import Pose2D
 
 from . import AgentLookup, Formation
-from .anchor import Anchor
+from .anchor import AgentAnchor, Anchor
 
 if TYPE_CHECKING:
     pass
@@ -152,6 +152,10 @@ class LineFormation(Formation):
                     cur.target_changed_tick = True
                     cur.reaction_left = 0.0
 
+        # Slot 0 is the anchor in spirit; if the anchor IS slot 0's agent (e.g. FOLLOW
+        # leader), emitting a target for them stomps their own NAVIGATE command.
+        if self._slots and isinstance(self.anchor, AgentAnchor) and self.anchor.agent_id == self._slots[0].agent_id:
+            return {s.agent_id: s.target for s in self._slots[1:]}
         return {s.agent_id: s.target for s in self._slots}
 
     def arrived(self, agent_id: int) -> bool:

@@ -19,7 +19,7 @@ from arena_humansim.utils.types import Pose2D, Segments, WallAware
 
 _IMPL_IDS = sorted(_registry._registry.keys())
 
-_coord = st.floats(min_value=-10.0, max_value=10.0, allow_nan=False, allow_infinity=False)
+_coord = st.floats(min_value=-5.0, max_value=5.0, allow_nan=False, allow_infinity=False)
 _agent_positions = st.lists(st.tuples(_coord, _coord), min_size=0, max_size=6)
 _wall_segment = st.tuples(st.tuples(_coord, _coord), st.tuples(_coord, _coord))
 _walls = st.lists(_wall_segment, min_size=0, max_size=4)

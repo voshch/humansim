@@ -46,6 +46,7 @@ DEFAULT_FORMATION_BY_INTERACTION: dict[InteractionType, tuple[str, dict[str, Any
     InteractionType.GROUP_CONVERSATION: ("f_formation", {}),
     InteractionType.TALK_TO: ("dyad", {}),
     InteractionType.SERVICE: ("f_formation", {}),
+    InteractionType.FOLLOW: ("line", {"base_step": 0.8}),
 }
 
 

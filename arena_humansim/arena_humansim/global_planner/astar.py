@@ -57,14 +57,11 @@ def _astar_path(
         return None
 
     prepend_start = actual_start != start
-    append_goal = actual_goal != goal
 
     if actual_start == actual_goal:
         path = [actual_start]
         if prepend_start:
             path.insert(0, start)
-        if append_goal:
-            path.append(goal)
         return path
 
     result = pyastar2d.astar_path(weights, actual_start, actual_goal, allow_diagonal=True)
@@ -74,8 +71,6 @@ def _astar_path(
     path = [(int(r), int(c)) for r, c in result]
     if prepend_start:
         path.insert(0, start)
-    if append_goal:
-        path.append(goal)
     return path
 
 
@@ -83,7 +78,7 @@ class AStarPlanner(GlobalPlanner):
     def __init__(
         self,
         replan_distance: float = 1.0,
-        inflation_radius: float = 0.3,
+        inflation_radius: float = 0.38,
     ):
         self._replan_distance = replan_distance
         self._inflation_radius = inflation_radius
@@ -146,6 +141,23 @@ class AStarPlanner(GlobalPlanner):
     def get_cached_paths(self) -> dict[int, list[Pose2D]]:
         return {aid: wps for aid, (_, wps, _) in self._path_cache.items()}
 
+    def invalidate_paths(self, agent_ids: Iterable[int]) -> None:
+        for aid in agent_ids:
+            self._path_cache.pop(aid, None)
+
+    def snap_terminal(self, pose: Pose2D) -> Pose2D:
+        if self._occupancy_grid is None:
+            return pose
+        rows, cols = self._occupancy_grid.shape
+        rc = world_to_grid(self._origin, self._resolution, pose.x, pose.y)
+        if not (0 <= rc[0] < rows and 0 <= rc[1] < cols):
+            return pose
+        snapped = _nearest_free_cell(self._occupancy_grid, rc[0], rc[1])
+        if snapped is None or snapped == rc:
+            return pose
+        cell = grid_to_world(self._origin, self._resolution, snapped[0], snapped[1])
+        return Pose2D(x=cell.x, y=cell.y, theta=pose.theta)
+
     def compute(
         self,
         agents: Iterable[BaseAgent],
@@ -189,13 +201,13 @@ class AStarPlanner(GlobalPlanner):
 
                 if raw_path is None:
                     self._logger.debug(f"No path for agent {agent_id} ({start_rc} -> {goal_rc}), using direct goal")
-                    goals[agent_id] = target
+                    goals[agent_id] = self.snap_terminal(target)
                     self._path_cache.pop(agent_id, None)
                     continue
 
                 waypoints = [grid_to_world(self._origin, self._resolution, r, c) for r, c in raw_path]
                 waypoints[0] = Pose2D(x=agent_pos.x, y=agent_pos.y)
-                waypoints[-1] = Pose2D(x=target.x, y=target.y)
+                waypoints[-1] = self.snap_terminal(target)
                 assert self._occupancy_grid is not None
                 waypoints = simplify_with_los(self._occupancy_grid, self._origin, self._resolution, waypoints)
                 if self._wall_segments:

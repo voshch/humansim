@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-import numpy as np
+import inspect
 
+import numpy as np
+import pytest
+
+from arena_humansim.core.agents.types import AgentType
 from arena_humansim.global_planner import (
     GlobalPlanner,
     _registry,
     simplify_path,
 )
+from arena_humansim.global_planner.astar import AStarPlanner
+from arena_humansim.global_planner.dijkstra import DijkstraPlanner
 from arena_humansim.utils.types import Pose2D
 
 
@@ -106,3 +112,14 @@ def test_register_decorator_adds_new_entry() -> None:
         _registry._registry.pop(name, None)
 
     assert name not in GlobalPlanner.list_available()
+
+
+@pytest.mark.parametrize("planner_cls", [AStarPlanner, DijkstraPlanner])
+def test_default_inflation_radius_covers_default_agent_radius(planner_cls: type) -> None:
+    inflation_default = inspect.signature(planner_cls.__init__).parameters["inflation_radius"].default
+    agent_radius_default = AgentType(name="default").agent_radius.mean
+    assert inflation_default > agent_radius_default, (
+        f"{planner_cls.__name__} default inflation_radius={inflation_default} "
+        f"must be > default agent_radius={agent_radius_default}; otherwise planned "
+        f"paths can hug walls closer than a pedestrian can fit"
+    )
