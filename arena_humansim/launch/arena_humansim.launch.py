@@ -78,7 +78,7 @@ def generate_launch_description():
         package="arena_humansim",
         executable="arena_humansim_node",
         name="arena_humansim",
-        namespace="arena_humansim",
+        namespace=LaunchConfiguration("namespace"),
         parameters=[
             {"mode": LaunchConfiguration("mode"),
              "use_sim_time": LaunchConfiguration("use_sim_time"),
@@ -105,6 +105,7 @@ def generate_launch_description():
     kill_rviz = ExecuteProcess(cmd=["pkill", "-INT", "-f", "rviz2.*arena_humansim.rviz"], output="log")
 
     return LaunchDescription([
+        DeclareLaunchArgument("namespace", default_value="arena_humansim", description="node namespace"),
         DeclareLaunchArgument("mode", default_value="master", choices=["master", "subsystem"]),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
         DeclareLaunchArgument("markers", default_value="0", description="0=off, 1=basic, 2=full"),
