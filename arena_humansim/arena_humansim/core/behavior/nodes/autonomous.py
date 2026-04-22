@@ -3,15 +3,19 @@ import py_trees
 
 from arena_humansim.core.agents import ActionDef, BaseAgent, StepDef
 from arena_humansim.core.behavior.nodes.helpers import (
+    _at_target,
     _bt_logger,
-    _interaction_command,
     _nav_command,
+    _resolve_interaction_radius,
     _sample_param_dist,
+    _seek_command,
 )
 from arena_humansim.core.behavior.nodes.utility import preconditions_met, score_actions
+from arena_humansim.core.interaction_kinds import HandleKind, InteractionType
 from arena_humansim.core.world_knowledge import WorldKnowledge
 from arena_humansim.utils import DT
 from arena_humansim.utils.event_bus import EventBus
+from arena_humansim.utils.types import SeekSpec
 
 
 class AutonomousNode(py_trees.behaviour.Behaviour):
@@ -76,20 +80,28 @@ class AutonomousNode(py_trees.behaviour.Behaviour):
             best_name, _score = scored[0]
             best_action = self._actions[best_name]
 
-            if best_action.target_object_id:
-                obj = self._world.get(best_action.target_object_id)
-                if obj is not None:
-                    self._agent.movement.command = _nav_command(self._agent, obj.pose)
+            interaction_type: InteractionType | None = None
+            symmetric = False
+            if best_action.interaction:
+                try:
+                    interaction_type = InteractionType[best_action.interaction]
+                    symmetric = interaction_type.kind.handle.kind == HandleKind.NONE
+                except KeyError:
+                    interaction_type = None
+
+            if best_action.target:
+                obj = self._world.resolve(best_action.target, self._agent.state.pose, exclude_full=True)
+                if obj is None:
+                    _bt_logger.warning(f"Agent {agent_id}: step {self.name} could not resolve target={best_action.target!r}")
+                    self._agent.movement.command = None
                 else:
-                    _bt_logger.warning(f"Agent {agent_id}: step {self.name} could not resolve target_object_id={best_action.target_object_id!r}")
-            elif best_action.target_object_type:
-                obj = self._world.nearest_object(best_action.target_object_type, self._agent.state.pose)
-                if obj is not None:
-                    self._agent.movement.command = _nav_command(self._agent, obj.pose)
-                else:
-                    _bt_logger.warning(f"Agent {agent_id}: step {self.name} could not resolve target_object_type={best_action.target_object_type!r}")
-            elif best_action.interaction:
-                self._agent.movement.command = _interaction_command(self._agent, best_action.interaction)
+                    tolerance = _resolve_interaction_radius(obj, None, best_action.interaction)
+                    if symmetric and interaction_type is not None and _at_target(self._agent, obj.pose, tolerance):
+                        self._agent.movement.command = _seek_command(self._agent, SeekSpec(interaction_type=interaction_type))
+                    else:
+                        self._agent.movement.command = _nav_command(self._agent, obj.pose)
+            elif interaction_type is not None:
+                self._agent.movement.command = _seek_command(self._agent, SeekSpec(interaction_type=interaction_type))
             else:
                 self._agent.movement.command = None
         else:

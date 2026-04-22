@@ -92,8 +92,10 @@ def test_misses_behind_observer(perception: Perception) -> None:
     fov = 180.0
     if fov >= 360.0:
         pytest.skip("observer is omnidirectional")
+    # Place the other agent beyond proximity_sense (default ~1.0m, clip_high=2.0m)
+    # so only FOV gating is exercised.
     observer = _make_agent(1, 0.0, 0.0, theta=0.0, vision_range=5.0, vision_fov=fov)
-    other = _make_agent(2, -1.0, 0.0, theta=0.0, vision_range=5.0, vision_fov=fov)
+    other = _make_agent(2, -3.0, 0.0, theta=0.0, vision_range=5.0, vision_fov=fov)
     all_agents: dict[int, AgentState] = {1: observer.state, 2: other.state}
     world_state: WorldState = {}
     _prepare(perception, all_agents)

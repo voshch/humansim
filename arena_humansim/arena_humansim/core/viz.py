@@ -93,6 +93,7 @@ def cube(ns: str, mid: int, stamp: Time, x: float, y: float, z: float, sx: float
 
 
 _C_CONE = rgba(0.2, 0.6, 1.0, 0.12)
+_C_PROX = _C_CONE
 _C_OBS = rgba(0.2, 0.8, 0.2, 0.4)
 _C_CMD = rgba(1.0, 1.0, 1.0, 0.9)
 _C_PATH = rgba(0.4, 0.9, 0.4, 0.5)
@@ -139,15 +140,17 @@ def _shape_outline(pose: Pose2D, shape: Shape) -> list[tuple[float, float]]:
     return []
 
 
-_CMD_NAMES = {0: "NAV", 1: "ADV", 2: "SRCH", 3: "ACC", 4: "DEC", 5: "STOP"}
+_CMD_NAMES = {0: "NAV", 1: "STOP", 2: "SEEK"}
 _ITYPE_NAMES = {
     0: "TALK",
     1: "GROUP",
-    2: "FOLLOW",
-    3: "SIT",
-    4: "LIE",
-    5: "USE",
-    6: "QUEUE",
+    2: "SIT",
+    3: "LIE",
+    4: "USE",
+    5: "QUEUE",
+    6: "WAVE",
+    7: "BLOCK",
+    8: "SERVICE",
 }
 
 
@@ -175,7 +178,7 @@ class MarkerView:
 class MarkerPublisher:
     def __init__(self, node: Node):
         self._node = node
-        self._pub = node.create_publisher(MarkerArray, "viz", 5)
+        self._pub = node.create_publisher(MarkerArray, "viz", 100)
         self._scene: dict[tuple[str, int], Marker] = {}
         self._pool: dict[str, list[Marker]] = {}
         self._touched: set[tuple[str, int]] = set()
@@ -238,13 +241,11 @@ class MarkerPublisher:
             m.header.stamp = stamp
             adds.append(m)
 
-        if deletes:
+        if deletes or adds:
+            # One publish per flush, DELETEs first — a split into two messages on a depth-N queue
+            # could drop the DELETEs under load, leaving stale markers in RViz indefinitely.
             ma = MarkerArray()
-            ma.markers = deletes
-            self._pub.publish(ma)
-        if adds:
-            ma = MarkerArray()
-            ma.markers = adds
+            ma.markers = deletes + adds
             self._pub.publish(ma)
 
         self._touched.clear()
@@ -491,6 +492,7 @@ def publish_infrastructure(
 
 def publish_perception(pub: MarkerPublisher, agents: Iterable[BaseAgent]) -> None:
     cone_view = pub.view("vision_cone", Marker.TRIANGLE_LIST)
+    prox_view = pub.view("proximity_sense", Marker.TRIANGLE_LIST)
     obs_view = pub.view("observed", Marker.ARROW)
     for agent in agents:
         aid = agent.state.agent_id
@@ -511,6 +513,20 @@ def publish_perception(pub: MarkerPublisher, agents: Iterable[BaseAgent]) -> Non
             m.points.append(Point(x=ox, y=oy, z=z))
             m.points.append(Point(x=ox + p.vision_range * math.cos(a0), y=oy + p.vision_range * math.sin(a0), z=z))
             m.points.append(Point(x=ox + p.vision_range * math.cos(a1), y=oy + p.vision_range * math.sin(a1), z=z))
+        m, new = prox_view.get(aid)
+        if new:
+            m.scale.x = m.scale.y = m.scale.z = 1.0
+            m.color = _C_PROX
+        m.points.clear()
+        segs = 24
+        ox, oy, z = pose.x, pose.y, 0.02
+        radius = p.proximity_sense
+        for si in range(segs):
+            a0 = 2.0 * math.pi * si / segs
+            a1 = 2.0 * math.pi * (si + 1) / segs
+            m.points.append(Point(x=ox, y=oy, z=z))
+            m.points.append(Point(x=ox + radius * math.cos(a0), y=oy + radius * math.sin(a0), z=z))
+            m.points.append(Point(x=ox + radius * math.cos(a1), y=oy + radius * math.sin(a1), z=z))
         if agent.belief is not None:
             for i, obs in enumerate(agent.belief.observed_agents):
                 m, new = obs_view.get(aid * 100 + i)

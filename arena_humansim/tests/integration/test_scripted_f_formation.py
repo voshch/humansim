@@ -57,19 +57,13 @@ def test_scripted_f_formation_drives_simple_agents(manager_factory: Callable[...
         mgr.tick()
 
     pre_distances = {aid: _centroid_distance(mgr, aid) for aid in (10, 11, 12, 13)}
-    assert all(d > RADIUS for d in pre_distances.values()), (
-        f"agents unexpectedly close to centroid before script fires: {pre_distances}"
-    )
+    assert all(d > RADIUS for d in pre_distances.values()), f"agents unexpectedly close to centroid before script fires: {pre_distances}"
 
     for _ in range(200):
         mgr.tick()
 
     active = [i for i in mgr._interaction_manager.interactions.values() if i.outcome == InteractionOutcome.ACTIVE]
-    assert any(set(i.participants) == {10, 11, 12, 13} for i in active), (
-        "scripted GROUP_CONVERSATION interaction never formed with all participants active"
-    )
+    assert any(set(i.participants) == {10, 11, 12, 13} for i in active), "scripted GROUP_CONVERSATION interaction never formed with all participants active"
 
     post_distances = {aid: _centroid_distance(mgr, aid) for aid in (10, 11, 12, 13)}
-    assert all(d < RADIUS for d in post_distances.values()), (
-        f"agents did not converge to F-formation after script: {post_distances}"
-    )
+    assert all(d < RADIUS for d in post_distances.values()), f"agents did not converge to F-formation after script: {post_distances}"

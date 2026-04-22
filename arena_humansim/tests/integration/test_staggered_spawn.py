@@ -25,11 +25,13 @@ def _pending_msg(agent_id: int, x: float) -> AgentStateMsg:
 
 def test_pending_scenario_spawns_fire_on_schedule(manager_factory: Callable[..., AgentManager], minimal_scenario: ScenarioConfig) -> None:
     mgr = manager_factory(minimal_scenario, node_name="test_staggered_spawn")
-    mgr._pending_scenario_spawns = deque([
-        (0, _pending_msg(101, 0.0)),
-        (5, _pending_msg(102, 1.0)),
-        (10, _pending_msg(103, 2.0)),
-    ])
+    mgr._pending_scenario_spawns = deque(
+        [
+            (0, _pending_msg(101, 0.0)),
+            (5, _pending_msg(102, 1.0)),
+            (10, _pending_msg(103, 2.0)),
+        ]
+    )
 
     mgr.tick()
     assert 101 in mgr._agents

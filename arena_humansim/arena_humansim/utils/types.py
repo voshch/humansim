@@ -1,9 +1,17 @@
 """Core data structures for arena_humansim."""
 
+from __future__ import annotations
+
 import enum
-from typing import Any
+import math
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import attrs
+
+if TYPE_CHECKING:
+    from arena_humansim.core.interaction_kinds import InteractionType
+    from arena_humansim.utils.scenario import FormationConfig
+
 
 Segment = tuple[tuple[float, float], tuple[float, float]]
 Segments = list[Segment]
@@ -21,17 +29,10 @@ class WaypointMode(enum.IntEnum):
     RANDOM = 3
 
 
-class InteractionType(enum.IntEnum):
-    TALK_TO = 0
-    GROUP_CONVERSATION = 1
-    FOLLOW = 2
-    SIT_ON = 3
-    LIE_ON = 4
-    USE = 5
-    QUEUE_USE = 6
-    WAVE_AT = 7
-    BLOCK = 8
-    SERVICE = 9
+class CommandType(enum.IntEnum):
+    NAVIGATE = 0
+    STOP = 1
+    SEEK = 2
 
 
 class InteractionOutcome(enum.IntEnum):
@@ -39,6 +40,7 @@ class InteractionOutcome(enum.IntEnum):
     ACTIVE = 1
     COMPLETED = 2
     INTERRUPTED = 3
+    CANCELED = 4
 
 
 @attrs.define
@@ -48,7 +50,62 @@ class Pose2D:
     theta: float = 0.0
 
 
+def pose_distance(a: Pose2D, b: Pose2D) -> float:
+    return math.hypot(a.x - b.x, a.y - b.y)
+
+
 Goal = Pose2D | tuple[float, float]
+
+
+class AnchorKind(enum.StrEnum):
+    OBJECT = "object"
+    AGENT = "agent"
+    PROVIDER = "provider"
+    POSE = "pose"
+    CENTROID = "centroid"
+
+
+_VALID_FORMATION_TYPES = ("line", "cluster", "f_formation", "dyad")
+
+
+@attrs.define
+class FormationSpec:
+    """Runtime representation of a scenario FormationConfig on a WorldObject."""
+
+    type: str
+    params: dict[str, float] = attrs.Factory(dict)
+    anchor_kind: AnchorKind = AnchorKind.OBJECT
+    anchor_ref: str | None = None
+    anchor_pose: Pose2D | None = None
+
+    @classmethod
+    def from_config(cls, cfg: FormationConfig | None) -> FormationSpec | None:
+        if cfg is None or not cfg.type:
+            return None
+        if cfg.type not in _VALID_FORMATION_TYPES:
+            raise ValueError(f"Unknown formation type '{cfg.type}'. Valid: {_VALID_FORMATION_TYPES}")
+        anchor_kind: AnchorKind = AnchorKind.OBJECT
+        anchor_ref: str | None = None
+        anchor_pose: Pose2D | None = None
+        if cfg.anchor is not None:
+            try:
+                anchor_kind = AnchorKind(cfg.anchor.kind)
+            except ValueError:
+                raise ValueError(f"Unknown anchor kind '{cfg.anchor.kind}'. Valid: {[k.value for k in AnchorKind]}") from None
+            anchor_ref = cfg.anchor.ref
+            if cfg.anchor.pose is not None:
+                anchor_pose = Pose2D(
+                    x=float(cfg.anchor.pose.x),
+                    y=float(cfg.anchor.pose.y),
+                    theta=float(cfg.anchor.pose.theta),
+                )
+        return cls(
+            type=cfg.type,
+            params=dict(cfg.params),
+            anchor_kind=anchor_kind,
+            anchor_ref=anchor_ref,
+            anchor_pose=anchor_pose,
+        )
 
 
 @attrs.define
@@ -78,6 +135,32 @@ class BeliefState:
     extra: dict[str, object] = attrs.Factory(dict)
 
 
+class AcceptResult(enum.IntEnum):
+    BECAME_PARTICIPANT = 0
+    QUEUED = 1
+    REJECTED = 2
+
+
+@runtime_checkable
+class AccessPolicy(Protocol):
+    def on_accept(self, interaction: InteractionState, agent_id: int) -> AcceptResult: ...
+
+    def tick(self, interaction: InteractionState, dt: float) -> list[int]: ...
+
+    def on_stop(self, interaction: InteractionState, agent_id: int) -> None: ...
+
+
+@runtime_checkable
+class Formation(Protocol):
+    def on_join(self, agent_id: int) -> None: ...
+
+    def on_leave(self, agent_id: int) -> None: ...
+
+    def tick(self, dt: float) -> dict[int, Pose2D]: ...
+
+    def arrived(self, agent_id: int) -> bool: ...
+
+
 @attrs.define
 class InteractionContract:
     type: int = 0
@@ -89,8 +172,8 @@ class InteractionContract:
     queue: list[int] = attrs.Factory(list)
     duration: float | None = None  # seconds; None = no contract-level timeout
     elapsed: float = 0.0
-    access: Any = None  # AccessPolicy; typed Any to avoid import cycle
-    formation: Any = None  # Formation; typed Any to avoid import cycle
+    access: AccessPolicy | None = None
+    formation: Formation | None = None
 
     @property
     def queue_length(self) -> int:
@@ -106,6 +189,10 @@ class InteractionContract:
     def is_full(self) -> bool:
         return self.max_participants != -1 and len(self.current_participants) >= self.max_participants
 
+    @property
+    def can_admit(self) -> bool:
+        return not self.is_full or self.queueable
+
 
 @attrs.define
 class InteractionState:
@@ -118,20 +205,48 @@ class InteractionState:
     outcome: int = 0  # InteractionOutcome.FORMING
     member_durations: dict[int, float] = attrs.Factory(dict)
 
+    @property
+    def provider(self) -> int | None:
+        return self.state.get("provider")
+
+    @property
+    def target_agent(self) -> int | None:
+        return self.state.get("target_agent")
+
+    @property
+    def service_tag(self) -> str | None:
+        return self.state.get("service_tag")
+
+    @property
+    def object_type(self) -> str | None:
+        return self.state.get("object_type")
+
+    @property
+    def formation_spec(self) -> FormationSpec | None:
+        return self.state.get("formation_spec")
+
+
+@attrs.frozen
+class SeekSpec:
+    interaction_type: InteractionType
+    target: str | int | None = None
+    offer: bool = False
+    min_participants: int | None = None
+    max_participants: int | None = None
+    queueable: bool | None = None
+    formation_spec: FormationSpec | None = None
+    duration: float | None = None
+
 
 @attrs.define
 class HighLevelCommand:
     agent_id: int = 0
-    type: int = 0
+    type: CommandType = CommandType.NAVIGATE
     target_pose: Pose2D = attrs.Factory(Pose2D)
     desired_velocity: float = 1.3
     interaction_target: int = -1
-    interaction_type: int = 0
-    target_agent: int = -1  # -1 = broadcast; >= 0 = only this agent can accept
-    interaction_duration: float | None = None  # seconds; None = no contract-level timeout
-    object_id: str | None = None
-    service_tag: str | None = None
-    max_participants: int | None = None
+    reason: InteractionOutcome = InteractionOutcome.INTERRUPTED
+    spec: SeekSpec | None = None
 
 
 @attrs.define
@@ -146,7 +261,8 @@ class WaypointMovement:
 @attrs.define
 class BehaviorTreeMovement:
     command: HighLevelCommand | None = None
-    last_outcome: int | None = None  # InteractionOutcome from most recently ended interaction
+    last_outcome: int | None = None
+    interaction_id: int | None = None
 
 
 class ShapeType(enum.Enum):
@@ -270,226 +386,3 @@ class NeedsState:
         for name, amount in deltas.items():
             if name in self.needs:
                 self.needs[name].value = min(100.0, self.needs[name].value + amount)
-
-
-import cattrs
-
-from arena_humansim.core.agents.types import (
-    ActionDef,
-    AgentType,
-    GoToStepDef,
-    LocalPlannerDist,
-    NeedCondition,
-    NeedDist,
-    ParamDist,
-    PerceptionDist,
-    SequenceDef,
-    StepDef,
-    TransitionDef,
-    VarDef,
-)
-
-converter = cattrs.Converter()
-
-
-def _structure_param_dist(val: object, _: type) -> ParamDist:
-    if isinstance(val, (int, float)):
-        return ParamDist(mean=float(val))
-    if isinstance(val, ParamDist):
-        return val
-    return ParamDist(**val)
-
-
-converter.register_structure_hook(ParamDist, _structure_param_dist)
-
-
-def _structure_need_dist(val: object, _: type) -> NeedDist:
-    if isinstance(val, (int, float)):
-        return NeedDist(initial=ParamDist(mean=float(val)))
-    if isinstance(val, NeedDist):
-        return val
-    d = dict(val)
-    if "initial" in d:
-        d["initial"] = converter.structure(d["initial"], ParamDist)
-    if "decay_rate" in d:
-        d["decay_rate"] = converter.structure(d["decay_rate"], ParamDist)
-    return NeedDist(**d)
-
-
-converter.register_structure_hook(NeedDist, _structure_need_dist)
-
-
-def _structure_need_condition(val: object, _: type) -> NeedCondition:
-    if isinstance(val, NeedCondition):
-        return val
-    return NeedCondition(**val)
-
-
-converter.register_structure_hook(NeedCondition, _structure_need_condition)
-
-
-def _structure_action_def(val: object, _: type) -> ActionDef:
-    if isinstance(val, ActionDef):
-        return val
-    d = dict(val)
-    if "when" in d and isinstance(d["when"], dict):
-        d["when"] = {k: converter.structure(v, NeedCondition) for k, v in d["when"].items()}
-    if "duration" in d and d["duration"] is not None:
-        d["duration"] = converter.structure(d["duration"], ParamDist)
-    if "patience" in d and d["patience"] is not None:
-        d["patience"] = converter.structure(d["patience"], ParamDist)
-    return ActionDef(**d)
-
-
-converter.register_structure_hook(ActionDef, _structure_action_def)
-
-
-_STEP_KINDS = ("object_interact", "go_to")
-
-
-def _structure_go_to_step_def(val: object, _: type) -> GoToStepDef:
-    if isinstance(val, GoToStepDef):
-        return val
-    d = dict(val)
-    d.pop("kind", None)
-    if "target_pose" not in d:
-        raise ValueError("go_to step requires 'target_pose: {x, y}' field")
-    pose = d["target_pose"]
-    if isinstance(pose, Pose2D):
-        d["target_pose"] = pose
-    else:
-        pose_d = dict(pose)
-        d["target_pose"] = Pose2D(x=float(pose_d["x"]), y=float(pose_d["y"]), theta=float(pose_d.get("theta", 0.0)))
-    if "duration" in d and d["duration"] is not None:
-        d["duration"] = converter.structure(d["duration"], ParamDist)
-    if "patience" in d and d["patience"] is not None:
-        d["patience"] = converter.structure(d["patience"], ParamDist)
-    return GoToStepDef(**d)
-
-
-converter.register_structure_hook(GoToStepDef, _structure_go_to_step_def)
-
-
-def _structure_step_def(val: object, _: type) -> StepDef:
-    if isinstance(val, StepDef):
-        return val
-    d = dict(val)
-    d.pop("kind", None)
-    if "duration" in d and d["duration"] is not None:
-        d["duration"] = converter.structure(d["duration"], ParamDist)
-    if "patience" in d and d["patience"] is not None:
-        d["patience"] = converter.structure(d["patience"], ParamDist)
-    if "until_need" in d and isinstance(d["until_need"], dict):
-        d["until_need"] = {k: converter.structure(v, NeedCondition) for k, v in d["until_need"].items()}
-    if "allowed_actions" in d and d["allowed_actions"] is not None:
-        d["allowed_actions"] = tuple(d["allowed_actions"])
-    if "blocked_actions" in d and d["blocked_actions"] is not None:
-        d["blocked_actions"] = tuple(d["blocked_actions"])
-    return StepDef(**d)
-
-
-converter.register_structure_hook(StepDef, _structure_step_def)
-
-
-def _structure_step_variant(val: object) -> StepDef | GoToStepDef:
-    if isinstance(val, (StepDef, GoToStepDef)):
-        return val
-    kind = dict(val).get("kind", "object_interact")
-    if kind == "go_to":
-        return converter.structure(val, GoToStepDef)
-    if kind == "object_interact":
-        return converter.structure(val, StepDef)
-    raise ValueError(f"unknown step kind {kind!r}; expected one of {_STEP_KINDS}")
-
-
-def _structure_transition_def(val: object, _: type) -> TransitionDef:
-    if isinstance(val, TransitionDef):
-        return val
-    d = dict(val)
-    when = d["when"]
-    if isinstance(when, str):
-        raise ValueError(f"String-based transition condition '{when}' is not supported. Use dict[str, NeedCondition] instead.")
-    d["when"] = {k: converter.structure(v, NeedCondition) for k, v in when.items()}
-    return TransitionDef(**d)
-
-
-converter.register_structure_hook(TransitionDef, _structure_transition_def)
-
-
-def _structure_sequence_def(val: object, _: type) -> SequenceDef:
-    if isinstance(val, SequenceDef):
-        return val
-    d = dict(val)
-    if "steps" in d:
-        d["steps"] = {k: _structure_step_variant(v) for k, v in d["steps"].items()}
-    if "transitions" in d:
-        d["transitions"] = tuple(converter.structure(t, TransitionDef) for t in d["transitions"])
-    else:
-        d["transitions"] = ()
-    return SequenceDef(**d)
-
-
-converter.register_structure_hook(SequenceDef, _structure_sequence_def)
-
-
-def _structure_perception_dist(val: object, _: type) -> PerceptionDist:
-    if isinstance(val, PerceptionDist):
-        return val
-    d = dict(val)
-    for k in d:
-        d[k] = converter.structure(d[k], ParamDist)
-    return PerceptionDist(**d)
-
-
-converter.register_structure_hook(PerceptionDist, _structure_perception_dist)
-
-
-def _structure_local_planner_dist(val: object, _: type) -> LocalPlannerDist:
-    if isinstance(val, LocalPlannerDist):
-        return val
-    d = dict(val)
-    for k in d:
-        d[k] = converter.structure(d[k], ParamDist)
-    return LocalPlannerDist(**d)
-
-
-converter.register_structure_hook(LocalPlannerDist, _structure_local_planner_dist)
-
-
-_PARAM_DIST_FIELDS = frozenset(f.name for f in attrs.fields(AgentType) if f.type is ParamDist)
-
-
-def _structure_agent_type(val: object, _: type) -> AgentType:
-    if isinstance(val, AgentType):
-        return val
-    d = dict(val)
-    for field_name in _PARAM_DIST_FIELDS:
-        if field_name in d:
-            d[field_name] = converter.structure(d[field_name], ParamDist)
-    if "perception" in d and isinstance(d["perception"], dict):
-        d["perception"] = converter.structure(d["perception"], PerceptionDist)
-    if "local_planner_params" in d and isinstance(d["local_planner_params"], dict):
-        d["local_planner_params"] = converter.structure(d["local_planner_params"], LocalPlannerDist)
-    if "needs" in d and isinstance(d["needs"], dict):
-        d["needs"] = {k: converter.structure(v, NeedDist) for k, v in d["needs"].items()}
-    if "actions" in d and isinstance(d["actions"], dict):
-        d["actions"] = {k: converter.structure(v, ActionDef) for k, v in d["actions"].items()}
-    if "sequences" in d and isinstance(d["sequences"], dict):
-        d["sequences"] = {k: converter.structure(v, SequenceDef) for k, v in d["sequences"].items()}
-    if "vars" in d and isinstance(d["vars"], dict):
-        d["vars"] = {k: VarDef(**v) if isinstance(v, dict) else v for k, v in d["vars"].items()}
-    if "perception_stack" in d and isinstance(d["perception_stack"], list):
-        d["perception_stack"] = tuple(d["perception_stack"])
-    return AgentType(**d)
-
-
-converter.register_structure_hook(AgentType, _structure_agent_type)
-
-
-def _structure_var_def(val: object, _: type) -> VarDef:
-    if isinstance(val, VarDef):
-        return val
-    return VarDef(**val)
-
-
-converter.register_structure_hook(VarDef, _structure_var_def)

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 from typing import TYPE_CHECKING
 
@@ -42,8 +44,7 @@ class ResolveObjectNode(py_trees.behaviour.Behaviour):
         name: str,
         agent: BaseAgent,
         world: WorldKnowledge,
-        target_object_type: str | None,
-        target_object_id: str | None,
+        target: str | None,
         ctx: StepContext,
         step_interaction_radius: float | None = None,
         interaction_name: str | None = None,
@@ -51,8 +52,7 @@ class ResolveObjectNode(py_trees.behaviour.Behaviour):
         super().__init__(name)
         self._agent = agent
         self._world = world
-        self._target_object_type = target_object_type
-        self._target_object_id = target_object_id
+        self._target = target
         self._ctx = ctx
         self._step_interaction_radius = step_interaction_radius
         self._interaction_name = interaction_name
@@ -61,14 +61,10 @@ class ResolveObjectNode(py_trees.behaviour.Behaviour):
     def initialise(self) -> None:
         self._resolved = False
         obj: WorldObject | None = None
-        if self._target_object_id:
-            obj = self._world.get(self._target_object_id)
+        if self._target:
+            obj = self._world.resolve(self._target, self._agent.state.pose, exclude_full=False)
             if obj is None:
-                _bt_logger.warning(f"Agent {self._agent.state.agent_id}: step {self.name} could not resolve target_object_id={self._target_object_id!r}")
-        elif self._target_object_type:
-            obj = self._world.nearest_object(self._target_object_type, self._agent.state.pose, exclude_full=False)
-            if obj is None:
-                _bt_logger.warning(f"Agent {self._agent.state.agent_id}: step {self.name} could not resolve target_object_type={self._target_object_type!r}")
+                _bt_logger.warning(f"Agent {self._agent.state.agent_id}: step {self.name} could not resolve target={self._target!r}")
 
         if obj is not None:
             self._ctx.target_pose = _approach_pose_for(obj, self._world)
@@ -90,7 +86,7 @@ class GoToNode(py_trees.behaviour.Behaviour):
         target_pose: Pose2D | None = None,
         ctx: StepContext | None = None,
         world: WorldKnowledge | None = None,
-        pool: "AgentPool | None" = None,
+        pool: AgentPool | None = None,
     ) -> None:
         super().__init__(name)
         if target_pose is None and ctx is None:
@@ -100,6 +96,13 @@ class GoToNode(py_trees.behaviour.Behaviour):
         self._ctx = ctx
         self._world = world
         self._pool = pool
+
+    def initialise(self) -> None:
+        # Stale arrival latch from a previous step must not short-circuit this one.
+        if self._pool is not None:
+            idx = self._pool._id_to_idx.get(self._agent.state.agent_id)
+            if idx is not None:
+                self._pool.latched[idx] = False
 
     def _target(self) -> tuple[Pose2D | None, float]:
         if self._literal_pose is not None:
@@ -125,6 +128,5 @@ class GoToNode(py_trees.behaviour.Behaviour):
             return py_trees.common.Status.FAILURE
         if self._arrived(target, tolerance):
             return py_trees.common.Status.SUCCESS
-        # Formations clobber command every tick; re-emit unconditionally.
         self._agent.movement.command = _nav_command(agent=self._agent, target_pose=target)
         return py_trees.common.Status.RUNNING

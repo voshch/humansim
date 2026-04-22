@@ -32,13 +32,13 @@ extends: elder
 desired_velocity: {mean: 0.5, std: 0.08, clip_low: 0.2, clip_high: 0.8}
 ```
 
-`extends:` pulls in the parent's full field set, then this file's fields override. Nested structures (`perception`, `local_planner_params`) merge field-by-field, not as whole replacements. Inheritance chains resolve in the loader; see `arena_humansim/core/agents/__init__.py:resolve_agent_type`.
+`extends:` pulls in the parent's full field set, then this file's fields override. Nested structures (`perception`, `local_planner_params`) merge field-by-field, not as whole replacements. Inheritance chains resolve in the loader; see [../../arena_humansim/core/agents/__init__.py](../../arena_humansim/core/agents/__init__.py) (`resolve_agent_type`).
 
 ## Behavior trees
 
 Set `mode: behavior_tree` to drive the agent from a compiled py_trees BT. `mode: simple` (default) ignores `sequences` / `actions` / `needs` and runs waypoint-only movement.
 
-BT authoring is split into four fields on the agent type: `needs`, `utility_weights`, `actions`, `sequences` (plus `initial_sequence` to pick the entry sequence; defaults to `"default"`). See [../../arena_humansim/core/behavior/README.md](../../arena_humansim/core/behavior/README.md) for the cross-node invariants the compiler enforces (nav-before-advertise, patience, accept semantics).
+BT authoring is split into four fields on the agent type: `needs`, `utility_weights`, `actions`, `sequences` (plus `initial_sequence` to pick the entry sequence; defaults to `"default"`). See [../../arena_humansim/core/behavior/README.md](../../arena_humansim/core/behavior/README.md) for the cross-node invariants (patience phases, seek/cancel semantics, compiler dispatch table).
 
 ### `needs`
 
@@ -63,9 +63,9 @@ Candidate actions the autonomous selector can pick from. Fields:
 
 | Field | Meaning |
 |---|---|
-| `when` | `{need: {below|above: X}}` — preconditions gating the action. |
-| `interaction` | `TALK_TO`, `GROUP_CONVERSATION`, `FOLLOW`, `SIT_ON`, `LIE_ON`, `USE`, `QUEUE_USE`, `WAVE_AT`, `BLOCK`, `SERVICE`. Omit for nav-only. |
-| `target_object_type` / `target_object_id` | Object the action resolves to. Type = any matching object; id = exact. |
+| `when` | `{need: {below\|above: X}}` — preconditions gating the action. |
+| `interaction` | One of `TALK_TO`, `GROUP_CONVERSATION`, `SIT_ON`, `LIE_ON`, `USE`, `QUEUE_USE`, `WAVE_AT`, `BLOCK`, `SERVICE`. Omit for nav-only. |
+| `target` | Object id / object type / service tag / agent id, per the interaction's handle kind. |
 | `duration` | Distribution (seconds). |
 | `patience` | Distribution (seconds) capping the whole action (nav + execute). |
 | `satisfies` | `{need: amount}` applied on SUCCESS. |
@@ -73,7 +73,8 @@ Candidate actions the autonomous selector can pick from. Fields:
 ```yaml
 actions:
   rest_at_bench:
-    target_object_type: bench
+    target: bench                # object type — resolves to nearest visible
+    interaction: SIT_ON
     duration: {mean: 5.0, clip_low: 1.0, clip_high: 15.0}
     satisfies: {rest: 30.0}
 ```
@@ -87,7 +88,6 @@ sequences:
   chat:
     steps:
       hold_conversation:
-        target_object_type: gathering_area
         interaction: GROUP_CONVERSATION
         duration: {mean: 45.0, std: 15.0}
         patience: {mean: 60.0}
@@ -98,7 +98,7 @@ sequences:
   drink:
     steps:
       queue_and_drink:
-        target_object_type: fountain
+        target: fountain             # object id (or type)
         interaction: USE
         duration: {mean: 6.0}
         satisfies: {thirst: 100.0}
@@ -109,15 +109,21 @@ sequences:
 
 ### `steps`
 
-Each step is either a `StepDef` (anchored to an object or agent) or a `GoToStepDef` (fixed pose). StepDef fields:
+Each step is either a `StepDef` (interaction, pure-wait, cancel) or a `GoToStepDef` (explicit `kind: go_to`).
+
+`StepDef` fields:
 
 | Field | Meaning |
 |---|---|
-| `target_object_type` / `target_object_id` | Nav target. Omit both for a pure-wait step. |
-| `target_agent` | Agent id to pursue. Routes through `BlockNode` → `BLOCK` interaction, with velocity boost and lookahead prediction. |
-| `interaction` | Same enum as actions. Pairs with `target_object_*` to emit nav→advertise. |
-| `duration` | Distribution (seconds). |
-| `patience` | Distribution (seconds). Covers nav + advertise + wait-for-outcome. |
+| `interaction` | `TALK_TO` / `GROUP_CONVERSATION` / `WAVE_AT` / `SIT_ON` / `LIE_ON` / `USE` / `QUEUE_USE` / `BLOCK` / `SERVICE`. Omit for a pure-wait step. |
+| `target` | Interpreted per the interaction's handle kind: object id/type for `OBJECT`; service tag (str) for `SERVICE`; agent id (int) for `BLOCK`; omit for symmetric types. |
+| `offer` | SERVICE provider side. `true` makes this step create-and-wait rather than find-and-join. Required when a SERVICE interaction has no existing provider. |
+| `cancel` | `true` ⇒ emit STOP with `reason=CANCELED` on the agent's current interaction. Mutually exclusive with `interaction:`. |
+| `queueable` | Provider-side override (SERVICE with `offer: true`) — admit seekers into a FIFO queue when full. |
+| `min_participants` / `max_participants` | Provider-side overrides on the contract. Count the provider itself. |
+| `formation_spec` | Provider-side formation override (`{type, anchor_kind, params}`). |
+| `duration` | Distribution (seconds). With `interaction:` → contract-level timeout (outcome `COMPLETED`). On a pure-wait step → `HoldNode` duration (NAVIGATE-to-self). |
+| `patience` | Distribution (seconds). Covers nav + seek + wait-for-ACTIVE + hold. |
 | `satisfies` | `{need: amount}` applied on SUCCESS. |
 | `autonomous` | `true` ⇒ `AutonomousNode` scores `actions` and runs the winner. |
 | `allowed_actions` / `blocked_actions` | Filter the autonomous candidate pool. |
@@ -125,26 +131,41 @@ Each step is either a `StepDef` (anchored to an object or agent) or a `GoToStepD
 | `until_need` | Need-condition predicate that exits the autonomous step (e.g. `{rest: {above: 80}}`). |
 | `interruptible` | Per-step override of the sequence flag. |
 | `interaction_radius` | Per-step override of the radius cascade; see [../scenarios/README.md](../scenarios/README.md). |
-| `accept` | `true` ⇒ passive accepter (no nav, no resolve). Requires `interaction`; rejects `target_object_*`. |
-| `service_tag` | Free-form tag for `SERVICE` matching when `accept: true`. |
+| `on_failure` | `"abort"` (default) / `"skip"` — on step FAILURE. |
 
-GoToStepDef takes `target_pose: {x, y, theta}` instead of a target reference — use for scripted waypoints.
+`GoToStepDef` (`kind: go_to`) takes exactly one of:
+
+- `target_pose: {x, y, theta}` — scripted waypoint.
+- `target: <str>` — object id/type; the compiler emits `Resolve → GoTo`.
+
+Plus `duration:` (optional hold on arrival), `patience:`, `satisfies:`, `on_failure:`, `interruptible:`.
 
 ### Pure-wait step
 
-Omit both `target_object_*` and `interaction`; keep `duration`. Produces a `HoldNode` — the agent stops and waits.
+Omit `interaction:` and `cancel:`; keep `duration:`. Produces `ClearOutcome → Hold` — `HoldNode` re-emits NAVIGATE-to-self with zero velocity each tick, so the agent parks in place without tearing down any live interaction.
 
-### Accept step
+### Cancel step
 
 ```yaml
-sell_water:
-  accept: true
-  interaction: SERVICE
-  service_tag: water
-  patience: {mean: 30.0}
+drop: {cancel: true}
 ```
 
-No nav, no advertise-by-object; the accepter binds to any robot advertising the matching `service_tag`. Covered in detail in [../../arena_humansim/core/behavior/README.md](../../arena_humansim/core/behavior/README.md#accept-steps).
+Emits STOP on the agent's current `interaction_id` with `reason=CANCELED`. Falls back to force_stop (target=-1) if `interaction_id` is `None`; IM no-ops if the agent isn't in any interaction. Mutually exclusive with `interaction:`.
+
+### Meet at an object with a symmetric interaction
+
+Symmetric interactions (TALK_TO, GROUP_CONVERSATION) don't take a `target:`, so "meet at the gathering area" is a two-step pattern: walk first with a `go_to` step, then run the interaction.
+
+```yaml
+sequences:
+  chat:
+    steps:
+      walk_to_gathering: {kind: go_to, target: gathering_area}
+      hold_conversation:
+        interaction: GROUP_CONVERSATION
+        duration: {mean: 45.0, std: 15.0}
+        patience: {mean: 60.0}
+```
 
 ### Where this gets compiled
 

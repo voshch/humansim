@@ -48,15 +48,17 @@ def test_simplify_path_preserves_corner_above_min_area() -> None:
 
 
 def test_simplify_path_mixed_keeps_sharp_drops_collinear() -> None:
-    pts = np.array([
-        [0.0, 0.0],
-        [1.0, 0.0],
-        [2.0, 0.0],
-        [3.0, 0.0],
-        [3.0, 2.0],
-        [3.0, 4.0],
-        [5.0, 4.0],
-    ])
+    pts = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [2.0, 0.0],
+            [3.0, 0.0],
+            [3.0, 2.0],
+            [3.0, 4.0],
+            [5.0, 4.0],
+        ]
+    )
     waypoints = _poses(pts)
     result = simplify_path(waypoints, min_area=0.01)
     xs_ys = [(p.x, p.y) for p in result]
@@ -118,8 +120,4 @@ def test_register_decorator_adds_new_entry() -> None:
 def test_default_inflation_radius_covers_default_agent_radius(planner_cls: type) -> None:
     inflation_default = inspect.signature(planner_cls.__init__).parameters["inflation_radius"].default
     agent_radius_default = AgentType(name="default").agent_radius.mean
-    assert inflation_default > agent_radius_default, (
-        f"{planner_cls.__name__} default inflation_radius={inflation_default} "
-        f"must be > default agent_radius={agent_radius_default}; otherwise planned "
-        f"paths can hug walls closer than a pedestrian can fit"
-    )
+    assert inflation_default > agent_radius_default, f"{planner_cls.__name__} default inflation_radius={inflation_default} must be > default agent_radius={agent_radius_default}; otherwise planned paths can hug walls closer than a pedestrian can fit"

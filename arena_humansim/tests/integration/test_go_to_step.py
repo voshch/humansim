@@ -32,9 +32,5 @@ def test_go_to_step_reaches_target(manager_factory: Callable[..., AgentManager])
     dy = agent.state.pose.y - target_y
     dist = math.hypot(dx, dy)
 
-    assert bt.root.status == py_trees.common.Status.SUCCESS, (
-        f"BT root did not reach SUCCESS (status={bt.root.status!r}); final pose=({agent.state.pose.x:.3f}, {agent.state.pose.y:.3f}), dist={dist:.3f}"
-    )
-    assert dist <= DISTANCE_TOLERANCE, (
-        f"agent final pose ({agent.state.pose.x:.3f}, {agent.state.pose.y:.3f}) is {dist:.3f}m from target ({target_x}, {target_y}); DISTANCE_TOLERANCE={DISTANCE_TOLERANCE}"
-    )
+    assert bt.root.status == py_trees.common.Status.SUCCESS, f"BT root did not reach SUCCESS (status={bt.root.status!r}); final pose=({agent.state.pose.x:.3f}, {agent.state.pose.y:.3f}), dist={dist:.3f}"
+    assert dist <= DISTANCE_TOLERANCE, f"agent final pose ({agent.state.pose.x:.3f}, {agent.state.pose.y:.3f}) is {dist:.3f}m from target ({target_x}, {target_y}); DISTANCE_TOLERANCE={DISTANCE_TOLERANCE}"

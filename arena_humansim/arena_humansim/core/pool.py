@@ -50,6 +50,7 @@ class AgentPool:
 
         self.vision_range = np.zeros(capacity, dtype=np.float64)
         self.vision_fov = np.zeros(capacity, dtype=np.float64)
+        self.proximity_sense = np.zeros(capacity, dtype=np.float64)
 
         self.goal_pos = np.zeros((capacity, 2), dtype=np.float64)
         self.has_goal = np.zeros(capacity, dtype=np.bool_)
@@ -102,6 +103,7 @@ class AgentPool:
         perc = p.perception
         self.vision_range[i] = perc.vision_range
         self.vision_fov[i] = perc.vision_fov
+        self.proximity_sense[i] = perc.proximity_sense
 
         self.has_goal[i] = False
         self.has_terminal[i] = False
@@ -134,6 +136,7 @@ class AgentPool:
                 self.anisotropy,
                 self.vision_range,
                 self.vision_fov,
+                self.proximity_sense,
                 self.has_goal,
                 self.has_terminal,
                 self.goal_theta,
@@ -240,6 +243,7 @@ class AgentPool:
         self.anisotropy = _resize_1d(self.anisotropy)
         self.vision_range = _resize_1d(self.vision_range)
         self.vision_fov = _resize_1d(self.vision_fov)
+        self.proximity_sense = _resize_1d(self.proximity_sense)
         self.goal_pos = _resize_2d(self.goal_pos)
         self.has_goal = _resize_1d(self.has_goal)
         self.terminal_pos = _resize_2d(self.terminal_pos)

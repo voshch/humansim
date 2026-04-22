@@ -24,7 +24,7 @@ from pathlib import Path
 import attrs
 import numpy as np
 
-from arena_humansim.utils.types import Pose2D
+from arena_humansim.utils.types import FormationSpec, Pose2D
 
 
 @attrs.frozen
@@ -35,10 +35,22 @@ class ParamDist:
     clip_high: float = float("inf")
 
 
+def _as_paramdist(val: object) -> "ParamDist | None":
+    if val is None:
+        return None
+    if isinstance(val, ParamDist):
+        return val
+    if isinstance(val, (int, float)):
+        return ParamDist(mean=float(val))
+    if isinstance(val, dict):
+        return ParamDist(**val)
+    return val  # type: ignore[return-value]
+
+
 @attrs.frozen
 class NeedDist:
-    initial: ParamDist = ParamDist(100.0)
-    decay_rate: ParamDist = ParamDist(0.5, 0.1)
+    initial: ParamDist = attrs.field(default=ParamDist(100.0), converter=_as_paramdist)
+    decay_rate: ParamDist = attrs.field(default=ParamDist(0.5, 0.1), converter=_as_paramdist)
 
 
 @attrs.frozen
@@ -60,10 +72,9 @@ class VarDef:
 class ActionDef:
     when: dict[str, NeedCondition] = attrs.Factory(dict)
     interaction: str | None = None
-    target_object_type: str | None = None
-    target_object_id: str | None = None
-    duration: ParamDist | None = None
-    patience: ParamDist | None = None
+    target: str | None = None
+    duration: ParamDist | None = attrs.field(default=None, converter=_as_paramdist)
+    patience: ParamDist | None = attrs.field(default=None, converter=_as_paramdist)
     satisfies: dict[str, float] = attrs.Factory(dict)
     on_failure: str = "skip"
 
@@ -76,11 +87,10 @@ class TransitionDef:
 
 @attrs.frozen
 class StepDef:
-    target_object_type: str | None = None
-    target_object_id: str | None = None
+    target: str | None = None
     interaction: str | None = None
-    duration: ParamDist | None = None
-    patience: ParamDist | None = None
+    duration: ParamDist | None = attrs.field(default=None, converter=_as_paramdist)
+    patience: ParamDist | None = attrs.field(default=None, converter=_as_paramdist)
     satisfies: dict[str, float] = attrs.Factory(dict)
     on_failure: str = "abort"
 
@@ -94,17 +104,21 @@ class StepDef:
 
     interaction_radius: float | None = None
 
-    accept: bool = False
-    service_tag: str | None = None
-
-    target_agent: int | None = None
+    offer: bool = False
+    cancel: bool = False
+    queueable: bool | None = None
+    min_participants: int | None = None
+    max_participants: int | None = None
+    formation_spec: FormationSpec | None = None
+    wait_for_outcome: bool = False
 
 
 @attrs.frozen
 class GoToStepDef:
-    target_pose: Pose2D
-    duration: ParamDist | None = None
-    patience: ParamDist | None = None
+    target_pose: Pose2D | None = None
+    target: str | None = None
+    duration: ParamDist | None = attrs.field(default=None, converter=_as_paramdist)
+    patience: ParamDist | None = attrs.field(default=None, converter=_as_paramdist)
     satisfies: dict[str, float] = attrs.Factory(dict)
     on_failure: str = "abort"
     interruptible: bool | None = None
@@ -121,16 +135,17 @@ class SequenceDef:
 
 @attrs.frozen
 class PerceptionDist:
-    vision_range: ParamDist = ParamDist(5.0, 0.5)
-    vision_fov: ParamDist = ParamDist(180.0, 10.0)
+    vision_range: ParamDist = attrs.field(default=ParamDist(5.0, 0.5), converter=_as_paramdist)
+    vision_fov: ParamDist = attrs.field(default=ParamDist(180.0, 10.0), converter=_as_paramdist)
+    proximity_sense: ParamDist = attrs.field(default=ParamDist(1.0, 0.2, clip_low=0.5, clip_high=2.0), converter=_as_paramdist)
 
 
 @attrs.frozen
 class LocalPlannerDist:
-    relaxation_time: ParamDist = ParamDist(0.5, 0.05)
-    repulsion_strength: ParamDist = ParamDist(2.1, 0.2)
-    repulsion_range: ParamDist = ParamDist(0.3, 0.03)
-    anisotropy: ParamDist = ParamDist(0.5, 0.0)
+    relaxation_time: ParamDist = attrs.field(default=ParamDist(0.5, 0.05), converter=_as_paramdist)
+    repulsion_strength: ParamDist = attrs.field(default=ParamDist(2.1, 0.2), converter=_as_paramdist)
+    repulsion_range: ParamDist = attrs.field(default=ParamDist(0.3, 0.03), converter=_as_paramdist)
+    anisotropy: ParamDist = attrs.field(default=ParamDist(0.5, 0.0), converter=_as_paramdist)
 
 
 @attrs.frozen
@@ -138,17 +153,19 @@ class AgentType:
     name: str
     mode: str = "simple"
 
-    desired_velocity: ParamDist = ParamDist(1.1, 0.12)
-    agent_radius: ParamDist = ParamDist(0.35, 0.02)
-    max_velocity: ParamDist = ParamDist(1.5, 0.1, clip_low=0.5)
-    max_acceleration: ParamDist = ParamDist(1.5, 0.1, clip_low=0.3)
-    max_deceleration: ParamDist = ParamDist(2.5, 0.2, clip_low=0.5)
-    min_turning_radius: ParamDist = ParamDist(0.3, 0.03, clip_low=0.1)
-    pivot_angular_velocity: ParamDist = ParamDist(2.0, 0.2, clip_low=1.0)
+    desired_velocity: ParamDist = attrs.field(default=ParamDist(1.1, 0.12), converter=_as_paramdist)
+    agent_radius: ParamDist = attrs.field(default=ParamDist(0.35, 0.02), converter=_as_paramdist)
+    max_velocity: ParamDist = attrs.field(default=ParamDist(1.5, 0.1, clip_low=0.5), converter=_as_paramdist)
+    max_acceleration: ParamDist = attrs.field(default=ParamDist(1.5, 0.1, clip_low=0.3), converter=_as_paramdist)
+    max_deceleration: ParamDist = attrs.field(default=ParamDist(2.5, 0.2, clip_low=0.5), converter=_as_paramdist)
+    min_turning_radius: ParamDist = attrs.field(default=ParamDist(0.3, 0.03, clip_low=0.1), converter=_as_paramdist)
+    pivot_angular_velocity: ParamDist = attrs.field(default=ParamDist(2.0, 0.2, clip_low=1.0), converter=_as_paramdist)
 
     # LogNormal: mean is interpreted as the desired median in seconds; std is the shape parameter.
-    reaction_time: ParamDist = ParamDist(0.4, 0.3, clip_low=0.05, clip_high=1.5)
-    personal_space_min: ParamDist = ParamDist(0.6, 0.15, clip_low=0.2, clip_high=2.0)
+    reaction_time: ParamDist = attrs.field(default=ParamDist(0.4, 0.3, clip_low=0.05, clip_high=1.5), converter=_as_paramdist)
+    personal_space_min: ParamDist = attrs.field(default=ParamDist(0.6, 0.15, clip_low=0.2, clip_high=2.0), converter=_as_paramdist)
+
+    idle_gaze_rate: ParamDist = attrs.field(default=ParamDist(0.0, 0.0, clip_low=0.0, clip_high=0.0), converter=_as_paramdist)
 
     perception: PerceptionDist = attrs.Factory(PerceptionDist)
     local_planner_params: LocalPlannerDist = attrs.Factory(LocalPlannerDist)
@@ -179,6 +196,7 @@ class SampledNeed:
 class SampledPerception:
     vision_range: float = 5.0
     vision_fov: float = 180.0
+    proximity_sense: float = 1.0
 
 
 @attrs.frozen
@@ -214,6 +232,8 @@ class SampledParams:
 
     needs: dict[str, SampledNeed] = attrs.Factory(dict)
     utility_weights: dict[str, float] = attrs.Factory(dict)
+
+    idle_gaze_rate_hz: float = 0.0
 
 
 def _sample_dist(dist: ParamDist, rng: np.random.Generator) -> float:
@@ -255,6 +275,7 @@ def sample_agent_type(
         perception=SampledPerception(
             vision_range=_sample_dist(agent_type.perception.vision_range, rng),
             vision_fov=_sample_dist(agent_type.perception.vision_fov, rng),
+            proximity_sense=_sample_dist(agent_type.perception.proximity_sense, rng),
         ),
         local_planner_params=SampledLocalPlanner(
             relaxation_time=_sample_dist(agent_type.local_planner_params.relaxation_time, rng),
@@ -268,4 +289,5 @@ def sample_agent_type(
         animation=agent_type.animation,
         needs=sampled_needs,
         utility_weights=dict(agent_type.utility_weights),
+        idle_gaze_rate_hz=_sample_dist(agent_type.idle_gaze_rate, rng),
     )

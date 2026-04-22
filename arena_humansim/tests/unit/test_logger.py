@@ -14,6 +14,7 @@ from arena_humansim.core.agents.types import (
 from arena_humansim.core.logger import SimulationLogger
 from arena_humansim.utils.types import (
     AgentState,
+    CommandType,
     HighLevelCommand,
     InteractionContract,
     InteractionState,
@@ -99,7 +100,11 @@ def test_record_spawn_emits_expected_keys(tmp_path: Path) -> None:
     assert params["name"] == "adult"
     assert params["desired_velocity"] == pytest.approx(1.1)
     assert params["agent_radius"] == pytest.approx(0.25)
-    assert params["perception"] == {"vision_range": pytest.approx(5.0), "vision_fov": pytest.approx(180.0)}
+    assert params["perception"] == {
+        "vision_range": pytest.approx(5.0),
+        "vision_fov": pytest.approx(180.0),
+        "proximity_sense": pytest.approx(1.0),
+    }
     assert params["local_planner_params"]["relaxation_time"] == pytest.approx(0.5)
     assert params["local_planner_params"]["repulsion_strength"] == pytest.approx(2.1)
     assert params["local_planner_params"]["repulsion_range"] == pytest.approx(0.3)
@@ -142,7 +147,7 @@ def test_record_tick_serializes_agents_interactions_commands(tmp_path: Path) -> 
     commands = {
         1: HighLevelCommand(
             agent_id=1,
-            type=0,
+            type=CommandType.NAVIGATE,
             target_pose=Pose2D(x=5.0, y=0.0, theta=0.0),
             interaction_target=-1,
         ),

@@ -1,11 +1,11 @@
-# queue_demo.yaml
+# queue.yaml
 # Office water-cooler scene: a group of colleagues stands around a gathering
 # spot holding a GROUP_CONVERSATION (F-formation). Occasionally an individual
 # gets thirsty and breaks off to queue at the water fountain (LINE + FIFO),
 # then returns to the conversation. Demonstrates both formation types and a
 # need-driven break-off transition.
 
-name: queue_demo
+name: queue
 description: >-
   Five colleagues hold an F-formation conversation next to a water fountain.
   A thirst need drives periodic break-offs: thirsty agents queue at the
@@ -59,8 +59,8 @@ agent_types:
     sequences:
       chat:
         steps:
+          walk_to_gathering: {kind: go_to, target: gathering_area}
           hold_conversation:
-            target_object_type: gathering_area
             interaction: GROUP_CONVERSATION
             duration: {mean: 45.0, std: 15.0, clip_low: 15.0, clip_high: 90.0}
             patience: {mean: 60.0, std: 10.0, clip_low: 30.0, clip_high: 120.0}
@@ -71,7 +71,7 @@ agent_types:
       drink:
         steps:
           queue_and_drink:
-            target_object_type: fountain
+            target: fountain
             interaction: USE
             duration: {mean: 6.0, std: 1.5, clip_low: 3.0, clip_high: 12.0}
             satisfies: {thirst: 100.0}

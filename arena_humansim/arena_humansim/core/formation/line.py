@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import attrs
 
 from arena_humansim.utils import DISTANCE_TOLERANCE
-from arena_humansim.utils.types import Pose2D
+from arena_humansim.utils.types import Pose2D, pose_distance
 
 from . import AgentLookup, Formation
 from .anchor import AgentAnchor, Anchor
@@ -20,20 +20,6 @@ class _Slot:
     agent_id: int
     target: Pose2D
     prev_target: Pose2D
-    reaction_left: float = 0.0
-    pending_target: Pose2D | None = None  # set on leave; applied after reaction delay
-    target_changed_tick: bool = False
-
-
-# Coefficient applied to agent.reaction_time for shuffle wave propagation.
-# Queue shuffles are motor-adjacent; ~0.7x of the base reaction trait.
-SITE_COEF_SHUFFLE = 0.7
-
-_POSE_EPS = 1e-4
-
-
-def _pose_differs(a: Pose2D, b: Pose2D) -> bool:
-    return abs(a.x - b.x) > _POSE_EPS or abs(a.y - b.y) > _POSE_EPS or abs(a.theta - b.theta) > _POSE_EPS
 
 
 class LineFormation(Formation):
@@ -92,69 +78,35 @@ class LineFormation(Formation):
     def on_join(self, agent_id: int) -> None:
         if any(s.agent_id == agent_id for s in self._slots):
             return
-        anchor_pose = self.anchor.pose()
-        if not self._slots:
-            target = self._front_pose(anchor_pose)
-        else:
-            tail = self._slots[-1].target
-            dx, dy = self._backward_offset(self._spacing_for(agent_id), tail.theta)
-            target = Pose2D(x=tail.x + dx, y=tail.y + dy, theta=tail.theta)
-        self._slots.append(_Slot(agent_id=agent_id, target=target, prev_target=target))
+        self._slots.append(_Slot(agent_id=agent_id, target=Pose2D(), prev_target=Pose2D()))
 
     def on_leave(self, agent_id: int) -> None:
-        idx = next((i for i, s in enumerate(self._slots) if s.agent_id == agent_id), -1)
-        if idx < 0:
-            return
-        removed = self._slots.pop(idx)
-        if idx < len(self._slots):
-            successor = self._slots[idx]
-            agent = self.agent_lookup(successor.agent_id)
-            reaction = agent.params.reaction_time if agent is not None else 0.4
-            successor.reaction_left = SITE_COEF_SHUFFLE * reaction
-            successor.pending_target = removed.target
+        self._slots = [s for s in self._slots if s.agent_id != agent_id]
 
     def tick(self, dt: float) -> dict[int, Pose2D]:
+        del dt
         anchor_pose = self.anchor.pose()
+        front_target = self._front_pose(anchor_pose)
+        yaw = anchor_pose.theta
 
-        for s in self._slots:
-            s.target_changed_tick = False
+        if not self._slots:
+            return {}
 
-        if self._slots:
-            front = self._slots[0]
-            front_target = self._front_pose(anchor_pose)
-            if _pose_differs(front.target, front_target):
-                front.prev_target = front.target
-                front.target = front_target
-                front.target_changed_tick = True
-                front.reaction_left = 0.0
-                front.pending_target = None
-
+        self._slots[0].target = front_target
+        offset_x = 0.0
+        offset_y = 0.0
         for i in range(1, len(self._slots)):
-            pred = self._slots[i - 1]
-            cur = self._slots[i]
-            if pred.target_changed_tick and cur.reaction_left <= 0.0 and cur.pending_target is None:
-                agent = self.agent_lookup(cur.agent_id)
-                reaction = agent.params.reaction_time if agent is not None else 0.4
-                cur.reaction_left = SITE_COEF_SHUFFLE * reaction
-            if cur.reaction_left > 0.0:
-                cur.reaction_left -= dt
-                if cur.reaction_left <= 0.0:
-                    cur.prev_target = cur.target
-                    if cur.pending_target is not None:
-                        cur.target = cur.pending_target
-                        cur.pending_target = None
-                    else:
-                        cur.target = Pose2D(
-                            x=pred.prev_target.x,
-                            y=pred.prev_target.y,
-                            theta=pred.prev_target.theta,
-                        )
-                    cur.target_changed_tick = True
-                    cur.reaction_left = 0.0
+            step = self._spacing_for(self._slots[i].agent_id)
+            dx, dy = self._backward_offset(step, yaw)
+            offset_x += dx
+            offset_y += dy
+            self._slots[i].target = Pose2D(
+                x=front_target.x + offset_x,
+                y=front_target.y + offset_y,
+                theta=yaw,
+            )
 
-        # Slot 0 is the anchor in spirit; if the anchor IS slot 0's agent (e.g. FOLLOW
-        # leader), emitting a target for them stomps their own NAVIGATE command.
-        if self._slots and isinstance(self.anchor, AgentAnchor) and self.anchor.agent_id == self._slots[0].agent_id:
+        if isinstance(self.anchor, AgentAnchor) and self.anchor.agent_id == self._slots[0].agent_id:
             return {s.agent_id: s.target for s in self._slots[1:]}
         return {s.agent_id: s.target for s in self._slots}
 
@@ -166,4 +118,4 @@ class LineFormation(Formation):
         if agent is None:
             return True
         pose = agent.state.pose
-        return math.hypot(pose.x - slot.target.x, pose.y - slot.target.y) < DISTANCE_TOLERANCE
+        return pose_distance(pose, slot.target) < DISTANCE_TOLERANCE

@@ -200,3 +200,17 @@ def test_empty_pool_is_noop(pool_empty: Callable[..., AgentPool]) -> None:
     arrival_latch_step(pool, R_ENTER, R_EXIT)
     arrival_damp_step(pool, DT, TAU_BRAKE)
     assert pool.n == 0
+
+
+def test_latch_releases_when_terminal_cleared(pool_with_agents: Callable[..., AgentPool]) -> None:
+    # Stale latch from a previous go_to step must release once the step drops has_terminal,
+    # otherwise the next go_to step would spuriously see "arrived" without ever moving.
+    pool = pool_with_agents(n=1)
+    pool.pos[0] = [2.0, 2.0]
+    pool.latched[0] = True
+    pool.terminal_pos[0] = [2.0, 2.0]
+    pool.has_terminal[0] = False
+
+    arrival_latch_step(pool, R_ENTER, R_EXIT)
+
+    assert bool(pool.latched[0]) is False

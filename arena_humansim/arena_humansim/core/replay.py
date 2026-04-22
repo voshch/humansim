@@ -8,7 +8,7 @@ import attrs
 from arena_humansim.core.agents import SampledParams
 from arena_humansim.core.agents.types import SampledLocalPlanner, SampledPerception
 from arena_humansim.utils.loggable import Loggable
-from arena_humansim.utils.types import AgentState, HighLevelCommand, Pose2D
+from arena_humansim.utils.types import AgentState, CommandType, HighLevelCommand, Pose2D
 
 if TYPE_CHECKING:
     from arena_humansim.core.agent_manager import AgentManager
@@ -132,7 +132,7 @@ class ReplayManager(Loggable):
             tp = cdata.get("target_pose", {})
             commands[aid] = HighLevelCommand(
                 agent_id=aid,
-                type=cdata.get("type", 0),
+                type=CommandType(cdata.get("type", 0)),
                 target_pose=Pose2D(
                     x=tp.get("x", 0.0),
                     y=tp.get("y", 0.0),

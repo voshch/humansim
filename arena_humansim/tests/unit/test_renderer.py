@@ -35,12 +35,9 @@ def _build_bag(bag_dir: Path, with_geometry: bool = True, frames: int = 3) -> No
         StorageOptions(uri=str(bag_dir), storage_id="mcap"),
         ConverterOptions(input_serialization_format="cdr", output_serialization_format="cdr"),
     )
-    writer.create_topic(TopicMetadata(
-        id=0, name="/agent_states", type="arena_humansim_msgs/msg/AgentStates", serialization_format="cdr"))
+    writer.create_topic(TopicMetadata(id=0, name="/agent_states", type="arena_humansim_msgs/msg/AgentStates", serialization_format="cdr"))
     if with_geometry:
-        writer.create_topic(TopicMetadata(
-            id=1, name="/arena_humansim/world_geometry", type="arena_humansim_msgs/msg/WorldGeometry",
-            serialization_format="cdr"))
+        writer.create_topic(TopicMetadata(id=1, name="/arena_humansim/world_geometry", type="arena_humansim_msgs/msg/WorldGeometry", serialization_format="cdr"))
         geom = WorldGeometryMsg()
         geom.wall_names = ["w1"]
         geom.wall_starts = [Point32(x=-2.0, y=0.0, z=0.0)]

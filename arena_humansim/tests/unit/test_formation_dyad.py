@@ -30,6 +30,7 @@ def _lookup(poses: dict[int, Pose2D]) -> Callable[[int], _FakeAgent | None]:
     def inner(aid: int) -> _FakeAgent | None:
         p = poses.get(aid)
         return _FakeAgent(state=_FakeState(pose=p)) if p is not None else None
+
     return inner
 
 

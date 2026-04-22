@@ -160,17 +160,18 @@ def commands_factory() -> Callable[..., dict[int, Any]]:
     def make(agent_ids: list[int] | None = None, target: tuple[float, float] = (5.0, 0.0)) -> dict[int, Any]:
         from arena_humansim.utils.types import HighLevelCommand
 
+        from arena_humansim.utils.types import CommandType
+
         ids = agent_ids if agent_ids is not None else [1]
         tx, ty = target
         out: dict[int, Any] = {}
         for aid in ids:
             out[int(aid)] = HighLevelCommand(
                 agent_id=int(aid),
-                type=0,
+                type=CommandType.NAVIGATE,
                 target_pose=Pose2D(x=float(tx), y=float(ty), theta=0.0),
                 desired_velocity=1.3,
                 interaction_target=-1,
-                interaction_type=0,
             )
         return out
 

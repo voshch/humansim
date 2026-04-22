@@ -15,7 +15,7 @@ AgentManager (ROS 2 Node)                    [core/]
 ├── Collision          Wall projection overlap resolution            [collision/]
 ├── SpawnScheduler     Poisson-process agent spawning at sources
 ├── DespawnMonitor     Sink-based agent removal with TTL
-├── InteractionManager Social interactions (talk, follow, queue, …)  [core/]
+├── InteractionManager Social interactions (talk, queue, service, …) [core/]
 ├── EventBus           Event-driven scripting
 └── SimulationLogger   JSON replay logging
 ```
@@ -80,26 +80,26 @@ Agents can operate in two movement modes:
 
 BTs are compiled from the agent type's `sequences`, `actions`, and `needs`. Needs decay over time and trigger actions when thresholds are crossed (e.g. hunger < 30 → eat).
 
-**Authoring the YAML:** [`config/agent_types/README.md`](arena_humansim/config/agent_types/README.md#behavior-trees) documents `needs`, `actions`, `sequences`, `steps`, `transitions`, accept steps, and autonomous steps with full field tables and examples.
+**Authoring the YAML:** [`config/agent_types/README.md`](arena_humansim/config/agent_types/README.md#behavior-trees) documents `needs`, `actions`, `sequences`, `steps`, `transitions`, cancel steps, and autonomous steps with full field tables and examples.
 
-**Internals / extending primitives:** [`core/behavior/README.md`](arena_humansim/arena_humansim/core/behavior/README.md) covers cross-node invariants (nav-before-advertise, patience, accept semantics). [`core/behavior/nodes/README.md`](arena_humansim/arena_humansim/core/behavior/nodes/README.md) covers adding new `py_trees.Behaviour` primitives.
+**Internals / extending primitives:** [`core/behavior/README.md`](arena_humansim/arena_humansim/core/behavior/README.md) covers cross-node invariants (patience phases, seek/cancel semantics, compiler dispatch). [`core/behavior/nodes/README.md`](arena_humansim/arena_humansim/core/behavior/nodes/README.md) covers adding new `py_trees.Behaviour` primitives.
 
 ## Interactions
 
-Matcher semantics (advertise/search/accept, visibility gating, queueing, service binding) live in [`core/README.md`](arena_humansim/arena_humansim/core/README.md). The `interaction_radius` cascade is documented in [`config/scenarios/README.md`](arena_humansim/config/scenarios/README.md).
+Matcher semantics (seek dispatch by handle kind, visibility gating, queueing, service binding) live in [`core/README.md`](arena_humansim/arena_humansim/core/README.md). Per-type defaults (handle kind, contract, formation, `allows_offer`, `interaction_radius`) are centralized in [`core/interaction_kinds.py`](arena_humansim/arena_humansim/core/interaction_kinds.py). The `interaction_radius` cascade and per-step field reference are documented in [`config/scenarios/README.md`](arena_humansim/config/scenarios/README.md).
 
-This is very early-stage now, needs expansion.
+| Type | Handle | Participants | Description |
+|---|---|---|---|
+| `TALK_TO` | NONE | 2 | Face-to-face conversation |
+| `GROUP_CONVERSATION` | NONE | 2+ | Multi-agent group talk |
+| `WAVE_AT` | NONE | 2 | Symmetric greeting |
+| `SIT_ON` / `LIE_ON` | OBJECT | 1 | Occupy furniture (FIFO queue) |
+| `USE` | OBJECT | 1 | Use a world object (FIFO queue) |
+| `QUEUE_USE` | OBJECT | 1+ | Queue for a shared resource |
+| `BLOCK` | AGENT | 1-2 | Pursue and block a target agent |
+| `SERVICE` | TAG | 1+ | Asymmetric provider/seeker pairing by tag (also subsumes escort/follow via `formation_spec: line, anchor_kind: provider`) |
 
-| Type | Participants | Description |
-|---|---|---|
-| `TALK_TO` | 2 | Face-to-face conversation |
-| `GROUP_CONVERSATION` | 2+ | Multi-agent group talk |
-| `FOLLOW` | 2 | One agent follows another |
-| `SIT_ON` / `LIE_ON` | 1 | Occupy furniture |
-| `USE` | 1 | Use a world object |
-| `QUEUE_USE` | 1+ | Queue for a shared resource |
-
-Interactions follow an advertise → search → accept → stop protocol. Agents in active interactions defer despawn until the interaction ends.
+Every interaction follows a single flow: a BT `SeekNode` emits a SEEK command, IM finds a matching open interaction and joins, or (if creation is allowed for this handle) creates one. Teardown is explicit — either a BT `CancelNode` (STOP with `reason=CANCELED`) or the contract's duration expiring (`COMPLETED`). Agents in active interactions defer despawn until the interaction ends.
 
 ## Spawning & Despawning
 

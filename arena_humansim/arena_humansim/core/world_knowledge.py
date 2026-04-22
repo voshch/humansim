@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 import math
 
 import attrs
 
 from arena_humansim.utils.loggable import Loggable
-from arena_humansim.utils.types import Pose2D
+from arena_humansim.utils.types import AnchorKind, FormationSpec, Pose2D
+
+__all__ = ["AnchorKind", "FormationSpec", "WorldKnowledge", "WorldObject"]
 
 
 @attrs.define
@@ -13,57 +17,8 @@ class WorldObject:
     pose: Pose2D = attrs.Factory(Pose2D)
     capacity: int = 1
     satisfies: dict[str, float] = attrs.Factory(dict)
-    formation: "FormationSpec | None" = None
+    formation: FormationSpec | None = None
     interaction_radius: float | None = None
-
-
-_VALID_FORMATION_TYPES = ("line", "cluster", "f_formation", "dyad")
-_VALID_ANCHOR_KINDS = ("object", "agent", "pose", "centroid")
-
-
-@attrs.define
-class FormationSpec:
-    """Runtime representation of a scenario FormationConfig on a WorldObject."""
-
-    type: str
-    params: dict[str, float] = attrs.Factory(dict)
-    anchor_kind: str = "object"
-    anchor_ref: str | None = None
-    anchor_pose: Pose2D | None = None
-
-    @classmethod
-    def from_config(cls, cfg: object) -> "FormationSpec | None":
-        if cfg is None:
-            return None
-        ftype = getattr(cfg, "type", None)
-        if not ftype:
-            return None
-        if ftype not in _VALID_FORMATION_TYPES:
-            raise ValueError(f"Unknown formation type '{ftype}'. Valid: {_VALID_FORMATION_TYPES}")
-        params_cfg = getattr(cfg, "params", None) or {}
-        anchor_cfg = getattr(cfg, "anchor", None)
-        anchor_kind = "object"
-        anchor_ref: str | None = None
-        anchor_pose: Pose2D | None = None
-        if anchor_cfg is not None:
-            anchor_kind = getattr(anchor_cfg, "kind", "object")
-            if anchor_kind not in _VALID_ANCHOR_KINDS:
-                raise ValueError(f"Unknown anchor kind '{anchor_kind}'. Valid: {_VALID_ANCHOR_KINDS}")
-            anchor_ref = getattr(anchor_cfg, "ref", None)
-            pose_cfg = getattr(anchor_cfg, "pose", None)
-            if pose_cfg is not None:
-                anchor_pose = Pose2D(
-                    x=float(getattr(pose_cfg, "x", 0.0)),
-                    y=float(getattr(pose_cfg, "y", 0.0)),
-                    theta=float(getattr(pose_cfg, "theta", 0.0)),
-                )
-        return cls(
-            type=ftype,
-            params=dict(params_cfg),
-            anchor_kind=anchor_kind,
-            anchor_ref=anchor_ref,
-            anchor_pose=anchor_pose,
-        )
 
 
 class WorldKnowledge(Loggable):
@@ -95,6 +50,15 @@ class WorldKnowledge(Loggable):
 
     def get_by_type(self, object_type: str) -> list[WorldObject]:
         return list(self._by_type.get(object_type, []))
+
+    def resolve(self, target: str, from_pose: Pose2D | None = None, exclude_full: bool = False) -> WorldObject | None:
+        """Try target as an object_id; otherwise treat as a type name and return nearest visible-by-pose."""
+        obj = self.get(target)
+        if obj is not None:
+            return obj
+        if from_pose is None:
+            return None
+        return self.nearest_object(target, from_pose, exclude_full=exclude_full)
 
     def nearest_object(
         self,

@@ -36,10 +36,7 @@ def test_subsystem_stamp_is_scheduled_sim_time_not_clock_now() -> None:
             mgr._subsystem_timer_callback()
 
         assert mgr._tick_count == n_ticks
-        assert mgr._sim_time_ns == (n_ticks - 1) * dt_ns, (
-            f"sim_time_ns after {n_ticks} ticks should be (n-1)*dt = {(n_ticks - 1) * dt_ns}, "
-            f"got {mgr._sim_time_ns}"
-        )
+        assert mgr._sim_time_ns == (n_ticks - 1) * dt_ns, f"sim_time_ns after {n_ticks} ticks should be (n-1)*dt = {(n_ticks - 1) * dt_ns}, got {mgr._sim_time_ns}"
     finally:
         mgr.destroy_node()
 

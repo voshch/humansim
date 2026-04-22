@@ -9,7 +9,7 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 
 from arena_humansim.core.agents import BaseAgent
-from arena_humansim.utils.types import HighLevelCommand, Pose2D, Segment, Segments
+from arena_humansim.utils.types import CommandType, HighLevelCommand, Pose2D, Segment, Segments
 
 from . import GlobalPlanner
 from ._grid import (
@@ -256,6 +256,8 @@ class DijkstraPlanner(GlobalPlanner):
 
         for agent_id, cmd in high_level_commands.items():
             if not isinstance(cmd, HighLevelCommand):
+                continue
+            if cmd.type != CommandType.NAVIGATE:
                 continue
 
             target = cmd.target_pose

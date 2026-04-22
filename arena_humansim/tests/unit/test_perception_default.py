@@ -12,7 +12,7 @@ from arena_humansim.core.pool import AgentPool
 from arena_humansim.utils.types import AgentState, Pose2D
 
 
-def _params(vision_range: float, vision_fov: float) -> SampledParams:
+def _params(vision_range: float, vision_fov: float, proximity_sense: float = 0.0) -> SampledParams:
     return SampledParams(
         name="adult",
         desired_velocity=1.1,
@@ -24,7 +24,11 @@ def _params(vision_range: float, vision_fov: float) -> SampledParams:
         pivot_angular_velocity=2.0,
         reaction_time=0.4,
         personal_space_min=0.6,
-        perception=SampledPerception(vision_range=vision_range, vision_fov=vision_fov),
+        perception=SampledPerception(
+            vision_range=vision_range,
+            vision_fov=vision_fov,
+            proximity_sense=proximity_sense,
+        ),
         local_planner_params=SampledLocalPlanner(
             relaxation_time=0.5,
             repulsion_strength=2.1,
@@ -41,6 +45,7 @@ def _make_agent(
     theta: float = 0.0,
     vision_range: float = 5.0,
     vision_fov: float = 360.0,
+    proximity_sense: float = 0.0,
 ) -> BaseAgent:
     state = AgentState(
         agent_id=agent_id,
@@ -50,7 +55,7 @@ def _make_agent(
     )
     return BaseAgent(
         state=state,
-        params=_params(vision_range=vision_range, vision_fov=vision_fov),
+        params=_params(vision_range=vision_range, vision_fov=vision_fov, proximity_sense=proximity_sense),
         global_planner=cast(Any, None),
         local_planner=cast(Any, None),
         animation=cast(Any, None),
@@ -67,7 +72,7 @@ def _pool_from(agents: list[BaseAgent]) -> AgentPool:
 def _csr_neighbors(pool: AgentPool, row: int) -> list[int]:
     indptr = pool.neighbor_indptr
     indices = pool.neighbor_indices
-    return [int(x) for x in indices[indptr[row]:indptr[row + 1]]]
+    return [int(x) for x in indices[indptr[row] : indptr[row + 1]]]
 
 
 def test_compute_pool_kdtree_builds_csr_with_range_filter(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -175,6 +180,53 @@ def test_compute_pool_dense_fov_mixed_omni_and_narrow() -> None:
     neighbors_of_omni = set(_csr_neighbors(pool, 1))
     assert 0 in neighbors_of_omni
     assert 1 not in neighbors_of_omni
+
+
+def test_proximity_sense_unions_with_fov_back_neighbour() -> None:
+    # Two agents facing opposite directions, 0.8m apart, proximity_sense=1.2 covers them.
+    # With vision_fov=90deg each agent's FOV cone excludes the peer behind them,
+    # yet proximity sense must include them in the neighbour CSR.
+    agents = [
+        _make_agent(1, 0.0, 0.0, theta=0.0, vision_range=5.0, vision_fov=90.0, proximity_sense=1.2),
+        _make_agent(2, -0.8, 0.0, theta=0.0, vision_range=5.0, vision_fov=90.0, proximity_sense=1.2),
+    ]
+    pool = _pool_from(agents)
+    perception = DefaultPerception()
+    perception.compute_pool(pool)
+
+    assert 1 in set(_csr_neighbors(pool, 0))
+    assert 0 in set(_csr_neighbors(pool, 1))
+
+
+def test_proximity_sense_does_not_override_out_of_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(DefaultPerception, "_SMALL_N_THRESHOLD", 4)
+    agents = [
+        _make_agent(1, 0.0, 0.0, theta=0.0, vision_range=5.0, vision_fov=90.0, proximity_sense=1.2),
+        _make_agent(2, 10.0, 0.0, theta=3.14159, vision_range=5.0, vision_fov=90.0, proximity_sense=1.2),
+        _make_agent(3, 20.0, 0.0, vision_range=5.0, vision_fov=360.0, proximity_sense=1.2),
+        _make_agent(4, 30.0, 0.0, vision_range=5.0, vision_fov=360.0, proximity_sense=1.2),
+        _make_agent(5, 40.0, 0.0, vision_range=5.0, vision_fov=360.0, proximity_sense=1.2),
+    ]
+    pool = _pool_from(agents)
+    perception = DefaultPerception()
+    perception.compute_pool(pool)
+
+    assert 1 not in set(_csr_neighbors(pool, 0))
+    assert 0 not in set(_csr_neighbors(pool, 1))
+
+
+def test_fov_neighbour_outside_proximity_still_visible() -> None:
+    # Peer within vision_range & FOV but outside proximity_sense must remain a neighbour.
+    agents = [
+        _make_agent(1, 0.0, 0.0, theta=0.0, vision_range=5.0, vision_fov=360.0, proximity_sense=1.2),
+        _make_agent(2, 3.0, 0.0, theta=0.0, vision_range=5.0, vision_fov=360.0, proximity_sense=1.2),
+    ]
+    pool = _pool_from(agents)
+    perception = DefaultPerception()
+    perception.compute_pool(pool)
+
+    assert 1 in set(_csr_neighbors(pool, 0))
+    assert 0 in set(_csr_neighbors(pool, 1))
 
 
 def test_prepare_tick_builds_tree_only_when_more_than_one_agent() -> None:

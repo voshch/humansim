@@ -1,21 +1,15 @@
 from __future__ import annotations
 
-import enum
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
+from arena_humansim.utils.types import AcceptResult
 
 if TYPE_CHECKING:
     from arena_humansim.utils.types import InteractionState
-
-
-class AcceptResult(enum.IntEnum):
-    BECAME_PARTICIPANT = 0
-    QUEUED = 1
-    REJECTED = 2
 
 
 _registry: ModuleRegistry[AccessPolicy] = ModuleRegistry()

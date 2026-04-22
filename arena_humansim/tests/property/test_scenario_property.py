@@ -6,7 +6,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from arena_humansim.utils.scenario import SimulationParams
-from arena_humansim.utils.types import converter
+from arena_humansim.utils.scenario_loader import converter
 
 
 @given(

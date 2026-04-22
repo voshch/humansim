@@ -41,16 +41,14 @@ agent_types:
       rest: 1.0
     actions:
       rest_at_bench:
-        target_object_type: bench
+        target: bench
         duration: {mean: 0.5, std: 0.0, clip_low: 0.1, clip_high: 2.0}
         satisfies: {rest: 30.0}
     initial_sequence: stroll
     sequences:
       stroll:
         steps:
-          walk_out:
-            target_object_type: bench
-            duration: {mean: 0.2, std: 0.0, clip_low: 0.05, clip_high: 1.0}
+          walk_out: {kind: go_to, target: bench}
           pause:
             duration: {mean: 0.3, std: 0.0, clip_low: 0.1, clip_high: 1.0}
           wander:

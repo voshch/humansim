@@ -92,6 +92,4 @@ def test_master_mode_no_drops_uniform_spacing() -> None:
     dt_ns = int(dt * 1e9)
     for i, msg in enumerate(received):
         stamp_ns = int(msg.header.stamp.sec) * 1_000_000_000 + int(msg.header.stamp.nanosec)
-        assert stamp_ns == i * dt_ns, (
-            f"frame {i} header.stamp={stamp_ns}ns, expected {i * dt_ns}ns (k*dt) - missing or reordered tick"
-        )
+        assert stamp_ns == i * dt_ns, f"frame {i} header.stamp={stamp_ns}ns, expected {i * dt_ns}ns (k*dt) - missing or reordered tick"

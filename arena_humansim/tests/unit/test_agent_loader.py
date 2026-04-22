@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from arena_humansim.core.agents import loader
 from arena_humansim.core.agents.types import AgentType
 
@@ -65,18 +64,10 @@ def test_load_agent_types_raw_from_dir_missing_returns_empty(tmp_path: Path) -> 
     assert loader.load_agent_types_raw_from_dir(missing) == {}
 
 
-def test_load_default_agent_types_empty_when_share_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_agent_types_empty_when_share_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(loader, "_get_share_agent_types_dir", lambda: None)
-    assert loader.load_default_agent_types() == {}
+    assert loader.load_agent_types() == {}
     assert loader._load_default_agent_types_raw() == {}
-
-
-def test_is_path_agent_type_recognizes_slash_and_yaml_suffix() -> None:
-    assert loader.is_path_agent_type("foo/bar")
-    assert loader.is_path_agent_type("agent.yaml")
-    assert loader.is_path_agent_type("/abs/path/agent.yaml")
-    assert not loader.is_path_agent_type("adult")
-    assert not loader.is_path_agent_type("elder")
 
 
 def test_resolve_agent_type_by_name_path_and_registry(tmp_path: Path) -> None:
@@ -97,30 +88,16 @@ def test_resolve_agent_type_by_name_path_and_registry(tmp_path: Path) -> None:
     assert loader.resolve_agent_type_name("unknown", registry={}) is None
 
 
-def test_load_agent_types_with_extends_resolves_inline(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_agent_types_with_extends_resolves_inline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     defaults_dir = tmp_path / "defaults"
     defaults_dir.mkdir()
     parent_yaml = defaults_dir / "parent.yaml"
-    parent_yaml.write_text(
-        "name: parent\n"
-        "mode: simple\n"
-        "desired_velocity:\n"
-        "  mean: 2.0\n"
-        "agent_radius:\n"
-        "  mean: 0.5\n"
-    )
+    parent_yaml.write_text("name: parent\nmode: simple\ndesired_velocity:\n  mean: 2.0\nagent_radius:\n  mean: 0.5\n")
 
     scenario_dir = tmp_path / "scenario"
     scenario_dir.mkdir()
     child_yaml = scenario_dir / "child.yaml"
-    child_yaml.write_text(
-        "name: child\n"
-        "extends: parent\n"
-        "desired_velocity:\n"
-        "  mean: 3.3\n"
-    )
+    child_yaml.write_text("name: child\nextends: parent\ndesired_velocity:\n  mean: 3.3\n")
 
     monkeypatch.setattr(loader, "_get_share_agent_types_dir", lambda: defaults_dir)
 
@@ -133,9 +110,7 @@ def test_load_agent_types_with_extends_resolves_inline(
     assert result["parent"].desired_velocity.mean == 2.0
 
 
-def test_load_agent_types_without_extends_returns_structured(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_agent_types_without_extends_returns_structured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     defaults_dir = tmp_path / "defaults"
     defaults_dir.mkdir()
     (defaults_dir / "plain.yaml").write_text("name: plain\nmode: simple\n")

@@ -96,10 +96,7 @@ def test_replay_get_tick_roundtrip(rclpy_context: object, minimal_scenario: Scen
         for _ in range(n_ticks):
             tick_n = record_mgr._tick_count
             record_mgr.tick()
-            recorded[tick_n] = {
-                aid: (agent.state.pose.x, agent.state.pose.y, agent.state.pose.theta)
-                for aid, agent in record_mgr._agents.items()
-            }
+            recorded[tick_n] = {aid: (agent.state.pose.x, agent.state.pose.y, agent.state.pose.theta) for aid, agent in record_mgr._agents.items()}
         record_mgr._sim_logger.close()
     finally:
         record_mgr.destroy_node()

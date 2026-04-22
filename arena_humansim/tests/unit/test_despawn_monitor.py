@@ -32,12 +32,16 @@ def _circle_sink(name: str = "exit", x: float = 0.0, y: float = 0.0, radius: flo
 
 
 def _polygon_sink(name: str = "room", cx: float = 0.0, cy: float = 0.0, vertices: list[Pose2D] | None = None) -> SinkConfig:
-    verts = vertices if vertices is not None else [
-        Pose2D(x=-1.0, y=-1.0),
-        Pose2D(x=1.0, y=-1.0),
-        Pose2D(x=1.0, y=1.0),
-        Pose2D(x=-1.0, y=1.0),
-    ]
+    verts = (
+        vertices
+        if vertices is not None
+        else [
+            Pose2D(x=-1.0, y=-1.0),
+            Pose2D(x=1.0, y=-1.0),
+            Pose2D(x=1.0, y=1.0),
+            Pose2D(x=-1.0, y=1.0),
+        ]
+    )
     return SinkConfig(
         name=name,
         pose=Pose2D(x=cx, y=cy),

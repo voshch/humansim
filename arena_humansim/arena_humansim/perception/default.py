@@ -85,6 +85,11 @@ class DefaultPerception(Perception):
                 fov_mask[~needs_fov, :] = True
                 mask &= fov_mask
 
+        proximity_sense = pool.proximity_sense[:n]
+        if np.any(proximity_sense > 0.0):
+            prox_mask = dists <= proximity_sense[:, None]
+            mask |= prox_mask
+
         row, col = np.where(mask)
         if len(row) == 0:
             pool.set_neighbor_csr(
@@ -102,7 +107,7 @@ class DefaultPerception(Perception):
         tree = cKDTree(positions)
         self._shared_tree = tree
 
-        max_range = float(pool.vision_range[:n].max())
+        max_range = float(max(pool.vision_range[:n].max(), pool.proximity_sense[:n].max()))
         sdm = tree.sparse_distance_matrix(tree, max_range, output_type="coo_matrix")
 
         row = sdm.row
@@ -121,13 +126,13 @@ class DefaultPerception(Perception):
             )
             return
 
+        prox_ok = dist <= pool.proximity_sense[row]
         range_ok = dist <= pool.vision_range[row]
-        row = row[range_ok]
-        col = col[range_ok]
 
         obs_fov = pool.vision_fov[row]
         omni = obs_fov >= 360.0
 
+        fov_ok = np.ones(len(row), dtype=np.bool_)
         needs_fov = ~omni
         if np.any(needs_fov):
             r_fov = row[needs_fov]
@@ -140,13 +145,11 @@ class DefaultPerception(Perception):
 
             angle_diff = np.abs(np.arctan2(np.sin(bearing - heading), np.cos(bearing - heading)))
             half_fov = np.radians(obs_fov[needs_fov] * 0.5)
-            fov_ok_sub = angle_diff <= half_fov
+            fov_ok[needs_fov] = angle_diff <= half_fov
 
-            fov_ok = np.ones(len(row), dtype=np.bool_)
-            fov_ok[needs_fov] = fov_ok_sub
-
-            row = row[fov_ok]
-            col = col[fov_ok]
+        keep = (range_ok & fov_ok) | prox_ok
+        row = row[keep]
+        col = col[keep]
 
         counts = np.bincount(row, minlength=n)
         indptr = np.zeros(n + 1, dtype=np.int32)
@@ -167,6 +170,7 @@ class DefaultPerception(Perception):
         agent_id = agent.state.agent_id
         vision_range: float = agent.params.perception.vision_range
         vision_fov: float = agent.params.perception.vision_fov
+        proximity_sense: float = agent.params.perception.proximity_sense
 
         if agent_id not in all_agents:
             return belief
@@ -185,18 +189,24 @@ class DefaultPerception(Perception):
             half_fov = np.radians(vision_fov * 0.5)
             heading = observer.pose.theta
 
-        neighbor_indices = self._shared_tree.query_ball_point([ox, oy], vision_range)
+        query_radius = max(vision_range, proximity_sense)
+        neighbor_indices = self._shared_tree.query_ball_point([ox, oy], query_radius)
 
         for idx in neighbor_indices:
             nid = self._shared_ids[idx]
             if nid == agent_id:
                 continue
-            if not omnidirectional:
-                nx, ny = self._shared_positions[idx]
-                bearing = np.arctan2(ny - oy, nx - ox)
-                angle_diff = abs(_wrap_angle(bearing - heading))
-                if angle_diff > half_fov:
+            nx, ny = self._shared_positions[idx]
+            d = float(np.hypot(nx - ox, ny - oy))
+            within_prox = d <= proximity_sense
+            if not within_prox:
+                if d > vision_range:
                     continue
+                if not omnidirectional:
+                    bearing = np.arctan2(ny - oy, nx - ox)
+                    angle_diff = abs(_wrap_angle(bearing - heading))
+                    if angle_diff > half_fov:
+                        continue
             belief.observed_agents.append(all_agents[nid])
 
         return belief

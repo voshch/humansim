@@ -2,10 +2,10 @@ import numpy as np
 import py_trees
 
 from arena_humansim.core.agents import BaseAgent, ParamDist
-from arena_humansim.core.behavior.nodes.helpers import _sample_param_dist
-from arena_humansim.core.interaction_manager import CommandType
+from arena_humansim.core.behavior.nodes.helpers import _nav_command, _sample_param_dist
+from arena_humansim.core.behavior.step_context import StepContext
 from arena_humansim.utils import DT
-from arena_humansim.utils.types import BehaviorTreeMovement, HighLevelCommand
+from arena_humansim.utils.types import BehaviorTreeMovement
 
 
 class ClearOutcomeNode(py_trees.behaviour.Behaviour):
@@ -14,8 +14,10 @@ class ClearOutcomeNode(py_trees.behaviour.Behaviour):
         self._agent = agent
 
     def update(self) -> py_trees.common.Status:
-        if isinstance(self._agent.movement, BehaviorTreeMovement):
-            self._agent.movement.last_outcome = None
+        mv = self._agent.movement
+        if isinstance(mv, BehaviorTreeMovement):
+            mv.last_outcome = None
+            mv.interaction_id = None
         return py_trees.common.Status.SUCCESS
 
 
@@ -56,12 +58,14 @@ class HoldNode(py_trees.behaviour.Behaviour):
         duration_source: ParamDist | None,
         rng: np.random.Generator,
         dt: float,
+        ctx: StepContext | None = None,
     ) -> None:
         super().__init__(name)
         self._agent = agent
         self._duration_source = duration_source
         self._rng = rng
         self._dt = dt
+        self._ctx = ctx
         self._duration: float | None = None
         self._elapsed: float = 0.0
 
@@ -69,15 +73,19 @@ class HoldNode(py_trees.behaviour.Behaviour):
         self._elapsed = 0.0
         self._duration = _sample_param_dist(self._duration_source, self._rng) if self._duration_source is not None else None
 
+    def _bound(self) -> bool:
+        lookup = self._ctx.is_bound_lookup if self._ctx is not None else None
+        return bool(lookup(self._agent.state.agent_id)) if lookup is not None else False
+
     def update(self) -> py_trees.common.Status:
         if self._duration is None:
             return py_trees.common.Status.SUCCESS
-        # Re-emit STOP every tick so stale nav commands don't linger past arrival.
-        self._agent.movement.command = HighLevelCommand(
-            agent_id=self._agent.state.agent_id,
-            type=CommandType.STOP,
-            interaction_target=-1,
-        )
+        # Bound agents are driven by the formation emitter; overwriting movement.command
+        # here would freeze followers mid-ride. Let formation own motion, just tick time.
+        if not self._bound():
+            cmd = _nav_command(self._agent, self._agent.state.pose)
+            cmd.desired_velocity = 0.0
+            self._agent.movement.command = cmd
         if self._elapsed >= self._duration:
             return py_trees.common.Status.SUCCESS
         self._elapsed += self._dt

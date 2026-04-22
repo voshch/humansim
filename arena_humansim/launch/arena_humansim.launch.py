@@ -43,6 +43,9 @@ def _rviz_action(context, *args, **kwargs):
     rviz_val = LaunchConfiguration("rviz").perform(context)
     mode_val = LaunchConfiguration("mode").perform(context)
     use_sim_time = LaunchConfiguration("use_sim_time").perform(context)
+    if rviz_val == "":
+        markers_val = LaunchConfiguration("markers").perform(context)
+        rviz_val = "false" if markers_val == "0" else "true"
     if mode_val != "master" or rviz_val.lower() == "false":
         return []
     if rviz_val.lower() == "true":
@@ -109,7 +112,7 @@ def generate_launch_description():
         DeclareLaunchArgument("mode", default_value="master", choices=["master", "subsystem"]),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
         DeclareLaunchArgument("markers", default_value="0", description="0=off, 1=basic, 2=full"),
-        DeclareLaunchArgument("rviz", default_value="true", description="true = default config, false = off, path = custom config"),
+        DeclareLaunchArgument("rviz", default_value="", description="true = default config, false = off, path = custom config (empty = auto: off if markers=0 else on)"),
         DeclareLaunchArgument("record", default_value="false", description="record scenario to rosbag"),
         DeclareLaunchArgument("record_dir", default_value="", description="output dir (empty = ./recordings/<ts>[_<scenario>]/ relative to cwd)"),
         DeclareLaunchArgument("render", default_value="true", description="render video after node exits"),

@@ -4,47 +4,81 @@ The simulator's central subsystems live here: the agent pool, the tick-schedulin
 
 This README focuses on **`InteractionManager`** — the only piece of core with non-obvious behavior that isn't already covered by a sibling readme. See also:
 
-- [behavior/README.md](behavior/README.md) — behavior-tree node invariants (ADVERTISE, patience, SERVICE accept).
+- [behavior/README.md](behavior/README.md) — behavior-tree node invariants (`SeekNode`, patience, cancel).
 
 ## InteractionManager
 
-Pure router over `ADVERTISE` / `STOP` / `IDLE` commands. Discovery — "who should I pair with?" — is delegated to perception, not reimplemented here.
+Router over `NAVIGATE` / `STOP` / `SEEK` commands. `NAVIGATE` is ignored here (consumed upstream by the locomotion layer); `STOP` drops an agent from one interaction or force-stops across all; `SEEK` is the only matcher entry point.
 
-## `_try_bind` rules
+## `_handle_seek` flow
 
-For every unbound `_Advertisement`, the matcher tries each rule in order. First match wins.
+Each `SEEK` carries a `SeekSpec`. Dispatch consults `spec.interaction_type.kind.handle.strategy` (from the per-type registry in [interaction_kinds.py](interaction_kinds.py)):
 
-1. **Explicit interaction.** `ad.interaction_target >= 0` → join that specific interaction if it exists and is still open.
-2. **Object-anchored.** `ad.object_id is not None` → join the existing interaction for that (object, type) pair, or create one with the ad's agent as creator.
-3. **Targeted agent.** `ad.target_agent >= 0` → find an ad from that specific agent of the same type and pair.
-4. **Open / anchorless.** Pair with the closest *visible* open ad of the same type. Visibility comes from perception (range + FOV); distance is only used as tiebreak among visible candidates. No global `DISCOVERY_RADIUS` — each agent's `vision_range` and `vision_fov` shape the gate.
+1. **Already a member?** Iterate `_agent_membership[agent_id]`; if any existing interaction passes `strategy.matches(interaction, spec)`, return — no duplicate membership.
+2. **Find existing.** Only seekers (`spec.offer=False`) enter this branch — providers always create, never join another provider's offer. `strategy.find(self, spec, agent_id)` returns an admissible interaction id or `None`. On hit, `accept(agent_id, iid)` joins (as `PARTICIPANT` or, if the access policy queues, `QUEUED`) and stamps `spec.duration` into `member_durations`.
+3. **Create.** If `strategy.can_create(self, spec, agent_id)` passes, `_create_interaction(creator_id=agent_id, spec=spec)` runs. `OBJECT` handles first resolve `spec.target` through `WorldKnowledge.resolve` so the created interaction keys on a concrete `object_id`.
 
-Rule 4 fails silently when no visibility callback is wired, so tests that don't care about pairing can skip the setup.
+Within a single `update(dt)` call, commands are sorted so `spec.offer=True` dispatches before seekers. This guarantees a same-tick seeker can match a provider's freshly-created interaction instead of racing past it.
 
-## `visibility_lookup` contract
+## Handle kinds
+
+Four `HandleKind`s, one strategy each, all in `interaction_kinds.py`:
+
+| Kind | Target shape | `find` scan | `populate_state` writes |
+|---|---|---|---|
+| `NONE` (symmetric: TALK_TO, GROUP_CONVERSATION, WAVE_AT) | omitted | `_scan_symmetric` — visible peer of same type | — |
+| `TAG` (SERVICE) | `str` tag | `_scan_tag` — visible provider with matching `service_tag`; requires `offer=True` to create | `state["service_tag"]` |
+| `AGENT` (BLOCK) | `int` agent id | `_scan_agent` — interaction with matching `target_agent` | `state["target_agent"]` |
+| `OBJECT` (SIT_ON, LIE_ON, USE, QUEUE_USE) | `str` object or type | `_find_object_bound` — `_interaction_by_object_type[(object_id, type)]`, then retry via `WorldKnowledge.resolve` | returns `object_id` (stored on `InteractionState.object_id`, not `state[]`) |
+
+`SERVICE` offers additionally set `state["provider"] = creator_id` when `spec.offer` is true.
+
+## Hot-path indexes
+
+Maintained in `_add_membership` / `_drop_membership` / `_create_interaction` / `_teardown`:
+
+- `_interactions_by_type: dict[int, set[int]]` — all live interaction ids keyed by `int(InteractionType)`; every `_scan_*` iterates one bucket.
+- `_interaction_by_object_type: dict[tuple[str, int], int]` — the single active interaction for an `(object_id, type)` pair. Cleared on teardown so a new seeker can create a fresh one.
+- `_agent_membership: dict[int, dict[int, MembershipRole]]` — per-agent map of interaction id → `PARTICIPANT | QUEUED`. Replaces the older `_agent_to_interactions` / `_agent_to_queues` split; `_iter_membership(aid, role=...)` filters.
+
+## Contract duration
+
+`_tick_durations(dt)` advances `contract.elapsed` only while the interaction is `ACTIVE` and — when a formation is attached — every participant satisfies `formation.arrived(pid)`. On expiry:
+
+- With a queued `access` policy and a non-empty queue, current participants are released via `_release_participant`, the policy promotes the next batch, and `contract.elapsed` resets — letting `duration` stretch across successive holders without tearing the interaction down. A per-member override in `member_durations` becomes the next `contract.duration`.
+- Otherwise, `_teardown(iid, InteractionOutcome.COMPLETED)` fires.
+
+`_teardown(outcome)` clears indexes, drops memberships, leaves formations, and propagates outcome (`COMPLETED` / `CANCELED` / `INTERRUPTED`) to every ex-member's BT movement.
+
+## BT state propagation
+
+All BT side-effects funnel through one helper:
 
 ```python
-visibility_lookup: Callable[[int], set[int]]
+_update_bt_movement(aid, *, interaction_id=..., clear_command=..., last_outcome=...)
 ```
 
-Given an agent_id, return the set of agent_ids that agent currently perceives. The interaction manager calls this from `_find_visible_open_ad` during rule 4.
+Each keyword is optional (sentinel `_UNSET`). It no-ops unless a field actually changed, and it only touches agents whose movement is a `BehaviorTreeMovement`. `BehaviorTreeMovement` carries `{command, last_outcome, interaction_id}`; `SeekNode` reads `interaction_id` to know it's bound, `last_outcome` to know how the previous step ended. `_tick_formations` writes a fresh `NAVIGATE` command each tick for every arrived-but-moving participant.
 
-In the main loop it's backed by the pool's neighbor CSR — see `pool.visible_agent_ids` and `DefaultPerception.compute_pool`. In tests it's a simple dict lookup.
+## Formation resolution
 
-## SERVICE interaction type
+`_resolve_formation(interaction)` picks the first of:
 
-`InteractionType.SERVICE` is special-cased by the matcher. Before rules 1–4, `_bind_ad` dispatches SERVICE ads to `_bind_service`.
+1. Step-level `spec.formation_spec` (authored on the `SeekSpec` / scenario step).
+2. Object-level metadata — `WorldObject.formation` for `interaction.object_id`.
+3. Registry default — `InteractionType(...).kind.formation_default`.
 
-- **Pairing criteria.** Same `service_tag` (string-equal) and mutual visibility via the same `visibility_lookup` used by rule 4.
-- **Anchor rule.** If exactly one peer in the pair is ROBOT-kind, that peer is the initiator and occupies index 0 of `participants`. This centers `f_formation` on the robot.
-- **Parallel interactions.** Two robots offering the same tag yield two independent interactions, one per robot. The store already indexes multiple ads per agent.
-- **`max_participants` threading.** An ad's `max_participants` overrides the contract default (`-1` = unbounded). The robot ad wins over a human seeker ad when both set it. Counts every participant including the robot itself — set `N+1` for "N humans at once".
-- **Queueing.** Contract default is `queueable=True` with `FIFOQueue()`; overflow past the cap queues in arrival order.
+`_anchor_from_spec(spec, interaction)` dispatches on `AnchorKind`:
 
-Defaults: formation `f_formation`, `interaction_radius` 3.0.
+- `OBJECT` → `ObjectAnchor` on `spec.anchor_ref or interaction.object_id`.
+- `AGENT` → `AgentAnchor` on `int(spec.anchor_ref)`.
+- `PROVIDER` → `AgentAnchor` on `interaction.provider` (used by SERVICE's `f_formation`).
+- `POSE` → `PoseAnchor` on `spec.anchor_pose`.
+- `CENTROID` → `CentroidAnchor` over live participants.
+
+Unresolvable anchors return `None` and the interaction runs without a formation.
 
 ## What lives elsewhere
 
-- **Proximity gating for anchored `ADVERTISE`** — the compiler emits `ResolveObjectNode` → `GoToNode` → `AdvertiseInteractionNode` for interaction steps; `GoToNode` only returns SUCCESS once within `interaction_radius`, so `AdvertiseInteractionNode` never fires before the agent has arrived. IM trusts the ad.
-- **Formation defaults per interaction type** — `DEFAULT_FORMATION_BY_INTERACTION` (same file), keyed by `InteractionType`. Overridden by `WorldObject.formation` when present.
-- **Approach-tolerance defaults per interaction type** — `DEFAULT_INTERACTION_RADIUS` (same file). See [config/scenarios/README.md](../../config/scenarios/README.md) for the full cascade.
+- **Proximity gating.** The compiler emits `ResolveObjectNode → GoToNode → SeekNode` for object-bound interaction steps; `GoToNode` only returns SUCCESS within `interaction_radius`, so `SEEK` never fires before arrival.
+- **Per-type defaults.** `contract_defaults`, `formation_default`, and `interaction_radius` all live on `InteractionKind` in [interaction_kinds.py](interaction_kinds.py). See [config/scenarios/README.md](../../config/scenarios/README.md) for the authoring cascade.

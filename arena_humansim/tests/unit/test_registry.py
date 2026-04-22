@@ -40,6 +40,7 @@ def test_duplicate_registration_raises() -> None:
         return _Thing
 
     with pytest.raises(AssertionError):
+
         @reg.register("thing")
         def _load2() -> type[_Thing]:
             return _Thing

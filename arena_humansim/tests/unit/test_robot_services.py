@@ -6,10 +6,10 @@ pytest.importorskip("rclpy")
 
 from typing import Any
 
-from arena_humansim.core.interaction_manager import CommandType
+from arena_humansim.core.interaction_kinds import InteractionType
 from arena_humansim.core.robot_services import RobotServiceAdvertiser
 from arena_humansim.utils.scenario import ServiceSpec
-from arena_humansim.utils.types import AgentKind, AgentState, InteractionType, Pose2D
+from arena_humansim.utils.types import AgentKind, AgentState, CommandType, Pose2D
 
 
 class _StubAgent:
@@ -25,7 +25,7 @@ def _human_agent(agent_id: int) -> Any:
     return _StubAgent(agent_id, AgentKind.HUMAN)
 
 
-def test_robot_service_advertiser_emits_per_service_and_skips_non_robots() -> None:
+def test_robot_service_advertiser_emits_per_service() -> None:
     adv = RobotServiceAdvertiser()
     adv.register(10, [ServiceSpec(tag="water", max_participants=3), ServiceSpec(tag="trash", max_participants=-1)])
     adv.register(20, [ServiceSpec(tag="soup", max_participants=2)])
@@ -36,12 +36,38 @@ def test_robot_service_advertiser_emits_per_service_and_skips_non_robots() -> No
     for_20 = [c for c in cmds if c.agent_id == 20]
 
     assert len(for_10) == 2
-    assert for_20 == []
+    # AgentKind.ROBOT gate in IM is gone; advertiser emits for whoever registered services.
+    assert len(for_20) == 1
 
-    by_tag = {c.service_tag: c for c in for_10}
+    by_tag = {c.spec.target: c for c in for_10 if c.spec is not None}
     assert set(by_tag) == {"water", "trash"}
     for cmd in for_10:
-        assert cmd.type == int(CommandType.ADVERTISE)
-        assert cmd.interaction_type == int(InteractionType.SERVICE)
-    assert by_tag["water"].max_participants == 3
-    assert by_tag["trash"].max_participants is None
+        assert cmd.type == CommandType.SEEK
+        assert cmd.spec is not None
+        assert cmd.spec.interaction_type == InteractionType.SERVICE
+        assert cmd.spec.offer is True
+    assert by_tag["water"].spec.max_participants == 3
+    # negative max_participants becomes None (unbounded) in the spec.
+    assert by_tag["trash"].spec.max_participants is None
+
+
+def test_unregister_drops_services() -> None:
+    adv = RobotServiceAdvertiser()
+    adv.register(1, [ServiceSpec(tag="water", max_participants=1)])
+    adv.unregister(1)
+    assert adv.emit({1: _robot_agent(1)}) == []
+
+
+def test_missing_agent_skipped() -> None:
+    adv = RobotServiceAdvertiser()
+    adv.register(99, [ServiceSpec(tag="water", max_participants=1)])
+    # agent not in the lookup dict -> nothing emitted for them.
+    assert adv.emit({}) == []
+
+
+def test_empty_tag_skipped() -> None:
+    adv = RobotServiceAdvertiser()
+    adv.register(1, [ServiceSpec(tag="", max_participants=1), ServiceSpec(tag="water", max_participants=1)])
+    cmds = adv.emit({1: _robot_agent(1)})
+    tags = {c.spec.target for c in cmds if c.spec is not None}
+    assert tags == {"water"}

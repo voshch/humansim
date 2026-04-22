@@ -56,13 +56,12 @@ from arena_humansim.core.agents import (
     SampledParams,
     TickPhase,
     create_agent,
-    create_agent_from_params,
-    resolve_agent_type,
 )
 from arena_humansim.core.agents.loader import resolve_agent_type_name
 from arena_humansim.core.behavior.compiler import BehaviorTreeFactory
 from arena_humansim.core.despawn_monitor import DespawnMonitor
-from arena_humansim.core.interaction_manager import CommandType, InteractionManager
+from arena_humansim.core.interaction_kinds import InteractionType
+from arena_humansim.core.interaction_manager import InteractionManager
 from arena_humansim.core.logger import SimulationLogger
 from arena_humansim.core.pool import AgentPool
 from arena_humansim.core.recorder import BagRecorder, default_record_dir
@@ -83,10 +82,11 @@ from arena_humansim.utils.types import (
     AgentState,
     BehaviorTreeMovement,
     BeliefState,
+    CommandType,
     HighLevelCommand,
     InteractionOutcome,
-    InteractionType,
     Pose2D,
+    SeekSpec,
     Segments,
     Shape,
     SinkConfig,
@@ -148,7 +148,7 @@ def arrival_latch_step(pool: AgentPool, r_enter: float, r_exit: float) -> None:
 
     d_term = np.hypot(term[:, 0] - pos[:, 0], term[:, 1] - pos[:, 1])
 
-    release = latched & (d_term > r_exit)
+    release = latched & ((d_term > r_exit) | ~has_term)
     enter = (~latched) & has_term & (d_term < r_enter)
     new_latched = np.where(release, False, np.where(enter, True, latched))
     pool.latched[:n] = new_latched
@@ -723,9 +723,8 @@ class AgentManager(Node):
 
         agent_type = resolve_agent_type_name(type_name, self._agent_types)
         if agent_type is not None:
-            agent_type = resolve_agent_type(agent_type, self._agent_types)
             rng = self._rng.get_agent_substream(aid, "params")
-            agent = create_agent(agent_type, state, self._module_pool, rng)
+            agent = create_agent(agent_type, state, self._module_pool, self._module_selections, rng)
         else:
             params = SampledParams(
                 name=type_name,
@@ -743,7 +742,7 @@ class AgentManager(Node):
                 global_planner=self._module_selections["global_planner"],
                 animation=self._module_selections["animation"],
             )
-            agent = create_agent_from_params(params, state, self._module_pool)
+            agent = create_agent(params, state, self._module_pool, self._module_selections)
 
         overrides = {}
         if agent_msg.radius > 0.0:
@@ -825,6 +824,8 @@ class AgentManager(Node):
             dt=self._dt,
             agent_lookup=lambda aid: self._agents.get(aid),
             pool=self._pool,
+            is_bound_lookup=self._interaction_manager.is_bound,
+            im=self._interaction_manager,
         )
         self._behavior_trees[aid] = bt
         if bt is not None:
@@ -1011,10 +1012,14 @@ class AgentManager(Node):
             for aid in self._high_level_cmds:
                 if aid not in needs_subgoal_ids:
                     cmd = self._high_level_cmds[aid]
+                    if cmd.type != CommandType.NAVIGATE:
+                        continue
                     self._cached_intermediate_goals[aid] = cmd.target_pose
 
             terminals: dict[int, Pose2D] = {}
             for aid, cmd in self._high_level_cmds.items():
+                if cmd.type != CommandType.NAVIGATE:
+                    continue
                 agent = self._agents.get(aid)
                 if agent is not None:
                     terminals[aid] = agent.global_planner.snap_terminal(cmd.target_pose)
@@ -1419,12 +1424,12 @@ class AgentManager(Node):
             creator = script.participants[0]
             if self._agents.get(creator) is None:
                 continue
-            interaction = self._interaction_manager._create_interaction(
-                int(itype),
-                creator,
-                object_id=object_id,
+            spec = SeekSpec(
+                interaction_type=itype,
+                target=object_id,
                 duration=duration_s,
             )
+            interaction = self._interaction_manager._create_interaction(creator_id=creator, spec=spec)
             if duration_s is not None and duration_s > 0:
                 interaction.member_durations[creator] = duration_s
             for pid in script.participants[1:]:

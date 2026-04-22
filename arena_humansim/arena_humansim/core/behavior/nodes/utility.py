@@ -45,12 +45,11 @@ def score_actions(
             weight = utility_weights.get(need_name, 1.0)
             utility += urgency * weight * (delta / 100.0)
 
-        if action.target_object_id:
-            q_len = world.queue_length_for_object(action.target_object_id)
-            penalty = q_len * 0.05
-            utility *= max(0.2, 1.0 - penalty)
-        elif action.target_object_type:
-            q_len = world.queue_length(action.target_object_type)
+        if action.target:
+            if world.get(action.target) is not None:
+                q_len = world.queue_length_for_object(action.target)
+            else:
+                q_len = world.queue_length(action.target)
             penalty = q_len * 0.05
             utility *= max(0.2, 1.0 - penalty)
 

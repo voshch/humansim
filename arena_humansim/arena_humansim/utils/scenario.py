@@ -1,5 +1,4 @@
 import ast
-import copy
 import enum
 import operator
 import re
@@ -10,8 +9,10 @@ import attrs
 import yaml
 
 from ..core.agents import AgentType, VarDef
+from ..core.agents.loader import _load_default_agent_types_raw, _structure_raw, load_agent_types_raw_from_dir, resolve_extends
 from ..core.agents.types import GoToStepDef
-from .types import InteractionType, converter
+from ..core.interaction_kinds import InteractionType, is_object_bound_name
+from .scenario_loader import converter
 
 
 @attrs.define
@@ -200,85 +201,6 @@ class ScenarioConfig:
     event_scripts: list[EventScript] = attrs.Factory(list)
 
 
-_DICT_MERGE_FIELDS = {
-    "needs",
-    "utility_weights",
-    "actions",
-    "sequences",
-    "vars",
-    "perception",
-    "local_planner_params",
-}
-
-_TUPLE_FIELDS = {"perception_stack"}
-
-
-def resolve_extends(
-    agent_types: dict[str, dict[str, Any]],
-    builtins: dict[str, dict[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    all_types: dict[str, dict[str, Any]] = {**builtins, **agent_types}
-
-    resolved: dict[str, dict[str, Any]] = {}
-    in_progress: set[str] = set()
-
-    def _resolve(name: str) -> dict[str, Any]:
-        if name in resolved:
-            return resolved[name]
-        if name not in all_types:
-            raise ValueError(f"Agent type '{name}' referenced by extends but not defined")
-        if name in in_progress:
-            raise ValueError(f"Circular extends detected involving '{name}'")
-
-        in_progress.add(name)
-        child = all_types[name]
-        extends = child.get("extends")
-
-        if extends is None:
-            resolved[name] = copy.deepcopy(child)
-            in_progress.discard(name)
-            return resolved[name]
-
-        parent = _resolve(extends)
-        merged = _deep_merge(parent, child, name)
-        resolved[name] = merged
-        in_progress.discard(name)
-        return merged
-
-    for name in agent_types:
-        _resolve(name)
-
-    return {name: resolved[name] for name in agent_types}
-
-
-def _deep_merge(
-    parent: dict[str, Any],
-    child: dict[str, Any],
-    child_name: str,
-) -> dict[str, Any]:
-    merged = copy.deepcopy(parent)
-    merged["name"] = child_name
-    merged["extends"] = None
-
-    for key, child_val in child.items():
-        if key in ("name", "extends"):
-            continue
-        if key in _DICT_MERGE_FIELDS:
-            if isinstance(child_val, dict) and child_val:
-                parent_val = merged.get(key, {})
-                if not isinstance(parent_val, dict):
-                    parent_val = {}
-                merged_dict = copy.deepcopy(parent_val)
-                merged_dict.update(copy.deepcopy(child_val))
-                merged[key] = merged_dict
-        elif key in _TUPLE_FIELDS:
-            merged[key] = copy.deepcopy(child_val)
-        else:
-            merged[key] = copy.deepcopy(child_val)
-
-    return merged
-
-
 _BINARY_OPS = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
@@ -427,8 +349,6 @@ def _structure_manual(
     var_overrides: dict[str, int | float | bool | str] | None = None,
     scenario_dir: Path | None = None,
 ) -> ScenarioConfig:
-    from arena_humansim.core.agents.loader import _load_default_agent_types_raw, _structure_raw, load_agent_types_raw_from_dir
-
     defaults_raw = _load_default_agent_types_raw()
     scenario_local_raw = load_agent_types_raw_from_dir(scenario_dir) if scenario_dir is not None else {}
     file_types_raw: dict[str, tuple[dict[str, Any], Path]] = {**defaults_raw, **scenario_local_raw}
@@ -512,37 +432,20 @@ def _validate_target_object_refs(config: ScenarioConfig) -> None:
             for step_name, step in seq.steps.items():
                 if isinstance(step, GoToStepDef):
                     continue
-                if step.target_object_id is not None and step.target_object_type is not None:
-                    raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: target_object_id and target_object_type are mutually exclusive")
-                if step.target_object_id is not None and step.target_object_id not in world_ids:
-                    raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: target_object_id={step.target_object_id!r} does not match any world_objects object_id")
-                if step.target_object_type is not None and step.target_object_type not in world_types:
-                    raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: target_object_type={step.target_object_type!r} does not match any world_objects type")
-                if step.accept:
-                    if step.interaction is None:
-                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: accept=true requires interaction")
-                    if step.target_object_id is not None or step.target_object_type is not None:
-                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: accept steps cannot also target an object; drop target_object_* or use a regular interaction step")
+                interaction = step.interaction
+                target = step.target
+                if interaction is not None and is_object_bound_name(interaction) and isinstance(target, str):
+                    if target not in world_ids and target not in world_types:
+                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: target={target!r} does not match any world_objects object_id or type")
+                if interaction == InteractionType.BLOCK.name:
+                    if not isinstance(target, int) or target not in agent_ids:
+                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: interaction BLOCK requires target=<agent_id:int>; got target={target!r}")
                     if step.autonomous:
-                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: accept and autonomous are mutually exclusive")
-                    if step.target_agent is not None:
-                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: accept and target_agent are mutually exclusive")
-                if step.service_tag is not None and not step.accept:
-                    raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: service_tag requires accept=true")
-                if step.target_agent is not None:
-                    if step.target_object_id is not None or step.target_object_type is not None:
-                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: target_agent cannot be combined with target_object_*")
-                    if step.autonomous:
-                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: target_agent and autonomous are mutually exclusive")
-                    if step.target_agent not in agent_ids:
-                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: target_agent={step.target_agent} does not match any scenario agents[].agent_id")
+                        raise ValueError(f"agent_type={atype_name!r} sequence={seq_name!r} step={step_name!r}: BLOCK and autonomous are mutually exclusive")
         for action_name, action in atype.actions.items():
-            if action.target_object_id is not None and action.target_object_type is not None:
-                raise ValueError(f"agent_type={atype_name!r} action={action_name!r}: target_object_id and target_object_type are mutually exclusive")
-            if action.target_object_id is not None and action.target_object_id not in world_ids:
-                raise ValueError(f"agent_type={atype_name!r} action={action_name!r}: target_object_id={action.target_object_id!r} does not match any world_objects object_id")
-            if action.target_object_type is not None and action.target_object_type not in world_types:
-                raise ValueError(f"agent_type={atype_name!r} action={action_name!r}: target_object_type={action.target_object_type!r} does not match any world_objects type")
+            if action.target is not None:
+                if action.target not in world_ids and action.target not in world_types:
+                    raise ValueError(f"agent_type={atype_name!r} action={action_name!r}: target={action.target!r} does not match any world_objects object_id or type")
 
 
 def _validate_interaction_scripts(config: ScenarioConfig) -> None:

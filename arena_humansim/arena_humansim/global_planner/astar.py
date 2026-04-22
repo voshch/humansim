@@ -10,7 +10,7 @@ import pyastar2d
 from scipy.ndimage import binary_dilation
 
 from arena_humansim.core.agents import BaseAgent
-from arena_humansim.utils.types import HighLevelCommand, Pose2D, Segment, Segments
+from arena_humansim.utils.types import CommandType, HighLevelCommand, Pose2D, Segment, Segments
 
 from . import GlobalPlanner
 from ._grid import (
@@ -171,6 +171,8 @@ class AStarPlanner(GlobalPlanner):
 
         for agent_id, cmd in high_level_commands.items():
             if not isinstance(cmd, HighLevelCommand):
+                continue
+            if cmd.type != CommandType.NAVIGATE:
                 continue
 
             target = cmd.target_pose

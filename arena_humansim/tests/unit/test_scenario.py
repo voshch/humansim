@@ -12,7 +12,7 @@ from arena_humansim.utils.scenario import (
     load_scenario,
     resolve_extends,
 )
-from arena_humansim.utils.types import converter
+from arena_humansim.utils.scenario_loader import converter
 
 
 def test_load_scenario_round_trips_minimal_yaml(tmp_path: Path) -> None:
@@ -49,6 +49,7 @@ def test_load_empty_yaml_yields_defaults(tmp_path: Path) -> None:
 
 def test_missing_required_field_in_structuring_raises() -> None:
     from arena_humansim.core.agents.types import AgentType
+
     with pytest.raises(Exception):
         converter.structure({}, AgentType)
 

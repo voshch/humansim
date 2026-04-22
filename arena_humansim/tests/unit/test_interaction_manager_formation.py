@@ -12,19 +12,20 @@ from arena_humansim.core.formation import (
     ObjectAnchor,
     PoseAnchor,
 )
+from arena_humansim.core.interaction_kinds import InteractionType
 from arena_humansim.core.interaction_manager import (
     CommandType,
     InteractionManager,
     _make_contract,
 )
-from arena_humansim.core.world_knowledge import FormationSpec, WorldKnowledge, WorldObject
+from arena_humansim.core.world_knowledge import AnchorKind, FormationSpec, WorldKnowledge, WorldObject
 from arena_humansim.utils.rng import RNG
 from arena_humansim.utils.types import (
     BehaviorTreeMovement,
-    HighLevelCommand,
     InteractionOutcome,
-    InteractionType,
+    InteractionState,
     Pose2D,
+    SeekSpec,
 )
 
 
@@ -39,6 +40,7 @@ class _FakeState:
     agent_id: int = 0
     pose: Pose2D = field(default_factory=Pose2D)
     desired_velocity: float = 1.2
+    kind: int = 0
 
 
 @dataclass
@@ -54,23 +56,46 @@ def _mk_manager(agents: dict[int, _FakeAgent], world: WorldKnowledge | None = No
     return mgr
 
 
-def _advertise(mgr: InteractionManager, agent_id: int, itype: int, object_id: str | None = None) -> int:
-    """Create an interaction with `agent_id` as creator, bypassing the matcher."""
-    interaction = mgr._create_interaction(int(itype), agent_id, object_id=object_id)
+def _create(
+    mgr: InteractionManager,
+    agent_id: int,
+    itype: InteractionType,
+    *,
+    target: str | int | None = None,
+    offer: bool = False,
+    duration: float | None = None,
+    formation_spec: FormationSpec | None = None,
+    min_participants: int | None = None,
+    max_participants: int | None = None,
+    queueable: bool | None = None,
+) -> int:
+    spec = SeekSpec(
+        interaction_type=itype,
+        target=target,
+        offer=offer,
+        duration=duration,
+        formation_spec=formation_spec,
+        min_participants=min_participants,
+        max_participants=max_participants,
+        queueable=queueable,
+    )
+    interaction = mgr._create_interaction(creator_id=agent_id, spec=spec)
     return interaction.id
 
 
 def test_resolve_formation_uses_object_metadata_override() -> None:
     wk = WorldKnowledge()
-    wk.add_object(WorldObject(
-        object_id="counter",
-        type="counter",
-        pose=Pose2D(x=10.0, y=0.0, theta=0.0),
-        formation=FormationSpec(type="line", params={"base_step": 0.5}),
-    ))
+    wk.add_object(
+        WorldObject(
+            object_id="counter",
+            type="counter",
+            pose=Pose2D(x=10.0, y=0.0, theta=0.0),
+            formation=FormationSpec(type="line", params={"base_step": 0.5}),
+        )
+    )
     agents = {1: _FakeAgent(state=_FakeState(agent_id=1))}
     mgr = _mk_manager(agents, world=wk)
-    iid = _advertise(mgr, 1, InteractionType.QUEUE_USE, object_id="counter")
+    iid = _create(mgr, 1, InteractionType.QUEUE_USE, target="counter")
     formation = mgr.interactions[iid].contract.formation
     assert formation is not None
     assert type(formation).__name__ == "LineFormation"
@@ -80,7 +105,7 @@ def test_resolve_formation_uses_object_metadata_override() -> None:
 def test_resolve_formation_falls_back_to_type_default() -> None:
     agents = {1: _FakeAgent(state=_FakeState(agent_id=1))}
     mgr = _mk_manager(agents)
-    iid = _advertise(mgr, 1, InteractionType.GROUP_CONVERSATION)
+    iid = _create(mgr, 1, InteractionType.GROUP_CONVERSATION)
     formation = mgr.interactions[iid].contract.formation
     assert formation is not None
     assert type(formation).__name__ == "FFormation"
@@ -89,16 +114,17 @@ def test_resolve_formation_falls_back_to_type_default() -> None:
 def test_anchor_from_spec_object_kind() -> None:
     wk = WorldKnowledge()
     wk.add_object(WorldObject(object_id="atm", type="atm", pose=Pose2D(x=3.0, y=4.0)))
-    wk.add_object(WorldObject(
-        object_id="counter",
-        type="counter",
-        pose=Pose2D(x=10.0, y=0.0),
-        formation=FormationSpec(type="line", anchor_kind="object", anchor_ref="atm"),
-    ))
+    wk.add_object(
+        WorldObject(
+            object_id="counter",
+            type="counter",
+            pose=Pose2D(x=10.0, y=0.0),
+            formation=FormationSpec(type="line", anchor_kind=AnchorKind.OBJECT, anchor_ref="atm"),
+        )
+    )
     agents = {1: _FakeAgent(state=_FakeState(agent_id=1))}
     mgr = _mk_manager(agents, world=wk)
-    contract = _make_contract(int(InteractionType.QUEUE_USE))
-    from arena_humansim.utils.types import InteractionState
+    contract = _make_contract(InteractionType.QUEUE_USE)
     inter = InteractionState(contract=contract, object_id="counter", participants=[1])
     counter = wk.get("counter")
     assert counter is not None and counter.formation is not None
@@ -109,11 +135,10 @@ def test_anchor_from_spec_object_kind() -> None:
 
 def test_anchor_from_spec_pose_kind() -> None:
     pose = Pose2D(x=2.0, y=2.0, theta=0.3)
-    spec = FormationSpec(type="line", anchor_kind="pose", anchor_pose=pose)
+    spec = FormationSpec(type="line", anchor_kind=AnchorKind.POSE, anchor_pose=pose)
     agents: dict[int, _FakeAgent] = {}
     mgr = _mk_manager(agents)
-    from arena_humansim.utils.types import InteractionState
-    inter = InteractionState(contract=_make_contract(int(InteractionType.USE)))
+    inter = InteractionState(contract=_make_contract(InteractionType.USE))
     anchor = mgr._anchor_from_spec(spec, inter)
     assert isinstance(anchor, PoseAnchor)
     assert anchor.pose() == pose
@@ -121,10 +146,9 @@ def test_anchor_from_spec_pose_kind() -> None:
 
 def test_anchor_from_spec_agent_kind() -> None:
     agents = {7: _FakeAgent(state=_FakeState(agent_id=7, pose=Pose2D(x=9.0, y=9.0)))}
-    spec = FormationSpec(type="line", anchor_kind="agent", anchor_ref="7")
+    spec = FormationSpec(type="line", anchor_kind=AnchorKind.AGENT, anchor_ref="7")
     mgr = _mk_manager(agents)
-    from arena_humansim.utils.types import InteractionState
-    inter = InteractionState(contract=_make_contract(int(InteractionType.USE)))
+    inter = InteractionState(contract=_make_contract(InteractionType.USE))
     anchor = mgr._anchor_from_spec(spec, inter)
     assert isinstance(anchor, AgentAnchor)
     assert anchor.pose() == Pose2D(x=9.0, y=9.0)
@@ -136,10 +160,9 @@ def test_anchor_from_spec_centroid_kind() -> None:
         2: _FakeAgent(state=_FakeState(agent_id=2, pose=Pose2D(x=4.0, y=0.0))),
     }
     mgr = _mk_manager(agents)
-    spec = FormationSpec(type="f_formation", anchor_kind="centroid")
-    from arena_humansim.utils.types import InteractionState
+    spec = FormationSpec(type="f_formation", anchor_kind=AnchorKind.CENTROID)
     inter = InteractionState(
-        contract=_make_contract(int(InteractionType.GROUP_CONVERSATION)),
+        contract=_make_contract(InteractionType.GROUP_CONVERSATION),
         participants=[1, 2],
     )
     anchor = mgr._anchor_from_spec(spec, inter)
@@ -147,19 +170,38 @@ def test_anchor_from_spec_centroid_kind() -> None:
     assert anchor.pose().x == pytest.approx(2.0)
 
 
+def test_anchor_from_spec_provider_kind() -> None:
+    agents = {5: _FakeAgent(state=_FakeState(agent_id=5, pose=Pose2D(x=7.0, y=0.0)))}
+    mgr = _mk_manager(agents)
+    spec = FormationSpec(type="line", anchor_kind=AnchorKind.PROVIDER, params={"base_step": 0.8})
+    inter = InteractionState(
+        contract=_make_contract(InteractionType.SERVICE),
+        participants=[5],
+        state={"provider": 5},
+    )
+    anchor = mgr._anchor_from_spec(spec, inter)
+    assert isinstance(anchor, AgentAnchor)
+    assert anchor.pose() == Pose2D(x=7.0, y=0.0)
+
+
 def test_anchor_from_spec_object_with_no_world_knowledge_returns_none() -> None:
     mgr = InteractionManager(RNG(0))  # no world_knowledge wired
-    spec = FormationSpec(type="line", anchor_kind="object", anchor_ref="atm")
-    from arena_humansim.utils.types import InteractionState
-    inter = InteractionState(contract=_make_contract(int(InteractionType.QUEUE_USE)))
+    spec = FormationSpec(type="line", anchor_kind=AnchorKind.OBJECT, anchor_ref="atm")
+    inter = InteractionState(contract=_make_contract(InteractionType.QUEUE_USE))
     assert mgr._anchor_from_spec(spec, inter) is None
 
 
 def test_anchor_from_spec_agent_with_invalid_ref_returns_none() -> None:
     mgr = _mk_manager({})
-    spec = FormationSpec(type="line", anchor_kind="agent", anchor_ref="not_an_int")
-    from arena_humansim.utils.types import InteractionState
-    inter = InteractionState(contract=_make_contract(int(InteractionType.USE)))
+    spec = FormationSpec(type="line", anchor_kind=AnchorKind.AGENT, anchor_ref="not_an_int")
+    inter = InteractionState(contract=_make_contract(InteractionType.USE))
+    assert mgr._anchor_from_spec(spec, inter) is None
+
+
+def test_anchor_from_spec_provider_without_provider_returns_none() -> None:
+    mgr = _mk_manager({})
+    spec = FormationSpec(type="line", anchor_kind=AnchorKind.PROVIDER)
+    inter = InteractionState(contract=_make_contract(InteractionType.SERVICE))
     assert mgr._anchor_from_spec(spec, inter) is None
 
 
@@ -168,13 +210,13 @@ def test_tick_formations_writes_navigate_to_member() -> None:
     wk.add_object(WorldObject(object_id="atm", type="atm", pose=Pose2D(x=5.0, y=0.0, theta=0.0)))
     agents = {1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D()))}
     mgr = _mk_manager(agents, world=wk)
-    iid = _advertise(mgr, 1, InteractionType.QUEUE_USE, object_id="atm")
+    iid = _create(mgr, 1, InteractionType.QUEUE_USE, target="atm")
     _, formation_targets, _ = mgr.update({}, dt=0.05)
     assert 1 in formation_targets
     assert formation_targets[1] == Pose2D(x=5.0, y=0.0, theta=0.0)
     cmd = agents[1].movement.command
     assert cmd is not None
-    assert cmd.type == int(CommandType.NAVIGATE)
+    assert cmd.type == CommandType.NAVIGATE
     assert cmd.target_pose == Pose2D(x=5.0, y=0.0, theta=0.0)
     assert cmd.desired_velocity == agents[1].state.desired_velocity
     assert mgr.interactions[iid].contract.formation is not None
@@ -185,21 +227,19 @@ def test_tick_formations_skips_when_agent_lookup_returns_none() -> None:
     wk.add_object(WorldObject(object_id="atm", type="atm", pose=Pose2D()))
     agents: dict[int, _FakeAgent] = {}  # empty
     mgr = _mk_manager(agents, world=wk)
-    mgr._create_interaction(int(InteractionType.QUEUE_USE), 99, object_id="atm")
+    _create(mgr, 99, InteractionType.QUEUE_USE, target="atm")
     mgr.update({}, dt=0.05)
     assert 99 in mgr._formation_targets
 
 
-def test_follow_default_formation_is_line_anchored_on_leader() -> None:
+def test_service_provider_anchored_formation_via_spec() -> None:
     agents = {
-        1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D(x=0.0, y=0.0, theta=0.0))),
-        2: _FakeAgent(state=_FakeState(agent_id=2, pose=Pose2D(x=-0.8, y=0.0, theta=0.0))),
+        1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D(x=0.0, y=0.0))),
+        2: _FakeAgent(state=_FakeState(agent_id=2, pose=Pose2D(x=1.0, y=0.0))),
     }
     mgr = _mk_manager(agents)
-    interaction = mgr._create_interaction(int(InteractionType.FOLLOW), 1, object_id=None)
-    iid = interaction.id
-    assert mgr.accept(2, iid) is True
-
+    fs = FormationSpec(type="line", anchor_kind=AnchorKind.PROVIDER, params={"base_step": 0.8})
+    iid = _create(mgr, 1, InteractionType.SERVICE, target="water", offer=True, formation_spec=fs)
     formation = mgr.interactions[iid].contract.formation
     assert formation is not None
     assert type(formation).__name__ == "LineFormation"
@@ -207,57 +247,30 @@ def test_follow_default_formation_is_line_anchored_on_leader() -> None:
     assert formation.anchor.agent_id == 1
 
 
-def test_follow_tick_skips_leader_and_trails_follower() -> None:
-    agents = {
-        1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D(x=0.0, y=0.0, theta=0.0))),
-        2: _FakeAgent(state=_FakeState(agent_id=2, pose=Pose2D(x=-0.8, y=0.0, theta=0.0))),
-    }
-    mgr = _mk_manager(agents)
-    interaction = mgr._create_interaction(int(InteractionType.FOLLOW), 1, object_id=None)
-    assert mgr.accept(2, interaction.id) is True
-
-    _, targets, _ = mgr.update({}, dt=0.05)
-    assert 1 not in targets
-    assert 2 in targets
-    assert agents[1].movement.command is None
-    follower_cmd = agents[2].movement.command
-    assert follower_cmd is not None
-    assert follower_cmd.type == int(CommandType.NAVIGATE)
-
-    initial_follower_target = targets[2]
-    assert initial_follower_target.x == pytest.approx(-0.8)
-
-    agents[1].state.pose = Pose2D(x=2.0, y=0.0, theta=0.0)
-    # Advance past the shuffle reaction delay (SITE_COEF_SHUFFLE * reaction_time).
-    _, targets2, _ = mgr.update({}, dt=0.5)
-    assert 1 not in targets2
-    # Follower's target is a delayed echo of the leader's prior front pose (origin),
-    # which is a step forward from where the follower was (-0.8).
-    assert targets2[2].x > initial_follower_target.x
-
-
 def test_group_conversation_releases_formation_on_duration_expiry() -> None:
     # For 2-member F-formation with defaults: radius = base_radius + radius_per_member*(n-1) = 0.82.
     # Placing agents on that circle makes arrived() true so _tick_durations actually ticks.
     wk = WorldKnowledge()
-    wk.add_object(WorldObject(
-        object_id="gathering",
-        type="gathering_area",
-        pose=Pose2D(x=0.0, y=0.0),
-        formation=FormationSpec(type="f_formation", anchor_kind="pose", anchor_pose=Pose2D(x=0.0, y=0.0)),
-    ))
+    wk.add_object(
+        WorldObject(
+            object_id="gathering",
+            type="gathering_area",
+            pose=Pose2D(x=0.0, y=0.0),
+            formation=FormationSpec(type="f_formation", anchor_kind=AnchorKind.POSE, anchor_pose=Pose2D(x=0.0, y=0.0)),
+        )
+    )
     agents = {
         1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D(x=0.82, y=0.0))),
         2: _FakeAgent(state=_FakeState(agent_id=2, pose=Pose2D(x=-0.82, y=0.0))),
     }
     mgr = _mk_manager(agents, world=wk)
-    interaction = mgr._create_interaction(
-        int(InteractionType.GROUP_CONVERSATION),
+    iid = _create(
+        mgr,
         1,
-        object_id="gathering",
+        InteractionType.GROUP_CONVERSATION,
         duration=0.2,
+        formation_spec=FormationSpec(type="f_formation", anchor_kind=AnchorKind.POSE, anchor_pose=Pose2D()),
     )
-    iid = interaction.id
     assert mgr.accept(2, iid) is True
     assert mgr.interactions[iid].outcome == InteractionOutcome.ACTIVE
 

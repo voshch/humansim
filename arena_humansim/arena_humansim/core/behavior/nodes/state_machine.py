@@ -1,8 +1,12 @@
+from __future__ import annotations
+
 import py_trees
 
 from arena_humansim.core.agents import BaseAgent, SequenceDef
 from arena_humansim.core.behavior.nodes.helpers import _bt_logger
 from arena_humansim.core.behavior.nodes.utility import preconditions_met
+from arena_humansim.core.interaction_manager import InteractionManager
+from arena_humansim.utils.types import InteractionOutcome
 
 
 class SequenceStateMachine(py_trees.behaviour.Behaviour):
@@ -13,12 +17,14 @@ class SequenceStateMachine(py_trees.behaviour.Behaviour):
         sequence_defs: dict[str, SequenceDef],
         initial: str,
         agent: BaseAgent,
+        im: InteractionManager | None = None,
     ) -> None:
         super().__init__(name=name)
         self._sequences = sequences
         self._sequence_defs = sequence_defs
         self._initial = initial
         self._agent = agent
+        self._im = im
         self._current_name: str = initial
         self._current_node: py_trees.behaviour.Behaviour = sequences[initial]
 
@@ -59,6 +65,11 @@ class SequenceStateMachine(py_trees.behaviour.Behaviour):
         _bt_logger.debug(f"Agent {self._agent.state.agent_id}: {self._current_name} -> {target}")
         # stop() cascades terminate() down composites; terminate() alone is a leaf-only hook.
         self._current_node.stop(py_trees.common.Status.INVALID)
+        # Evict from lingering interaction memberships only when switching sequences. A self-loop
+        # (e.g. chat `then: chat`) means the agent is continuing the same behavior — ejecting them
+        # would kick everyone out of a group conversation the moment it re-enters the seek step.
+        if target != self._current_name and self._im is not None:
+            self._im.force_stop(self._agent.state.agent_id, reason=InteractionOutcome.INTERRUPTED)
         self._current_name = target
         self._current_node = self._sequences[target]
         self._current_node.initialise()

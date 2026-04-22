@@ -18,15 +18,15 @@ from arena_humansim.core.agents.types import (
 )
 from arena_humansim.core.behavior.compiler import BehaviorTreeFactory
 from arena_humansim.core.behavior.nodes import (
-    AcceptInteractionNode,
-    AdvertiseInteractionNode,
     BlockNode,
+    CancelNode,
     ClearOutcomeNode,
     GoToNode,
     HoldNode,
     PatienceWatchdogNode,
     ResolveObjectNode,
     SatisfyNode,
+    SeekNode,
     SequenceStateMachine,
 )
 from arena_humansim.core.world_knowledge import WorldKnowledge
@@ -111,7 +111,7 @@ def test_go_to_step_shape(agent_factory: Callable[..., BaseAgent], world: WorldK
     ]
 
 
-def test_go_to_step_shape_minimal(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
+def test_go_to_step_with_target_pose_minimal(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
     step = GoToStepDef(target_pose=Pose2D(x=1.0, y=2.0))
     sequences = {"default": SequenceDef(steps={"walk2": step})}
     agent_type = _agent_type(sequences)
@@ -123,10 +123,21 @@ def test_go_to_step_shape_minimal(agent_factory: Callable[..., BaseAgent], world
     assert [type(c) for c in inner.children] == [ClearOutcomeNode, GoToNode]
 
 
-def test_object_interact_interaction_shape(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
+def test_go_to_step_with_target_expands_resolve_plus_goto(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
+    step = GoToStepDef(target="bench")
+    sequences = {"default": SequenceDef(steps={"walkto": step})}
+    agent_type = _agent_type(sequences)
+    agent = agent_factory(agent_id=12)
+
+    root = _compiled_root(agent_type, agent, world, event_bus, rng_np)
+    _, inner = _assert_outer_shape(root, "default", "walkto")
+    assert [type(c) for c in inner.children] == [ClearOutcomeNode, ResolveObjectNode, GoToNode]
+
+
+def test_object_bound_interaction_shape(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
     step = StepDef(
-        target_object_type="chair",
-        interaction="sit_on",
+        interaction="SIT_ON",
+        target="chair",
         duration=ParamDist(3.0),
         satisfies={"rest": 5.0},
     )
@@ -138,20 +149,20 @@ def test_object_interact_interaction_shape(agent_factory: Callable[..., BaseAgen
     _, inner = _assert_outer_shape(root, "default", "sit")
 
     child_types = [type(c) for c in inner.children]
-    assert child_types == [ClearOutcomeNode, ResolveObjectNode, GoToNode, AdvertiseInteractionNode, SatisfyNode]
+    assert child_types == [ClearOutcomeNode, ResolveObjectNode, GoToNode, SeekNode, SatisfyNode]
     assert [c.name for c in inner.children] == [
         "default/sit/clear_outcome",
         "default/sit/resolve_object",
         "default/sit/go_to",
-        "default/sit/advertise",
+        "default/sit/seek",
         "default/sit/satisfy",
     ]
 
 
-def test_object_interact_interaction_no_satisfy(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
+def test_object_bound_interaction_no_satisfy(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
     step = StepDef(
-        target_object_type="chair",
-        interaction="sit_on",
+        interaction="SIT_ON",
+        target="chair",
         duration=ParamDist(3.0),
     )
     sequences = {"default": SequenceDef(steps={"sit2": step})}
@@ -161,76 +172,83 @@ def test_object_interact_interaction_no_satisfy(agent_factory: Callable[..., Bas
     root = _compiled_root(agent_type, agent, world, event_bus, rng_np)
     _, inner = _assert_outer_shape(root, "default", "sit2")
 
-    assert [type(c) for c in inner.children] == [ClearOutcomeNode, ResolveObjectNode, GoToNode, AdvertiseInteractionNode]
+    assert [type(c) for c in inner.children] == [ClearOutcomeNode, ResolveObjectNode, GoToNode, SeekNode]
 
 
-def test_floating_advertise_has_no_resolve_or_goto(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
+def test_non_object_interaction_has_no_resolve_or_goto(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
     step = StepDef(
-        interaction="FOLLOW",
+        interaction="TALK_TO",
         duration=ParamDist(5.0),
         satisfies={"company": 1.0},
     )
-    sequences = {"default": SequenceDef(steps={"lead": step})}
+    sequences = {"default": SequenceDef(steps={"chat": step})}
     agent_type = _agent_type(sequences)
     agent = agent_factory(agent_id=20)
 
     root = _compiled_root(agent_type, agent, world, event_bus, rng_np)
-    _, inner = _assert_outer_shape(root, "default", "lead")
+    _, inner = _assert_outer_shape(root, "default", "chat")
 
-    assert [type(c) for c in inner.children] == [ClearOutcomeNode, AdvertiseInteractionNode, SatisfyNode]
+    assert [type(c) for c in inner.children] == [ClearOutcomeNode, SeekNode, SatisfyNode]
     assert [c.name for c in inner.children] == [
-        "default/lead/clear_outcome",
-        "default/lead/advertise",
-        "default/lead/satisfy",
+        "default/chat/clear_outcome",
+        "default/chat/seek",
+        "default/chat/satisfy",
     ]
 
 
-def test_floating_advertise_minimal(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
-    step = StepDef(interaction="FOLLOW")
-    sequences = {"default": SequenceDef(steps={"lead2": step})}
+def test_non_object_interaction_minimal(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
+    step = StepDef(interaction="TALK_TO")
+    sequences = {"default": SequenceDef(steps={"chat2": step})}
     agent_type = _agent_type(sequences)
     agent = agent_factory(agent_id=21)
 
     root = _compiled_root(agent_type, agent, world, event_bus, rng_np)
-    _, inner = _assert_outer_shape(root, "default", "lead2")
+    _, inner = _assert_outer_shape(root, "default", "chat2")
 
-    assert [type(c) for c in inner.children] == [ClearOutcomeNode, AdvertiseInteractionNode]
+    assert [type(c) for c in inner.children] == [ClearOutcomeNode, SeekNode]
 
 
-def test_object_nav_only_shape(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
+def test_service_offer_has_no_resolve(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
     step = StepDef(
-        target_object_type="fountain",
-        duration=ParamDist(1.5),
-        satisfies={"thirst": 2.0},
+        interaction="SERVICE",
+        target="water",
+        offer=True,
+        min_participants=1,
+        max_participants=3,
+        queueable=True,
     )
-    sequences = {"default": SequenceDef(steps={"visit": step})}
+    sequences = {"default": SequenceDef(steps={"vend": step})}
     agent_type = _agent_type(sequences)
-    agent = agent_factory(agent_id=5)
+    agent = agent_factory(agent_id=25)
 
     root = _compiled_root(agent_type, agent, world, event_bus, rng_np)
-    _, inner = _assert_outer_shape(root, "default", "visit")
+    _, inner = _assert_outer_shape(root, "default", "vend")
 
-    child_types = [type(c) for c in inner.children]
-    assert child_types == [ClearOutcomeNode, ResolveObjectNode, GoToNode, HoldNode, SatisfyNode]
-    assert [c.name for c in inner.children] == [
-        "default/visit/clear_outcome",
-        "default/visit/resolve_object",
-        "default/visit/go_to",
-        "default/visit/hold",
-        "default/visit/satisfy",
-    ]
+    assert [type(c) for c in inner.children] == [ClearOutcomeNode, SeekNode]
 
 
-def test_object_nav_only_no_duration_no_satisfy(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
-    step = StepDef(target_object_type="fountain")
-    sequences = {"default": SequenceDef(steps={"visit2": step})}
+def test_cancel_step_shape(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
+    step = StepDef(cancel=True, satisfies={"boredom": 1.0})
+    sequences = {"default": SequenceDef(steps={"bail": step})}
     agent_type = _agent_type(sequences)
-    agent = agent_factory(agent_id=6)
+    agent = agent_factory(agent_id=30)
 
     root = _compiled_root(agent_type, agent, world, event_bus, rng_np)
-    _, inner = _assert_outer_shape(root, "default", "visit2")
+    _, inner = _assert_outer_shape(root, "default", "bail")
 
-    assert [type(c) for c in inner.children] == [ClearOutcomeNode, ResolveObjectNode, GoToNode]
+    assert [type(c) for c in inner.children] == [ClearOutcomeNode, CancelNode, SatisfyNode]
+
+
+def test_cancel_step_minimal(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
+    step = StepDef(cancel=True)
+    sequences = {"default": SequenceDef(steps={"bail2": step})}
+    agent_type = _agent_type(sequences)
+    agent = agent_factory(agent_id=31)
+
+    root = _compiled_root(agent_type, agent, world, event_bus, rng_np)
+    _, inner = _assert_outer_shape(root, "default", "bail2")
+
+    assert [type(c) for c in inner.children] == [ClearOutcomeNode, CancelNode]
 
 
 def test_pure_wait_shape(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
@@ -263,53 +281,10 @@ def test_pure_wait_no_satisfy(agent_factory: Callable[..., BaseAgent], world: Wo
     assert [type(c) for c in inner.children] == [ClearOutcomeNode, HoldNode]
 
 
-def test_accept_step_shape(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
-    step = StepDef(
-        accept=True,
-        interaction="SERVICE",
-        service_tag="water",
-        patience=ParamDist(30.0),
-        satisfies={"thirst": 20.0},
-    )
-    sequences = {"default": SequenceDef(steps={"vend": step})}
-    agent_type = _agent_type(sequences)
-    agent = agent_factory(agent_id=9)
-
-    root = _compiled_root(agent_type, agent, world, event_bus, rng_np)
-    _, inner = _assert_outer_shape(root, "default", "vend")
-
-    child_types = [type(c) for c in inner.children]
-    assert child_types == [ClearOutcomeNode, AcceptInteractionNode, SatisfyNode]
-    assert [c.name for c in inner.children] == [
-        "default/vend/clear_outcome",
-        "default/vend/accept",
-        "default/vend/satisfy",
-    ]
-
-    accept_node = inner.children[1]
-    assert isinstance(accept_node, AcceptInteractionNode)
-    assert accept_node._interaction == "SERVICE"
-    assert accept_node._service_tag == "water"
-
-
-def test_accept_step_no_satisfy(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
-    step = StepDef(accept=True, interaction="TALK_TO", patience=ParamDist(10.0))
-    sequences = {"default": SequenceDef(steps={"greet": step})}
-    agent_type = _agent_type(sequences)
-    agent = agent_factory(agent_id=10)
-
-    root = _compiled_root(agent_type, agent, world, event_bus, rng_np)
-    _, inner = _assert_outer_shape(root, "default", "greet")
-
-    assert [type(c) for c in inner.children] == [ClearOutcomeNode, AcceptInteractionNode]
-    accept_node = inner.children[1]
-    assert isinstance(accept_node, AcceptInteractionNode)
-    assert accept_node._service_tag is None
-
-
 def test_block_step_shape(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
     step = StepDef(
-        target_agent=99,
+        interaction="BLOCK",
+        target=99,
         duration=ParamDist(5.0),
         patience=ParamDist(15.0),
         satisfies={"mischief": 10.0},
@@ -335,12 +310,10 @@ def test_block_step_shape(agent_factory: Callable[..., BaseAgent], world: WorldK
 
 
 def test_block_step_requires_agent_lookup(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
-    step = StepDef(target_agent=99)
+    step = StepDef(interaction="BLOCK", target=99)
     sequences = {"default": SequenceDef(steps={"pursue": step})}
     agent_type = _agent_type(sequences)
     agent = agent_factory(agent_id=11)
 
     with pytest.raises(ValueError, match="agent_lookup"):
         _compiled_root(agent_type, agent, world, event_bus, rng_np, agent_lookup=None)
-
-

@@ -76,7 +76,7 @@ def _read_bag(bag_dir: Path) -> tuple[Geometry, list[Frame]]:
             geometry.obstacles = [((o.pose.x, o.pose.y, o.pose.theta), (o.bb_x_min, o.bb_x_max, o.bb_y_min, o.bb_y_max)) for o in msg.obstacles]
             geometry.world_objects = [(o.object_id, o.type, o.pose.x, o.pose.y) for o in msg.world_objects]
         elif topic.endswith("agent_states"):
-            agents = [(int(a.agent_id), a.pose.x, a.pose.y, a.pose.theta, a.velocity.x, a.velocity.y, getattr(a, "policy", "") or "", int(getattr(a, "kind", 0))) for a in msg.agents]
+            agents = [(int(a.agent_id), a.pose.x, a.pose.y, a.pose.theta, a.velocity.x, a.velocity.y, a.policy or "", int(a.kind)) for a in msg.agents]
             frames.append(Frame(t_ns=t_ns, agents=agents))
 
     return geometry, frames

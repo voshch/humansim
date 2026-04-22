@@ -84,10 +84,11 @@ def _serialize_agent(agent: AgentState) -> dict[str, object]:
 
 
 def _serialize_interaction(interaction: InteractionState) -> dict[str, object]:
+    state = {k: v for k, v in interaction.state.items() if not k.startswith("_") and isinstance(v, (str, int, float, bool, type(None), list, dict))}
     return {
         "type": int(interaction.type),
         "participants": list(interaction.participants),
-        "state": interaction.state,
+        "state": state,
     }
 
 

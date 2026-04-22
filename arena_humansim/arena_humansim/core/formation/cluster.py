@@ -5,7 +5,7 @@ import math
 import attrs
 
 from arena_humansim.utils import DISTANCE_TOLERANCE
-from arena_humansim.utils.types import Pose2D
+from arena_humansim.utils.types import Pose2D, pose_distance
 
 from . import AgentLookup, Formation
 from .anchor import Anchor
@@ -69,7 +69,7 @@ class ClusterFormation(Formation):
         for s in self._slots:
             if s.agent_id is not None:
                 continue
-            d = math.hypot(s.pose.x - ap.x, s.pose.y - ap.y)
+            d = pose_distance(s.pose, ap)
             if d < best_d:
                 best_d = d
                 best = s
@@ -103,4 +103,4 @@ class ClusterFormation(Formation):
         if agent is None:
             return True
         pose = agent.state.pose
-        return math.hypot(pose.x - slot.pose.x, pose.y - slot.pose.y) < DISTANCE_TOLERANCE
+        return pose_distance(pose, slot.pose) < DISTANCE_TOLERANCE

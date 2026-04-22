@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING
 
 import numpy as np
 import py_trees
@@ -7,19 +8,21 @@ from rclpy.logging import get_logger
 
 from arena_humansim.core.agents import AgentType, BaseAgent
 from arena_humansim.core.agents.types import ActionDef, GoToStepDef, StepDef
+from arena_humansim.core.interaction_kinds import InteractionType, is_object_bound_name
+from arena_humansim.core.interaction_manager import InteractionManager
+from arena_humansim.core.pool import AgentPool
 from arena_humansim.core.world_knowledge import WorldKnowledge
 from arena_humansim.utils.event_bus import EventBus
-
-if TYPE_CHECKING:
-    from arena_humansim.core.pool import AgentPool
+from arena_humansim.utils.types import SeekSpec
 
 _logger = get_logger("behavior_compiler")
 
+IsBoundLookup = Callable[[int], bool]
+
 from .nodes import (
-    AcceptInteractionNode,
-    AdvertiseInteractionNode,
     AutonomousNode,
     BlockNode,
+    CancelNode,
     ClearOutcomeNode,
     GoToNode,
     HoldNode,
@@ -27,11 +30,12 @@ from .nodes import (
     PatienceWatchdogNode,
     ResolveObjectNode,
     SatisfyNode,
+    SeekNode,
     SequenceStateMachine,
 )
 from .step_context import StepContext
 
-AgentLookup = Callable[[int], "BaseAgent | None"]
+AgentLookup = Callable[[int], BaseAgent | None]
 
 
 def _watched(node_name: str, watchdog: py_trees.behaviour.Behaviour, sequence_children: list[py_trees.behaviour.Behaviour]) -> py_trees.composites.Parallel:
@@ -53,10 +57,14 @@ def _expand_go_to_step(
     node_name: str,
     step: GoToStepDef,
     agent: BaseAgent,
+    world: WorldKnowledge,
     rng: np.random.Generator,
     dt: float,
-    pool: "AgentPool | None" = None,
+    pool: AgentPool | None = None,
+    is_bound_lookup: IsBoundLookup | None = None,
+    im: InteractionManager | None = None,
 ) -> py_trees.composites.Parallel:
+    ctx = StepContext(is_bound_lookup=is_bound_lookup, im=im)
     watchdog = PatienceWatchdogNode(
         name=f"{node_name}/watchdog",
         patience_source=step.patience,
@@ -65,25 +73,41 @@ def _expand_go_to_step(
     )
     children: list[py_trees.behaviour.Behaviour] = [
         ClearOutcomeNode(name=f"{node_name}/clear_outcome", agent=agent),
-        GoToNode(name=f"{node_name}/go_to", agent=agent, target_pose=step.target_pose, pool=pool),
     ]
+    if step.target is not None:
+        children.extend(
+            [
+                ResolveObjectNode(
+                    name=f"{node_name}/resolve_object",
+                    agent=agent,
+                    world=world,
+                    target=step.target,
+                    ctx=ctx,
+                ),
+                GoToNode(name=f"{node_name}/go_to", agent=agent, ctx=ctx, world=world, pool=pool),
+            ]
+        )
+    else:
+        children.append(GoToNode(name=f"{node_name}/go_to", agent=agent, target_pose=step.target_pose, pool=pool))
     if step.duration is not None:
-        children.append(HoldNode(name=f"{node_name}/hold", agent=agent, duration_source=step.duration, rng=rng, dt=dt))
+        children.append(HoldNode(name=f"{node_name}/hold", agent=agent, duration_source=step.duration, rng=rng, dt=dt, ctx=ctx))
     if step.satisfies:
         children.append(SatisfyNode(name=f"{node_name}/satisfy", agent=agent, satisfies=step.satisfies))
     return _watched(node_name, watchdog, children)
 
 
-def _expand_object_interaction_step(
+def _expand_interaction_step(
     node_name: str,
     step: StepDef,
     agent: BaseAgent,
     world: WorldKnowledge,
     rng: np.random.Generator,
     dt: float,
+    is_bound_lookup: IsBoundLookup | None = None,
+    im: InteractionManager | None = None,
 ) -> py_trees.composites.Parallel:
-    assert step.interaction is not None, "_expand_object_interaction_step requires step.interaction"
-    ctx = StepContext()
+    assert step.interaction is not None, "_expand_interaction_step requires step.interaction"
+    ctx = StepContext(is_bound_lookup=is_bound_lookup, im=im)
     watchdog = PatienceWatchdogNode(
         name=f"{node_name}/watchdog",
         patience_source=step.patience,
@@ -93,66 +117,42 @@ def _expand_object_interaction_step(
     children: list[py_trees.behaviour.Behaviour] = [
         ClearOutcomeNode(name=f"{node_name}/clear_outcome", agent=agent),
     ]
-    if step.target_object_type or step.target_object_id:
-        children.extend([
-            ResolveObjectNode(
-                name=f"{node_name}/resolve_object",
-                agent=agent,
-                world=world,
-                target_object_type=step.target_object_type,
-                target_object_id=step.target_object_id,
-                ctx=ctx,
-                step_interaction_radius=step.interaction_radius,
-                interaction_name=step.interaction,
-            ),
-            GoToNode(name=f"{node_name}/go_to", agent=agent, ctx=ctx, world=world),
-        ])
+    object_bound = is_object_bound_name(step.interaction) and step.target is not None
+    if object_bound:
+        children.extend(
+            [
+                ResolveObjectNode(
+                    name=f"{node_name}/resolve_object",
+                    agent=agent,
+                    world=world,
+                    target=step.target,
+                    ctx=ctx,
+                    step_interaction_radius=step.interaction_radius,
+                    interaction_name=step.interaction,
+                ),
+                GoToNode(name=f"{node_name}/go_to", agent=agent, ctx=ctx, world=world),
+            ]
+        )
+    spec = SeekSpec(
+        interaction_type=InteractionType[step.interaction],
+        target=step.target,
+        offer=step.offer,
+        min_participants=step.min_participants,
+        max_participants=step.max_participants,
+        queueable=step.queueable,
+        formation_spec=step.formation_spec,
+    )
     children.append(
-        AdvertiseInteractionNode(
-            name=f"{node_name}/advertise",
+        SeekNode(
+            name=f"{node_name}/seek",
             agent=agent,
-            interaction=step.interaction,
+            spec=spec,
             ctx=ctx,
             duration_source=step.duration,
             rng=rng,
+            wait_for_outcome=step.wait_for_outcome,
         )
     )
-    if step.satisfies:
-        children.append(SatisfyNode(name=f"{node_name}/satisfy", agent=agent, satisfies=step.satisfies))
-    return _watched(node_name, watchdog, children)
-
-
-def _expand_object_nav_step(
-    node_name: str,
-    step: StepDef,
-    agent: BaseAgent,
-    world: WorldKnowledge,
-    rng: np.random.Generator,
-    dt: float,
-) -> py_trees.composites.Parallel:
-    ctx = StepContext()
-    watchdog = PatienceWatchdogNode(
-        name=f"{node_name}/watchdog",
-        patience_source=step.patience,
-        rng=rng,
-        dt=dt,
-    )
-    children: list[py_trees.behaviour.Behaviour] = [
-        ClearOutcomeNode(name=f"{node_name}/clear_outcome", agent=agent),
-        ResolveObjectNode(
-            name=f"{node_name}/resolve_object",
-            agent=agent,
-            world=world,
-            target_object_type=step.target_object_type,
-            target_object_id=step.target_object_id,
-            ctx=ctx,
-            step_interaction_radius=step.interaction_radius,
-            interaction_name=step.interaction,
-        ),
-        GoToNode(name=f"{node_name}/go_to", agent=agent, ctx=ctx, world=world),
-    ]
-    if step.duration is not None:
-        children.append(HoldNode(name=f"{node_name}/hold", agent=agent, duration_source=step.duration, rng=rng, dt=dt))
     if step.satisfies:
         children.append(SatisfyNode(name=f"{node_name}/satisfy", agent=agent, satisfies=step.satisfies))
     return _watched(node_name, watchdog, children)
@@ -164,7 +164,10 @@ def _expand_pure_wait_step(
     agent: BaseAgent,
     rng: np.random.Generator,
     dt: float,
+    is_bound_lookup: IsBoundLookup | None = None,
+    im: InteractionManager | None = None,
 ) -> py_trees.composites.Parallel:
+    ctx = StepContext(is_bound_lookup=is_bound_lookup, im=im)
     watchdog = PatienceWatchdogNode(
         name=f"{node_name}/watchdog",
         patience_source=step.patience,
@@ -173,21 +176,21 @@ def _expand_pure_wait_step(
     )
     children: list[py_trees.behaviour.Behaviour] = [
         ClearOutcomeNode(name=f"{node_name}/clear_outcome", agent=agent),
-        HoldNode(name=f"{node_name}/hold", agent=agent, duration_source=step.duration, rng=rng, dt=dt),
+        HoldNode(name=f"{node_name}/hold", agent=agent, duration_source=step.duration, rng=rng, dt=dt, ctx=ctx),
     ]
     if step.satisfies:
         children.append(SatisfyNode(name=f"{node_name}/satisfy", agent=agent, satisfies=step.satisfies))
     return _watched(node_name, watchdog, children)
 
 
-def _expand_accept_step(
+def _expand_cancel_step(
     node_name: str,
     step: StepDef,
     agent: BaseAgent,
     rng: np.random.Generator,
     dt: float,
+    im: InteractionManager | None = None,
 ) -> py_trees.composites.Parallel:
-    assert step.interaction is not None, "_expand_accept_step requires step.interaction"
     watchdog = PatienceWatchdogNode(
         name=f"{node_name}/watchdog",
         patience_source=step.patience,
@@ -196,14 +199,7 @@ def _expand_accept_step(
     )
     children: list[py_trees.behaviour.Behaviour] = [
         ClearOutcomeNode(name=f"{node_name}/clear_outcome", agent=agent),
-        AcceptInteractionNode(
-            name=f"{node_name}/accept",
-            agent=agent,
-            interaction=step.interaction,
-            duration_source=step.duration,
-            rng=rng,
-            service_tag=step.service_tag,
-        ),
+        CancelNode(name=f"{node_name}/cancel", agent=agent, im=im),
     ]
     if step.satisfies:
         children.append(SatisfyNode(name=f"{node_name}/satisfy", agent=agent, satisfies=step.satisfies))
@@ -217,8 +213,10 @@ def _expand_block_step(
     agent_lookup: AgentLookup,
     rng: np.random.Generator,
     dt: float,
+    im: InteractionManager | None = None,
 ) -> py_trees.composites.Parallel:
-    assert step.target_agent is not None, "_expand_block_step requires step.target_agent"
+    assert isinstance(step.target, int), "_expand_block_step requires step.target: int"
+    ctx = StepContext(im=im)
     watchdog = PatienceWatchdogNode(
         name=f"{node_name}/watchdog",
         patience_source=step.patience,
@@ -230,10 +228,11 @@ def _expand_block_step(
         BlockNode(
             name=f"{node_name}/block",
             agent=agent,
-            target_agent_id=step.target_agent,
+            target_agent_id=step.target,
             agent_lookup=agent_lookup,
             duration_source=step.duration,
             rng=rng,
+            ctx=ctx,
         ),
     ]
     if step.satisfies:
@@ -251,10 +250,10 @@ class _StepRecipe:
         self.action_defs = action_defs
         self.utility_weights = utility_weights
 
-    def build(self, agent: BaseAgent, world: WorldKnowledge, event_bus: EventBus, rng: np.random.Generator, dt: float, agent_lookup: AgentLookup | None = None, pool: "AgentPool | None" = None) -> py_trees.behaviour.Behaviour:
+    def build(self, agent: BaseAgent, world: WorldKnowledge, event_bus: EventBus, rng: np.random.Generator, dt: float, agent_lookup: AgentLookup | None = None, pool: AgentPool | None = None, is_bound_lookup: IsBoundLookup | None = None, im: InteractionManager | None = None) -> py_trees.behaviour.Behaviour:
         step = self.step_def
         if isinstance(step, GoToStepDef):
-            return _expand_go_to_step(self.node_name, step, agent, rng, dt, pool=pool)
+            return _expand_go_to_step(self.node_name, step, agent, world, rng, dt, pool=pool, is_bound_lookup=is_bound_lookup, im=im)
         if step.autonomous:
             return AutonomousNode(
                 name=self.node_name,
@@ -267,17 +266,15 @@ class _StepRecipe:
                 rng=rng,
                 dt=dt,
             )
-        if step.accept:
-            return _expand_accept_step(self.node_name, step, agent, rng, dt)
-        if step.target_agent is not None:
+        if step.cancel:
+            return _expand_cancel_step(self.node_name, step, agent, rng, dt, im=im)
+        if step.interaction == "BLOCK":
             if agent_lookup is None:
-                raise ValueError(f"{self.node_name}: target_agent requires agent_lookup to be threaded into BehaviorTreeFactory.build")
-            return _expand_block_step(self.node_name, step, agent, agent_lookup, rng, dt)
+                raise ValueError(f"{self.node_name}: interaction BLOCK requires agent_lookup to be threaded into BehaviorTreeFactory.build")
+            return _expand_block_step(self.node_name, step, agent, agent_lookup, rng, dt, im=im)
         if step.interaction is not None:
-            return _expand_object_interaction_step(self.node_name, step, agent, world, rng, dt)
-        if step.target_object_type or step.target_object_id:
-            return _expand_object_nav_step(self.node_name, step, agent, world, rng, dt)
-        return _expand_pure_wait_step(self.node_name, step, agent, rng, dt)
+            return _expand_interaction_step(self.node_name, step, agent, world, rng, dt, is_bound_lookup=is_bound_lookup, im=im)
+        return _expand_pure_wait_step(self.node_name, step, agent, rng, dt, is_bound_lookup=is_bound_lookup, im=im)
 
 
 class BehaviorTreeFactory:
@@ -319,11 +316,13 @@ class BehaviorTreeFactory:
         rng: np.random.Generator,
         dt: float,
         agent_lookup: AgentLookup | None = None,
-        pool: "AgentPool | None" = None,
+        pool: AgentPool | None = None,
+        is_bound_lookup: IsBoundLookup | None = None,
+        im: InteractionManager | None = None,
     ) -> py_trees.trees.BehaviourTree:
         compiled_sequences: dict[str, py_trees.behaviour.Behaviour] = {}
         for seq_name, recipes in self._seq_recipes.items():
-            children = [r.build(agent, world, event_bus, rng, dt, agent_lookup, pool) for r in recipes]
+            children = [r.build(agent, world, event_bus, rng, dt, agent_lookup, pool, is_bound_lookup, im) for r in recipes]
             if len(children) == 1:
                 compiled_sequences[seq_name] = children[0]
             else:
@@ -339,6 +338,7 @@ class BehaviorTreeFactory:
             sequence_defs=self._sequence_defs,
             initial=self._initial,
             agent=agent,
+            im=im,
         )
 
         if self._has_needs and agent.needs is not None:
@@ -364,7 +364,9 @@ def compile_agent_behavior(
     rng: np.random.Generator,
     dt: float,
     agent_lookup: AgentLookup | None = None,
-    pool: "AgentPool | None" = None,
+    pool: AgentPool | None = None,
+    is_bound_lookup: IsBoundLookup | None = None,
+    im: InteractionManager | None = None,
 ) -> py_trees.trees.BehaviourTree | None:
     if agent_type.mode == "simple":
         _logger.debug(f"Agent {agent.state.agent_id} ({agent_type.name}): simple mode, no behavior tree")
@@ -374,6 +376,6 @@ def compile_agent_behavior(
         return None
 
     factory = BehaviorTreeFactory(agent_type)
-    bt = factory.build(agent, world, event_bus, rng, dt, agent_lookup, pool)
+    bt = factory.build(agent, world, event_bus, rng, dt, agent_lookup, pool, is_bound_lookup, im=im)
     _logger.debug(f"Agent {agent.state.agent_id} ({agent_type.name}): compiled {len(agent_type.sequences)} sequence(s), initial={agent_type.initial_sequence}")
     return bt

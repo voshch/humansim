@@ -125,5 +125,3 @@ def test_robot_teleport_only_policy_stays_still_until_feedback(manager_factory: 
     mgr.tick()
     vx, vy = _vel_of(mgr, aid)
     assert abs(vx) < 1e-9 and abs(vy) < 1e-9
-
-

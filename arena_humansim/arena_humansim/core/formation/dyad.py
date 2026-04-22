@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 
 from arena_humansim.utils import DISTANCE_TOLERANCE
-from arena_humansim.utils.types import Pose2D
+from arena_humansim.utils.types import Pose2D, pose_distance
 
 from . import AgentLookup, Formation
 from .anchor import Anchor
@@ -76,4 +76,4 @@ class DyadFormation(Formation):
         if agent is None:
             return True
         pose = agent.state.pose
-        return math.hypot(pose.x - slot.x, pose.y - slot.y) < DISTANCE_TOLERANCE
+        return pose_distance(pose, slot) < DISTANCE_TOLERANCE

@@ -1,0 +1,255 @@
+"""InteractionType enum and per-type registry: handle addressing, contract defaults, formation defaults."""
+
+from __future__ import annotations
+
+import enum
+import functools
+from typing import TYPE_CHECKING
+
+import attrs
+
+from arena_humansim.utils.const import DISTANCE_TOLERANCE
+from arena_humansim.utils.types import AnchorKind, FormationSpec
+
+if TYPE_CHECKING:
+    from arena_humansim.core.interaction_manager import InteractionManager
+    from arena_humansim.utils.types import InteractionState, SeekSpec
+
+
+class InteractionType(enum.IntEnum):
+    # Values are persisted in logs/replays — never reassign or reuse an index.
+    TALK_TO = 0
+    GROUP_CONVERSATION = 1
+    SIT_ON = 3
+    LIE_ON = 4
+    USE = 5
+    QUEUE_USE = 6
+    WAVE_AT = 7
+    BLOCK = 8
+    SERVICE = 9
+
+    @property
+    def kind(self) -> InteractionKind:
+        return _registry()[self]
+
+    @property
+    def is_object_bound(self) -> bool:
+        return self.kind.is_object_bound
+
+
+class HandleKind(enum.Enum):
+    NONE = "none"
+    TAG = "tag"
+    AGENT = "agent"
+    OBJECT = "object"
+
+
+class AccessKind(enum.StrEnum):
+    FIFO = "fifo"
+
+
+class MembershipRole(enum.IntEnum):
+    PARTICIPANT = 0
+    QUEUED = 1
+
+
+class HandleStrategy:
+    target_shape: tuple[type, ...] = ()
+    target_required_for_create: bool = False
+    offer_required_for_create: bool = False
+
+    def matches(self, interaction: InteractionState, spec: SeekSpec) -> bool:
+        raise NotImplementedError
+
+    def find(self, im: InteractionManager, spec: SeekSpec, agent_id: int) -> int | None:
+        raise NotImplementedError
+
+    def can_create(self, im: InteractionManager, spec: SeekSpec, agent_id: int) -> bool:
+        if self.offer_required_for_create and not spec.offer:
+            return False
+        if self.target_required_for_create and not isinstance(spec.target, self.target_shape):
+            return False
+        return True
+
+    def populate_state(self, state: dict, target: str | int | None, creator_id: int) -> str | None:
+        return None
+
+
+@attrs.frozen
+class HandleSpec:
+    kind: HandleKind
+    state_key: str | None = None
+    strategy: HandleStrategy = attrs.field(factory=lambda: HandleStrategy())
+
+
+@attrs.frozen
+class ContractDefaults:
+    min_participants: int
+    max_participants: int
+    queueable: bool = False
+    access: AccessKind | None = None
+
+
+@attrs.frozen
+class InteractionKind:
+    handle: HandleSpec
+    contract_defaults: ContractDefaults
+    formation_default: FormationSpec | None = None
+    allows_offer: bool = False
+    interaction_radius: float = DISTANCE_TOLERANCE
+
+    @property
+    def is_object_bound(self) -> bool:
+        return self.handle.kind == HandleKind.OBJECT
+
+
+def _fs(type_: str, anchor_kind: AnchorKind, params: dict[str, float] | None = None) -> FormationSpec:
+    return FormationSpec(type=type_, params=dict(params or {}), anchor_kind=anchor_kind)
+
+
+class _NoneStrategy(HandleStrategy):
+    # Target must be omitted for symmetric interactions (TALK_TO / GROUP_CONVERSATION / WAVE_AT).
+    target_shape = ()
+    target_required_for_create = False
+    offer_required_for_create = False
+
+    def matches(self, interaction: InteractionState, spec: SeekSpec) -> bool:
+        return interaction.type == int(spec.interaction_type)
+
+    def find(self, im: InteractionManager, spec: SeekSpec, agent_id: int) -> int | None:
+        return im._scan_symmetric(spec, agent_id)
+
+
+class _TagStrategy(HandleStrategy):
+    target_shape = (str,)
+    target_required_for_create = False  # target presence is enforced only for offer=True (checked by loader)
+    offer_required_for_create = True
+
+    def matches(self, interaction: InteractionState, spec: SeekSpec) -> bool:
+        if spec.target is not None and interaction.service_tag != spec.target:
+            return False
+        return True
+
+    def find(self, im: InteractionManager, spec: SeekSpec, agent_id: int) -> int | None:
+        return im._scan_tag(spec, agent_id)
+
+    def populate_state(self, state: dict, target: str | int | None, creator_id: int) -> str | None:
+        if isinstance(target, str):
+            state["service_tag"] = target
+        return None
+
+
+class _AgentStrategy(HandleStrategy):
+    target_shape = (int,)
+    target_required_for_create = True
+    offer_required_for_create = False
+
+    def matches(self, interaction: InteractionState, spec: SeekSpec) -> bool:
+        return interaction.target_agent == spec.target
+
+    def find(self, im: InteractionManager, spec: SeekSpec, agent_id: int) -> int | None:
+        return im._scan_agent(spec, agent_id)
+
+    def can_create(self, im: InteractionManager, spec: SeekSpec, agent_id: int) -> bool:
+        del im, agent_id
+        return isinstance(spec.target, int) and spec.target >= 0
+
+    def populate_state(self, state: dict, target: str | int | None, creator_id: int) -> str | None:
+        del creator_id
+        if isinstance(target, int) and target >= 0:
+            state["target_agent"] = target
+        return None
+
+
+class _ObjectStrategy(HandleStrategy):
+    target_shape = (str,)
+    target_required_for_create = True
+    offer_required_for_create = False
+
+    def matches(self, interaction: InteractionState, spec: SeekSpec) -> bool:
+        if interaction.object_id is None or spec.target is None:
+            return False
+        if interaction.object_id == spec.target:
+            return True
+        return interaction.object_type == spec.target
+
+    def find(self, im: InteractionManager, spec: SeekSpec, agent_id: int) -> int | None:
+        return im._find_object_bound(spec, agent_id)
+
+    def can_create(self, im: InteractionManager, spec: SeekSpec, agent_id: int) -> bool:
+        if not isinstance(spec.target, str) or im._world_knowledge is None:
+            return False
+        return im._world_knowledge.resolve(spec.target, im._pose_lookup(agent_id), exclude_full=False) is not None
+
+    def populate_state(self, state: dict, target: str | int | None, creator_id: int) -> str | None:
+        del state, creator_id
+        return target if isinstance(target, str) else None
+
+
+_SYMMETRIC_HANDLE = HandleSpec(kind=HandleKind.NONE, strategy=_NoneStrategy())
+# OBJECT writes to InteractionState.object_id directly, not into state[]; no state_key.
+_OBJECT_HANDLE = HandleSpec(kind=HandleKind.OBJECT, strategy=_ObjectStrategy())
+_AGENT_HANDLE = HandleSpec(kind=HandleKind.AGENT, state_key="target_agent", strategy=_AgentStrategy())
+_TAG_HANDLE = HandleSpec(kind=HandleKind.TAG, state_key="service_tag", strategy=_TagStrategy())
+
+
+@functools.cache
+def _registry() -> dict[InteractionType, InteractionKind]:
+    return {
+        InteractionType.TALK_TO: InteractionKind(
+            handle=_SYMMETRIC_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=2, max_participants=2, queueable=False),
+            formation_default=_fs("dyad", AnchorKind.CENTROID),
+            interaction_radius=2.0,
+        ),
+        InteractionType.GROUP_CONVERSATION: InteractionKind(
+            handle=_SYMMETRIC_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=2, max_participants=-1, queueable=False),
+            formation_default=_fs("f_formation", AnchorKind.CENTROID),
+            interaction_radius=3.0,
+        ),
+        InteractionType.SIT_ON: InteractionKind(
+            handle=_OBJECT_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=1, max_participants=1, queueable=True, access=AccessKind.FIFO),
+            formation_default=_fs("cluster", AnchorKind.OBJECT),
+        ),
+        InteractionType.LIE_ON: InteractionKind(
+            handle=_OBJECT_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=1, max_participants=1, queueable=True, access=AccessKind.FIFO),
+            formation_default=_fs("cluster", AnchorKind.OBJECT),
+        ),
+        InteractionType.USE: InteractionKind(
+            handle=_OBJECT_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=1, max_participants=1, queueable=True, access=AccessKind.FIFO),
+            formation_default=None,
+        ),
+        InteractionType.QUEUE_USE: InteractionKind(
+            handle=_OBJECT_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=1, max_participants=1, queueable=True, access=AccessKind.FIFO),
+            formation_default=_fs("line", AnchorKind.OBJECT, {"base_step": 1.0}),
+        ),
+        InteractionType.WAVE_AT: InteractionKind(
+            handle=_SYMMETRIC_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=2, max_participants=2, queueable=False),
+            formation_default=None,
+        ),
+        InteractionType.BLOCK: InteractionKind(
+            handle=_AGENT_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=1, max_participants=2, queueable=False),
+            formation_default=None,
+        ),
+        InteractionType.SERVICE: InteractionKind(
+            handle=_TAG_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=1, max_participants=-1, queueable=True, access=AccessKind.FIFO),
+            formation_default=_fs("f_formation", AnchorKind.PROVIDER),
+            allows_offer=True,
+            interaction_radius=3.0,
+        ),
+    }
+
+
+def is_object_bound_name(interaction_name: str) -> bool:
+    try:
+        return InteractionType[interaction_name].is_object_bound
+    except KeyError:
+        return False
