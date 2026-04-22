@@ -8,6 +8,10 @@ There are no `ADVERTISE` / `accept` phases anymore — `AdvertiseInteractionNode
 
 Every interaction is driven by one BT node: `SeekNode`. It emits `SEEK`; the interaction manager (via `_handle_seek` and the per-`HandleKind` strategy in [../../core/interaction_kinds.py](../../core/interaction_kinds.py)) either joins a matching open interaction or, if creation is allowed for this `InteractionKind`, creates one. `CancelNode` tears an interaction down (STOP with `reason=CANCELED`).
 
+### Symmetric seek migration (`HandleKind.NONE`)
+
+For symmetric types (peer-to-peer, no service tag or object anchor — e.g. `GROUP_CONVERSATION`, `TALK_TO`), a solo 1p FORMING owner does **not** short-circuit on its own interaction. `seek()` still runs the strategy's `find()` each tick so a better-populated peer can take over. If a peer's matching interaction is discovered, the agent is silently removed from its own FORMING via `_detach_quiet` and `accept`ed into the peer's — no `INTERRUPTED` is emitted on `BehaviorTreeMovement.last_outcome`, so `SeekNode` stays `RUNNING` through the handoff instead of failing. If the detached interaction ends up empty with no queue, it collapses to `INTERRUPTED` as bookkeeping but never reaches the BT. Asymmetric types (`TAG` / `AGENT` / `OBJECT`) short-circuit on the agent's own FORMING — that interaction is their offer or reservation, not a placeholder to swap out of.
+
 ## Compiler dispatch
 
 | Flags on the step | Compiled inner sequence |
