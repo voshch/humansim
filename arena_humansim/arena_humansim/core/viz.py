@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from builtin_interfaces.msg import Time
 from geometry_msgs.msg import Point
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import ColorRGBA
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -21,6 +22,20 @@ if TYPE_CHECKING:
     from arena_humansim.utils.types import HighLevelCommand, InteractionState, Pose2D, Shape, SinkConfig, SourceConfig
 
 _FRAME = "map"
+
+_STATIC_NS = frozenset(
+    {
+        "sources",
+        "src_label",
+        "sinks",
+        "sink_label",
+        "walls",
+        "world_obj",
+        "world_obj_label",
+        "obstacles",
+        "obstacle_label",
+    }
+)
 
 
 def rgba(r: float, g: float, b: float, a: float = 1.0) -> ColorRGBA:
@@ -179,6 +194,11 @@ class MarkerPublisher:
     def __init__(self, node: Node):
         self._node = node
         self._pub = node.create_publisher(MarkerArray, "viz", 100)
+        self._pub_static = node.create_publisher(
+            MarkerArray,
+            "viz_static",
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL),
+        )
         self._scene: dict[tuple[str, int], Marker] = {}
         self._pool: dict[str, list[Marker]] = {}
         self._touched: set[tuple[str, int]] = set()
@@ -223,7 +243,9 @@ class MarkerPublisher:
         stamp = self._stamp()
         stale = [(ns, mid) for ns, mid in self._scene if ns in self._touched_ns and (ns, mid) not in self._touched]
 
-        deletes: list[Marker] = []
+        static_changed = False
+        dyn_deletes: list[Marker] = []
+        static_deletes: list[Marker] = []
         for ns, mid in stale:
             del self._scene[(ns, mid)]
             self._dirty.discard((ns, mid))
@@ -233,20 +255,38 @@ class MarkerPublisher:
             m.ns = ns
             m.id = mid
             m.action = Marker.DELETE
-            deletes.append(m)
+            if ns in _STATIC_NS:
+                static_deletes.append(m)
+                static_changed = True
+            else:
+                dyn_deletes.append(m)
 
-        adds: list[Marker] = []
+        dyn_adds: list[Marker] = []
         for key in self._dirty:
+            if key[0] in _STATIC_NS:
+                static_changed = True
+                continue
             m = self._scene[key]
             m.header.stamp = stamp
-            adds.append(m)
+            dyn_adds.append(m)
 
-        if deletes or adds:
-            # One publish per flush, DELETEs first — a split into two messages on a depth-N queue
-            # could drop the DELETEs under load, leaving stale markers in RViz indefinitely.
+        if dyn_deletes or dyn_adds:
+            # DELETEs first — a split into two messages on a depth-N queue could drop the DELETEs
+            # under load, leaving stale markers in RViz indefinitely.
             ma = MarkerArray()
-            ma.markers = deletes + adds
+            ma.markers = dyn_deletes + dyn_adds
             self._pub.publish(ma)
+
+        if static_changed:
+            # Republish full scene so the TRANSIENT_LOCAL retained message stays complete.
+            static_adds: list[Marker] = []
+            for (ns, _mid), m in self._scene.items():
+                if ns in _STATIC_NS:
+                    m.header.stamp = stamp
+                    static_adds.append(m)
+            ma = MarkerArray()
+            ma.markers = static_deletes + static_adds
+            self._pub_static.publish(ma)
 
         self._touched.clear()
         self._touched_ns.clear()
@@ -258,6 +298,7 @@ class MarkerPublisher:
         ma = MarkerArray()
         ma.markers = [m]
         self._pub.publish(ma)
+        self._pub_static.publish(ma)
         self._scene.clear()
         self._pool.clear()
         self._ns_count.clear()
