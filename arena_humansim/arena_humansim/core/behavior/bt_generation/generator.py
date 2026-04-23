@@ -9,15 +9,35 @@ and world semantic information.
 
 import json
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+import attrs
+import cattrs
 import yaml
+from apischema import settings
+from apischema.json_schema import deserialization_schema
+from apischema.objects import ObjectField
 
+from arena_humansim.core.agents.types import AgentType
 from arena_humansim.core.behavior.bt_generation.inference_client import GoogleGenAIClient, OpenAIClient
 from arena_humansim.core.behavior.bt_generation.system_prompts import behavior_tree_generation, spawn_position_selection, zone_selection
 from arena_humansim.utils.scenario import ScenarioConfig
+
+prev_default_object_fields = settings.default_object_fields
+
+
+def attrs_fields(cls: type) -> Sequence[ObjectField] | None:
+    if hasattr(cls, "__attrs_attrs__"):
+        return [ObjectField(a.name, a.type, required=a.default == attrs.NOTHING, default=a.default) for a in cls.__attrs_attrs__]
+
+    else:
+        return prev_default_object_fields(cls)
+
+
+settings.default_object_fields = attrs_fields
 
 
 class GenerationMode(Enum):
@@ -55,56 +75,49 @@ class GenerationContext:
 
 
 class TypeValidator:
-    """Validates and enforces YAML structure for generated scenarios."""
+    """Typed validation + parsing using cattrs."""
+
+    def __init__(self):
+        self.converter = cattrs.Converter()
 
     @staticmethod
-    def validate_agent_type_config(config: dict[str, Any]) -> bool:
-        """Validate agent type configuration structure."""
-        required_fields = ["extends", "mode"]
-        if not all(field in config for field in required_fields):
-            return False
-
-        if config.get("mode") != "behavior_tree":
-            return False
-
-        # Validate sequences structure
-        sequences = config.get("sequences", {})
-        if not isinstance(sequences, dict):
-            return False
-
-        for seq_name, seq_def in sequences.items():
-            if not isinstance(seq_def, dict):
-                return False
-            if "steps" not in seq_def:
-                return False
-
-        return True
-
-    @staticmethod
-    def validate_scenario_config(config: dict[str, Any]) -> bool:
-        """Validate complete scenario configuration."""
-        required_fields = ["name", "simulation", "modules"]
-        if not all(field in config for field in required_fields):
-            return False
-
-        # Validate agent_types if present
-        agent_types = config.get("agent_types", {})
-        for agent_type_name, agent_type_config in agent_types.items():
-            if not TypeValidator.validate_agent_type_config(agent_type_config):
-                return False
-
-        return True
-
-    @staticmethod
-    def repair_yaml(yaml_str: str) -> str:
-        """Attempt to repair common YAML issues in LLM-generated content."""
+    def normalize_yaml_format(yaml_str: str) -> str:
         try:
-            # Parse and re-dump to fix formatting
             data = yaml.safe_load(yaml_str)
             return yaml.dump(data, default_flow_style=False, sort_keys=False)
         except yaml.YAMLError:
-            # If parsing fails, return original
             return yaml_str
+
+    def parse_agent_types(self, yaml_str: str | None) -> dict[str, AgentType]:
+        """
+        Parse and validate agent_types from YAML string.
+
+        Returns:
+            dict[str, AgentType]
+
+        Raises:
+            RuntimeError if parsing or structuring fails
+        """
+        assert yaml_str is not None
+
+        # normalize (optional)
+        yaml_str = self.normalize_yaml_format(yaml_str)
+
+        # YAML to dict
+        try:
+            raw = yaml.safe_load(yaml_str)
+        except yaml.YAMLError as e:
+            print("Raw yaml string:\n", yaml_str)
+            raise RuntimeError("yaml error") from e
+
+        if not isinstance(raw, dict):
+            raise RuntimeError("Agent types YAML must be a dict")
+
+        # dict to typed
+        try:
+            return {name: self.converter.structure(config, AgentType) for name, config in raw.items()}
+        except Exception as e:
+            raise RuntimeError("structure error") from e
 
 
 class LLMBehaviorTreeGenerator:
@@ -113,15 +126,18 @@ class LLMBehaviorTreeGenerator:
     def __init__(self):
         _endpoint = os.environ.get("LLM_API_ENDPOINT")
         if not _endpoint:
-            self.llm_client = GoogleGenAIClient(model="...")
+            self.llm_client = GoogleGenAIClient(model="gemini-3-flash-preview")
         elif _endpoint == "GOOGLEGENAI":
-            self.llm_client = GoogleGenAIClient(model="...")
+            self.llm_client = GoogleGenAIClient(model="gemini-3-flash-preview")
         elif _endpoint == "OPENAI":
             self.llm_client = OpenAIClient(model="...")
         else:
             raise ValueError(f"LLM_API_ENDPOINT must be one of ['GOOGLEGENAI', 'OPENAI'], got {_endpoint}")
 
         self.generated_scenario: str | None = None
+        # Kinda useless for now
+        # I tend to use `TypeValidator` for OpenAI API if I couldn't find a way to use it with apischema
+        self.type_validator = TypeValidator()
 
     def generate_scenario(self, context: GenerationContext) -> dict[str, Any]:
         """
@@ -183,7 +199,10 @@ class LLMBehaviorTreeGenerator:
         """Stage 1: Select relevant semantic zones."""
         system_prompt = zone_selection
         user_prompt = f"Scenario: {context.user_prompt}\nWorld Information:\n{context.world_info.to_text()}\nIdentify the most relevant semantic zones for this scenario."
+
         response = self.llm_client.generate(contents=user_prompt, system_instruction=system_prompt)
+        assert isinstance(response, str)
+
         try:
             zones = json.loads(response)
             return zones if isinstance(zones, list) else []
@@ -196,31 +215,29 @@ class LLMBehaviorTreeGenerator:
         user_prompt = f"Scenario: {context.user_prompt}\nSemantic Zones:\n{json.dumps(zones, indent=2)}\nWorld Information:\n{context.world_info.to_text()}\nSuggest spawn positions for different agent types."
 
         response = self.llm_client.generate(system_prompt, user_prompt)
+        assert isinstance(response, str)
+
         try:
             positions = json.loads(response)
             return positions if isinstance(positions, dict) else {}
         except json.JSONDecodeError:
             return {}
 
-    def _generate_behavior_trees(self, context: GenerationContext, zones: list[dict[str, Any]], spawn_positions: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    def _generate_behavior_trees(self, context: GenerationContext, zones: list[dict[str, Any]], spawn_positions: dict[str, list[dict[str, Any]]]) -> dict[str, AgentType]:
         """Stage 3: Generate behavior trees for agent types."""
         system_prompt = behavior_tree_generation
         user_prompt = f"Scenario: {context.user_prompt}\nSemantic Zones:\n{json.dumps(zones, indent=2)}\nAgent Types and Spawn Positions:\n{json.dumps(spawn_positions, indent=2)}\nWorld Information:\n{context.world_info.to_text()}\nCreate behavior tree configurations for the agent types in this scenario."
 
-        response = self.llm_client.generate(system_prompt, user_prompt)
-        repaired_yaml = TypeValidator.repair_yaml(response)
+        response = self.llm_client.generate(system_prompt, user_prompt, response_json_schema=deserialization_schema(dict[str, AgentType]))
+        assert isinstance(response, dict), f"Parsing error. Got response from LLM: {response}"
 
-        try:
-            agent_types = yaml.safe_load(repaired_yaml)
-            # Validate the generated config
-            if not TypeValidator.validate_scenario_config({"agent_types": agent_types}):
-                print("Warning: Generated agent types failed validation")
-            return agent_types
-        except yaml.YAMLError:
-            print("Warning: Failed to parse generated YAML")
-            return {}
+        for agent_type_name, agent_type in response.items():
+            if not isinstance(agent_type, AgentType) or not isinstance(agent_type_name, str):
+                raise ValueError(f"Parsing error of agent {agent_type_name}. Got response from LLM: {response}")
 
-    def _assemble_scenario(self, context: GenerationContext, agent_types: dict[str, Any], spawn_positions: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+        return response
+
+    def _assemble_scenario(self, context: GenerationContext, agent_types: dict[str, AgentType], spawn_positions: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
         """Stage 4: Assemble complete scenario configuration."""
         scenario = {
             "name": f"generated_{context.user_prompt.replace(' ', '_')[:50]}",

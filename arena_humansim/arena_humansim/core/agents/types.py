@@ -32,7 +32,7 @@ class ParamDist:
     mean: float
     std: float = 0.0
     clip_low: float = 0.01
-    clip_high: float = float("inf")
+    clip_high: float = 1e9  # Infinity won't work for google.genai structured output
 
 
 def _as_paramdist(val: object) -> "ParamDist | None":

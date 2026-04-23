@@ -17,17 +17,7 @@ setup(
         ("share/" + package_name + "/config/scenarios", glob("config/scenarios/*.yaml")),
         ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
     ],
-    install_requires=[
-        "setuptools",
-        "attrs",
-        "cattrs",
-        "pyyaml",
-        "numpy",
-        "scipy",
-        "py_trees",
-        "pyastar2d",
-        "pydantic",
-    ],
+    install_requires=["setuptools", "attrs", "cattrs", "pyyaml", "numpy", "scipy", "py_trees", "pyastar2d", "pydantic", "apischema"],
     extras_require={
         "test": ["pytest>=7", "pytest-xdist", "hypothesis>=6"],
     },
