@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from arena_humansim.core.agents.base import BaseAgent
-from arena_humansim.core.agents.types import SampledLocalPlanner, SampledParams, SampledPerception
+from arena_humansim.core.agents.types import SampledParams, SampledPerception
 from arena_humansim.perception.default import DefaultPerception
 from arena_humansim.core.pool import AgentPool
 from arena_humansim.utils.types import AgentState, Pose2D
@@ -29,12 +29,12 @@ def _params(vision_range: float, vision_fov: float, proximity_sense: float = 0.0
             vision_fov=vision_fov,
             proximity_sense=proximity_sense,
         ),
-        local_planner_params=SampledLocalPlanner(
-            relaxation_time=0.5,
-            repulsion_strength=2.1,
-            repulsion_range=0.3,
-            anisotropy=0.5,
-        ),
+        local_planner_params={
+            "relaxation_time": 0.5,
+            "repulsion_strength": 2.1,
+            "repulsion_range": 0.3,
+            "anisotropy": 0.5,
+        },
     )
 
 
