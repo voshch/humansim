@@ -99,6 +99,7 @@ _registry.register("straight")(_load_straight)
 _registry.register("hsfm")(_load_hsfm)
 
 if importlib.util.find_spec("torch") is not None:
-    if importlib.util.find_spec("torch_geometric") is not None:
-        _registry.register("socialgail")(_load_socialgail)
     _registry.register("nsp")(_load_nsp)
+
+if importlib.util.find_spec("torch") is not None and importlib.util.find_spec("torch_geometric") is not None:
+    _registry.register("socialgail")(_load_socialgail)
