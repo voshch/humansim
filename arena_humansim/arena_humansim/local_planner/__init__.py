@@ -61,6 +61,13 @@ def _load_straight() -> type[LocalPlanner]:
     return StraightToGoalPlanner
 
 
+def _load_nsp() -> type[LocalPlanner]:
+    from .nsp.planner import NSPPlanner
+
+    return NSPPlanner
+
+
 _registry.register("sfm")(_load_sfm)
 _registry.register("orca")(_load_orca)
 _registry.register("straight")(_load_straight)
+_registry.register("nsp")(_load_nsp)

@@ -30,6 +30,7 @@ setup(
     ],
     extras_require={
         "test": ["pytest>=7", "pytest-xdist", "hypothesis>=6"],
+        "nsp": ["torch>=2.2"],
     },
     zip_safe=True,
     maintainer="voshch",
