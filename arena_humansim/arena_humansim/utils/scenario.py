@@ -13,13 +13,7 @@ from ..core.agents.loader import _load_default_agent_types_raw, _structure_raw, 
 from ..core.agents.types import GoToStepDef
 from ..core.interaction_kinds import InteractionType, is_object_bound_name
 from .scenario_loader import converter
-
-
-@attrs.define
-class Pose2DModel:
-    x: float = 0.0
-    y: float = 0.0
-    theta: float = 0.0
+from .types import Pose2D
 
 
 class ExecutionMode(enum.StrEnum):
@@ -56,8 +50,8 @@ class ServiceSpec:
 class AgentConfig:
     agent_id: int = 0
     agent_type: str = "adult"
-    spawn_pose: Pose2DModel = attrs.Factory(Pose2DModel)
-    goal_sequence: list[Pose2DModel] = attrs.Factory(list)
+    spawn_pose: Pose2D = attrs.Factory(Pose2D)
+    goal_sequence: list[Pose2D] = attrs.Factory(list)
     desired_velocity: float = 1.3
     agent_radius: float = 0.35
     interaction_preferences: dict[str, Any] = attrs.Factory(dict)
@@ -106,7 +100,7 @@ class AgentTemplateModel:
 
 @attrs.define
 class SourceScenarioConfig:
-    pose: Pose2DModel = attrs.Factory(Pose2DModel)
+    pose: Pose2D = attrs.Factory(Pose2D)
     shape: ShapeModel = attrs.Factory(ShapeModel)
     rate_profile: list[RateKeyframeModel] = attrs.Factory(list)
     max_concurrent: int = -1
@@ -116,7 +110,7 @@ class SourceScenarioConfig:
 
 @attrs.define
 class SinkScenarioConfig:
-    pose: Pose2DModel = attrs.Factory(Pose2DModel)
+    pose: Pose2D = attrs.Factory(Pose2D)
     shape: ShapeModel = attrs.Factory(ShapeModel)
     absorption_radius: float = 0.5
     capacity: int = -1
@@ -132,7 +126,7 @@ class FlowScenarioConfig:
 class AnchorConfig:
     kind: str = "object"  # "object" | "agent" | "pose" | "centroid"
     ref: str | None = None  # object_id or agent_id (as str) for object/agent; None for pose/centroid
-    pose: Pose2DModel | None = None  # for kind="pose"
+    pose: Pose2D | None = None  # for kind="pose"
 
 
 @attrs.define
@@ -146,7 +140,7 @@ class FormationConfig:
 class WorldObjectConfig:
     object_id: str = ""
     type: str = ""
-    pose: Pose2DModel = attrs.Factory(Pose2DModel)
+    pose: Pose2D = attrs.Factory(Pose2D)
     capacity: int = 1
     satisfies: dict[str, float] = attrs.Factory(dict)
     formation: FormationConfig | None = None
@@ -163,8 +157,8 @@ class EventScript:
 @attrs.define
 class WallConfig:
     name: str = ""
-    start: Pose2DModel = attrs.Factory(Pose2DModel)
-    end: Pose2DModel = attrs.Factory(Pose2DModel)
+    start: Pose2D = attrs.Factory(Pose2D)
+    end: Pose2D = attrs.Factory(Pose2D)
 
 
 @attrs.define
@@ -180,7 +174,7 @@ class ObstacleBB:
 @attrs.define
 class ObstacleSceneConfig:
     name: str = ""
-    pose: Pose2DModel = attrs.Factory(Pose2DModel)
+    pose: Pose2D = attrs.Factory(Pose2D)
     bb: ObstacleBB = attrs.Factory(ObstacleBB)
     obstacle_type: str = ""
     interaction_types: list[str] = attrs.Factory(list)

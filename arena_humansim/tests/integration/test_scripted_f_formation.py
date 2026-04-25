@@ -8,11 +8,10 @@ from arena_humansim.utils.scenario import (
     AgentConfig,
     InteractionScript,
     ModuleConfig,
-    Pose2DModel,
     ScenarioConfig,
     SimulationParams,
 )
-from arena_humansim.utils.types import InteractionOutcome
+from arena_humansim.utils.types import InteractionOutcome, Pose2D
 
 
 CENTROID_X = 0.0
@@ -23,10 +22,10 @@ FIRE_TICK = 50
 
 def _scripted_scenario() -> ScenarioConfig:
     agents = [
-        AgentConfig(agent_id=10, spawn_pose=Pose2DModel(x=-10.0, y=-8.0, theta=0.0), desired_velocity=1.0),
-        AgentConfig(agent_id=11, spawn_pose=Pose2DModel(x=10.0, y=-8.0, theta=math.pi), desired_velocity=1.0),
-        AgentConfig(agent_id=12, spawn_pose=Pose2DModel(x=0.0, y=-18.0, theta=math.pi / 2.0), desired_velocity=1.0),
-        AgentConfig(agent_id=13, spawn_pose=Pose2DModel(x=0.0, y=2.0, theta=-math.pi / 2.0), desired_velocity=1.0),
+        AgentConfig(agent_id=10, spawn_pose=Pose2D(x=-10.0, y=-8.0, theta=0.0), desired_velocity=1.0),
+        AgentConfig(agent_id=11, spawn_pose=Pose2D(x=10.0, y=-8.0, theta=math.pi), desired_velocity=1.0),
+        AgentConfig(agent_id=12, spawn_pose=Pose2D(x=0.0, y=-18.0, theta=math.pi / 2.0), desired_velocity=1.0),
+        AgentConfig(agent_id=13, spawn_pose=Pose2D(x=0.0, y=2.0, theta=-math.pi / 2.0), desired_velocity=1.0),
     ]
     script = InteractionScript(
         tick=FIRE_TICK,
