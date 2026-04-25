@@ -11,8 +11,14 @@ from arena_humansim.core.pool import AgentPool
 from arena_humansim.utils.types import Pose2D
 
 
-def _build_pool(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent], kinds: list[int]) -> AgentPool:
+def _build_pool_and_planner(
+    pool_empty: Callable[..., AgentPool],
+    agent_factory: Callable[..., BaseAgent],
+    kinds: list[int],
+) -> tuple[AgentPool, SFMPlanner]:
     pool = pool_empty(capacity=8)
+    planner = SFMPlanner()
+    planner.attach(pool)
     for i, k in enumerate(kinds):
         pool.add_agent(agent_factory(agent_id=i + 1, x=float(i) * 0.5, y=0.0))
         pool.kind[i] = k
@@ -21,17 +27,15 @@ def _build_pool(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..
     indptr = np.array([0, 1, 1], dtype=np.int32)
     indices = np.array([1], dtype=np.int32)
     pool.set_neighbor_csr(indptr, indices)
-    return pool
+    return pool, planner
 
 
 def test_robot_neighbor_produces_larger_repulsion(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
-    baseline = _build_pool(pool_empty, agent_factory, [0, 0])
-    p1 = SFMPlanner()
+    baseline, p1 = _build_pool_and_planner(pool_empty, agent_factory, [0, 0])
     p1.compute_pool(baseline, store_forces=False, dt=0.05)
     baseline_vel = baseline.vel[0].copy()
 
-    robot = _build_pool(pool_empty, agent_factory, [0, 1])
-    p2 = SFMPlanner()
+    robot, p2 = _build_pool_and_planner(pool_empty, agent_factory, [0, 1])
     p2.compute_pool(robot, store_forces=False, dt=0.05)
     robot_vel = robot.vel[0].copy()
 

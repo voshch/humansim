@@ -5,7 +5,7 @@ import math
 import attrs
 import pytest
 
-from arena_humansim.core.agents.types import SampledLocalPlanner, SampledParams, SampledPerception
+from arena_humansim.core.agents.types import SampledParams, SampledPerception
 from arena_humansim.utils.types import AgentState, Pose2D
 
 
@@ -46,7 +46,7 @@ def test_sampled_params_from_conftest_helper(agent_factory) -> None:
     assert p.desired_velocity == 1.1
     assert p.agent_radius == 0.25
     assert isinstance(p.perception, SampledPerception)
-    assert isinstance(p.local_planner_params, SampledLocalPlanner)
+    assert isinstance(p.local_planner_params, dict)
     assert p.perception_stack == ("default",)
     assert p.local_planner == "sfm"
     assert p.global_planner == "dijkstra"

@@ -226,7 +226,7 @@ def test_symmetric_seek_merges_via_perception_proximity() -> None:
     # The perception layer unions proximity into the neighbour CSR, so visibility_lookup
     # reports the peer and both SEEKs converge on one GROUP_CONVERSATION interaction.
     from arena_humansim.core.agents.base import BaseAgent
-    from arena_humansim.core.agents.types import SampledLocalPlanner, SampledParams, SampledPerception
+    from arena_humansim.core.agents.types import SampledParams, SampledPerception
     from arena_humansim.core.pool import AgentPool
     from arena_humansim.perception.default import DefaultPerception
 
@@ -243,12 +243,12 @@ def test_symmetric_seek_merges_via_perception_proximity() -> None:
             reaction_time=0.4,
             personal_space_min=0.6,
             perception=SampledPerception(vision_range=5.0, vision_fov=1.0, proximity_sense=prox),
-            local_planner_params=SampledLocalPlanner(
-                relaxation_time=0.5,
-                repulsion_strength=2.1,
-                repulsion_range=0.3,
-                anisotropy=0.5,
-            ),
+            local_planner_params={
+                "relaxation_time": 0.5,
+                "repulsion_strength": 2.1,
+                "repulsion_range": 0.3,
+                "anisotropy": 0.5,
+            },
         )
 
     def _real_agent(aid: int, x: float, y: float, theta: float, prox: float) -> BaseAgent:

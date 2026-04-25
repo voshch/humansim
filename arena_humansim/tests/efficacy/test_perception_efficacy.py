@@ -5,7 +5,7 @@ from typing import Any, cast
 import pytest
 
 from arena_humansim.core.agents.base import BaseAgent
-from arena_humansim.core.agents.types import SampledLocalPlanner, SampledParams, SampledPerception
+from arena_humansim.core.agents.types import SampledParams, SampledPerception
 from arena_humansim.perception import Perception, _registry
 from arena_humansim.utils.types import AgentState, BeliefState, Pose2D, WorldState
 
@@ -27,12 +27,12 @@ def _params_with_vision(vision_range: float, vision_fov: float) -> SampledParams
         reaction_time=0.4,
         personal_space_min=0.6,
         perception=SampledPerception(vision_range=vision_range, vision_fov=vision_fov),
-        local_planner_params=SampledLocalPlanner(
-            relaxation_time=0.5,
-            repulsion_strength=2.1,
-            repulsion_range=0.3,
-            anisotropy=0.5,
-        ),
+        local_planner_params={
+            "relaxation_time": 0.5,
+            "repulsion_strength": 2.1,
+            "repulsion_range": 0.3,
+            "anisotropy": 0.5,
+        },
     )
 
 

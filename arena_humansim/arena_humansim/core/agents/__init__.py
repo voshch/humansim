@@ -27,6 +27,6 @@ from arena_humansim.utils.scenario_loader import converter as _converter
 from .base import BaseAgent, Module, TickPhase, VectorizedModule  # noqa: F401
 from .factory import create_agent  # noqa: F401
 from .loader import _load_default_agent_types_raw, load_agent_types  # noqa: F401
-from .types import ActionDef, AgentType, NeedCondition, NeedDist, ParamDist, SampledNeed, SampledParams, SequenceDef, StepDef, TransitionDef, VarDef, sample_agent_type  # noqa: F401 — re-export
+from .types import ActionDef, AgentType, NeedCondition, NeedDist, ParamDist, SampledNeed, SampledParams, SequenceDef, StepDef, TransitionDef, VarDef, sample_agent_type  # noqa: F401
 
 BUILTIN_AGENTS: dict[str, AgentType] = {name: _converter.structure(raw, AgentType) for name, (raw, _) in _load_default_agent_types_raw().items()}

@@ -8,7 +8,6 @@ import pytest
 from arena_humansim.animation.kinematic import KinematicAnimation
 from arena_humansim.core.agents.base import BaseAgent
 from arena_humansim.core.agents.types import (
-    SampledLocalPlanner,
     SampledParams,
     SampledPerception,
 )
@@ -34,12 +33,12 @@ def _make_agent(agent_id: int = 1, vx: float = 0.0, vy: float = 0.0, theta: floa
         reaction_time=0.4,
         personal_space_min=0.6,
         perception=SampledPerception(vision_range=5.0, vision_fov=180.0),
-        local_planner_params=SampledLocalPlanner(
-            relaxation_time=0.5,
-            repulsion_strength=2.1,
-            repulsion_range=0.3,
-            anisotropy=0.5,
-        ),
+        local_planner_params={
+            "relaxation_time": 0.5,
+            "repulsion_strength": 2.1,
+            "repulsion_range": 0.3,
+            "anisotropy": 0.5,
+        },
         perception_stack=("default",),
         idle_gaze_rate_hz=idle_gaze_rate_hz,
     )

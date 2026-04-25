@@ -63,7 +63,7 @@ from arena_humansim.core.despawn_monitor import DespawnMonitor
 from arena_humansim.core.interaction_kinds import InteractionType
 from arena_humansim.core.interaction_manager import InteractionManager
 from arena_humansim.core.logger import SimulationLogger
-from arena_humansim.core.pool import AgentPool
+from arena_humansim.core.pool import AgentPool, PoolAware
 from arena_humansim.core.recorder import BagRecorder, default_record_dir
 from arena_humansim.core.replay import ReplayManager, ReplayResult
 from arena_humansim.core.robot_services import RobotServiceAdvertiser
@@ -281,6 +281,14 @@ class AgentManager(Node):
             self._collision,
             self._occluder,
         )
+        self._pool_aware: tuple[PoolAware, ...] = (
+            self._local_planner,
+            self._global_planner,
+            self._animation,
+            self._collision,
+            self._occluder,
+            *self._perception_cache.values(),
+        )
 
         self._module_pool: dict[str, Any] = {
             self._module_selections["global_planner"]: self._global_planner,
@@ -313,6 +321,8 @@ class AgentManager(Node):
         self._last_despawned_ids: list[int] = []
 
         self._pool = AgentPool()
+        for sub in self._pool_aware:
+            sub.attach(self._pool)
 
         self._agent_types: dict[str, AgentType] = dict(BUILTIN_AGENTS)
         self._agents: dict[int, BaseAgent] = {}
@@ -744,6 +754,8 @@ class AgentManager(Node):
             rng = self._rng.get_agent_substream(aid, "params")
             agent = create_agent(agent_type, state, self._module_pool, self._module_selections, rng)
         else:
+            planner_name = self._module_selections["local_planner"]
+            lp_defaults = {k: v.mean for k, v in LocalPlanner.get_class(planner_name).PARAM_DEFAULTS.items()}
             params = SampledParams(
                 name=type_name,
                 desired_velocity=state.desired_velocity,
@@ -756,9 +768,10 @@ class AgentManager(Node):
                 reaction_time=0.4,
                 personal_space_min=0.6,
                 perception_stack=("default",),
-                local_planner=self._module_selections["local_planner"],
+                local_planner=planner_name,
                 global_planner=self._module_selections["global_planner"],
                 animation=self._module_selections["animation"],
+                local_planner_params=lp_defaults,
             )
             agent = create_agent(params, state, self._module_pool, self._module_selections)
 
@@ -786,10 +799,7 @@ class AgentManager(Node):
             if val > 0.0:
                 lp_overrides[field_name] = val
         if lp_overrides:
-            overrides["local_planner_params"] = attrs.evolve(
-                agent.params.local_planner_params,
-                **lp_overrides,
-            )
+            overrides["local_planner_params"] = {**agent.params.local_planner_params, **lp_overrides}
 
         if overrides:
             agent.params = attrs.evolve(agent.params, **overrides)

@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 import numpy as np
 
+from arena_humansim.core.pool import PoolAware
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
 from arena_humansim.utils.types import Segments, WallAware
@@ -12,7 +13,7 @@ from arena_humansim.utils.types import Segments, WallAware
 _registry: ModuleRegistry[Occluder] = ModuleRegistry()
 
 
-class Occluder(WallAware, Loggable, ABC):
+class Occluder(PoolAware, WallAware, Loggable, ABC):
     @abstractmethod
     def clear(self, p_a: np.ndarray, p_b: np.ndarray) -> np.ndarray: ...
 

@@ -7,7 +7,6 @@ from arena_humansim.core.agents.types import (
     ActionDef,
     AgentType,
     GoToStepDef,
-    LocalPlannerDist,
     NeedCondition,
     NeedDist,
     PerceptionDist,
@@ -15,6 +14,7 @@ from arena_humansim.core.agents.types import (
     StepDef,
     TransitionDef,
     VarDef,
+    _as_paramdist,
 )
 from arena_humansim.core.interaction_kinds import HandleKind, InteractionType
 from arena_humansim.utils.types import AnchorKind, FormationSpec, Pose2D
@@ -211,15 +211,6 @@ def _structure_perception_dist(val: object, _: type) -> PerceptionDist:
 converter.register_structure_hook(PerceptionDist, _structure_perception_dist)
 
 
-def _structure_local_planner_dist(val: object, _: type) -> LocalPlannerDist:
-    if isinstance(val, LocalPlannerDist):
-        return val
-    return LocalPlannerDist(**dict(val))
-
-
-converter.register_structure_hook(LocalPlannerDist, _structure_local_planner_dist)
-
-
 def _structure_agent_type(val: object, _: type) -> AgentType:
     if isinstance(val, AgentType):
         return val
@@ -227,7 +218,7 @@ def _structure_agent_type(val: object, _: type) -> AgentType:
     if "perception" in d and isinstance(d["perception"], dict):
         d["perception"] = converter.structure(d["perception"], PerceptionDist)
     if "local_planner_params" in d and isinstance(d["local_planner_params"], dict):
-        d["local_planner_params"] = converter.structure(d["local_planner_params"], LocalPlannerDist)
+        d["local_planner_params"] = {k: _as_paramdist(v) for k, v in d["local_planner_params"].items()}
     if "needs" in d and isinstance(d["needs"], dict):
         d["needs"] = {k: converter.structure(v, NeedDist) for k, v in d["needs"].items()}
     if "actions" in d and isinstance(d["actions"], dict):

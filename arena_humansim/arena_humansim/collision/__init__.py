@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
 
-from arena_humansim.core.pool import AgentPool
+from arena_humansim.core.pool import AgentPool, PoolAware
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
 from arena_humansim.utils.types import WallAware
@@ -12,7 +12,7 @@ from arena_humansim.utils.types import WallAware
 _registry: ModuleRegistry[CollisionResolver] = ModuleRegistry()
 
 
-class CollisionResolver(WallAware, Loggable, ABC):
+class CollisionResolver(PoolAware, WallAware, Loggable, ABC):
     @abstractmethod
     def resolve(self, pool: AgentPool) -> set[int]: ...
 
