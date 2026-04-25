@@ -68,10 +68,11 @@ from arena_humansim.core.recorder import BagRecorder, default_record_dir
 from arena_humansim.core.replay import ReplayManager, ReplayResult
 from arena_humansim.core.robot_services import RobotServiceAdvertiser
 from arena_humansim.core.spawn_scheduler import SpawnScheduler
-from arena_humansim.core.viz import MarkerPublisher, publish_behavior, publish_global_plan, publish_infrastructure, publish_interaction, publish_local_plan, publish_module_markers, publish_perception, publish_waypoints
+from arena_humansim.core.viz import MarkerPublisher, publish_agents, publish_behavior, publish_global_plan, publish_infrastructure, publish_interaction, publish_local_plan, publish_module_markers, publish_perception, publish_waypoints
 from arena_humansim.core.world_knowledge import FormationSpec, WorldKnowledge, WorldObject
 from arena_humansim.global_planner import GlobalPlanner
 from arena_humansim.local_planner import LocalPlanner
+from arena_humansim.occlusion import Occluder
 from arena_humansim.perception import Perception
 from arena_humansim.utils import RNG
 from arena_humansim.utils.event_bus import EventBus
@@ -185,6 +186,7 @@ class AgentManager(Node):
         self.declare_parameter("local_planner", "sfm")
         self.declare_parameter("animation", "noop")
         self.declare_parameter("collision", "wall_projection")
+        self.declare_parameter("occlusion", "bitmap")
         self.declare_parameter("mode", self.MODE_MASTER)
         self.declare_parameter("log_dir", "")
         self.declare_parameter("replay_mode", "")
@@ -241,13 +243,21 @@ class AgentManager(Node):
             "local_planner": self.get_parameter("local_planner").value,
             "animation": self.get_parameter("animation").value,
             "collision": self.get_parameter("collision").value,
+            "occlusion": self.get_parameter("occlusion").value,
         }
 
         self._rng = RNG(seed)
 
+        self._occluder: Occluder = Occluder.get(self._module_selections["occlusion"])()
         self._perception_cache: dict[str, Perception] = {}
         default_name = self._module_selections["perception"]
-        self._perception_cache[default_name] = Perception.get(default_name)()
+        perception_cls = Perception.get(default_name)
+        from arena_humansim.perception.default import DefaultPerception
+
+        if issubclass(perception_cls, DefaultPerception):
+            self._perception_cache[default_name] = perception_cls(occluder=self._occluder)
+        else:
+            self._perception_cache[default_name] = perception_cls()
         self._global_planner = GlobalPlanner.create(
             self._module_selections["global_planner"],
         )
@@ -269,6 +279,7 @@ class AgentManager(Node):
             self._local_planner,
             self._global_planner,
             self._collision,
+            self._occluder,
         )
 
         self._module_pool: dict[str, Any] = {
@@ -476,6 +487,7 @@ class AgentManager(Node):
             self._logger.warning(f"scenario='{scenario_arg}' ignored in mode={self._mode} (orchestrator-driven)")
 
         self._logger.info(f"AgentManager initialized (seed={seed}, dt={self._dt}, mode={self._mode})")
+        self._logger.info("Modules: " + ", ".join(f"{k}={v}" for k, v in self._module_selections.items()))
 
     def _collect_ros_parameters(self) -> dict[str, Any]:
         params = {}
@@ -512,7 +524,13 @@ class AgentManager(Node):
 
     def _resolve_perception_layer(self, name: str) -> Perception:
         if name not in self._perception_cache:
-            instance = Perception.get(name)()
+            from arena_humansim.perception.default import DefaultPerception
+
+            perception_cls = Perception.get(name)
+            if issubclass(perception_cls, DefaultPerception):
+                instance: Perception = perception_cls(occluder=self._occluder)
+            else:
+                instance = perception_cls()
             self._perception_cache[name] = instance
             self._module_pool[name] = instance
         return self._perception_cache[name]
@@ -1156,6 +1174,7 @@ class AgentManager(Node):
         if self._marker_pub is not None:
             pool.sync_back(agents)
             mlvl = self._publish_markers
+            publish_agents(self._marker_pub, agents)
             publish_behavior(self._marker_pub, agents, self._high_level_cmds, interactions)
             publish_interaction(self._marker_pub, agents, interactions)
             publish_infrastructure(
@@ -1220,6 +1239,12 @@ class AgentManager(Node):
             return
         dt = self._dt
 
+        bypass = np.zeros(n, dtype=np.bool_)
+        for pidx, planner in enumerate(self._policies):
+            if getattr(planner, "bypasses_kinematic_constraints", False):
+                bypass |= pool.policy_idx[:n] == pidx
+
+        original_vel = pool.vel[:n].copy()
         new_vel = pool.vel[:n].copy()
         cur_vel = pool.prev_vel[:n]
         r_min = pool.min_turning_radius[:n]
@@ -1278,6 +1303,9 @@ class AgentManager(Node):
             new_vel,
         )
 
+        if bypass.any():
+            new_vel[bypass] = original_vel[bypass]
+
         pool.vel[:n] = new_vel
 
     def _local_plan_fallback(
@@ -1317,13 +1345,18 @@ class AgentManager(Node):
 
         pos += vel * dt
 
+        provides_heading = np.zeros(n, dtype=np.bool_)
+        for pidx, planner in enumerate(self._policies):
+            if planner.provides_heading:
+                provides_heading |= pool.policy_idx[:n] == pidx
+
         speed = np.linalg.norm(vel, axis=1)
         moving = speed > self._min_speed_for_heading
         vel_theta = np.arctan2(vel[:, 1], vel[:, 0])
         goal_theta = pool.goal_theta[:n]
         has_goal_theta = pool.has_goal_theta[:n]
         target_theta = np.where(moving, vel_theta, goal_theta)
-        rotating = moving | has_goal_theta
+        rotating = (moving | has_goal_theta) & ~provides_heading
         delta = np.arctan2(
             np.sin(target_theta - theta),
             np.cos(target_theta - theta),

@@ -9,6 +9,7 @@ Velocity commands for the next tick, given each agent's global subgoal and neigh
 | `sfm` | `SFMPlanner` | Social Force Model. `supports_pool=True` — vectorized NumPy path. Per-kind gain scales for human↔robot. Default. |
 | `orca` | `ORCAPlanner` | Reciprocal velocity obstacles. Per-agent `solve`, no pool path. |
 | `straight` | `StraightToGoalPlanner` | Ignores neighbors, drives toward the subgoal at `desired_velocity`. `supports_pool=True`. For debugging and robot policies that don't want avoidance. |
+| `socialgail` | `SocialGAILPlanner` | Learned crowd-sim policy from [William-island/SocialGAIL](https://github.com/William-island/SocialGAIL) (ICRA 2024, MIT). Pretrained HGNN actor; weights fetched on first use to `~/.cache/arena_humansim/socialgail/best.pt`. Requires `pip install torch torch-geometric`. `supports_pool=True`; re-infers every 8 sim ticks (0.4s decision interval, matching training). No wall handling — relies on `wall_projection`. |
 
 ## Contract
 

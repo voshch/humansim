@@ -10,7 +10,7 @@ AgentManager (ROS 2 Node)                    [core/]
 ├── Perception         KDTree neighbor queries + FOV filtering       [perception/]
 ├── Behavior Trees     py_trees decision making + needs system       [core/behavior/]
 ├── Global Planner     A* pathfinding on inflated occupancy grid     [global_planner/]
-├── Local Planner      SFM or ORCA collision avoidance               [local_planner/]
+├── Local Planner      SFM/HSFM/ORCA/SocialGAIL collision avoidance  [local_planner/]
 ├── Animation          Kinematic forward integration                 [animation/]
 ├── Collision          Wall projection overlap resolution            [collision/]
 ├── SpawnScheduler     Poisson-process agent spawning at sources
@@ -43,11 +43,14 @@ All modules are swappable via a plugin registry.
 
 | Layer | Options | Default |
 |---|---|---|
-| [Global Planner](arena_humansim/arena_humansim/global_planner/README.md) | `dijkstra` | `dijkstra` |
-| [Local Planner](arena_humansim/arena_humansim/local_planner/README.md) | `sfm`, `orca` | `sfm` |
+| [Global Planner](arena_humansim/arena_humansim/global_planner/README.md) | `dijkstra`, `astar` | `astar` |
+| [Local Planner](arena_humansim/arena_humansim/local_planner/README.md) | `sfm`, `hsfm`, `orca`, `straight`, `socialgail` | `sfm` |
 | [Perception](arena_humansim/arena_humansim/perception/README.md) | `default` | `default` |
 | [Animation](arena_humansim/arena_humansim/animation/README.md) | `noop`, `kinematic` | `noop` |
 | [Collision](arena_humansim/arena_humansim/collision/README.md) | `wall_projection`, `noop` | `wall_projection` |
+| Occlusion | `bitmap`, `noop` | `bitmap` |
+
+Each module is selectable as a ROS parameter and as a launch argument of the same name (e.g. `local_planner:=socialgail`). Scenario YAMLs do **not** carry a `modules:` block — module choice is a runtime decision, not a property of the scenario.
 
 ## Agent Types
 
@@ -120,11 +123,13 @@ The simulator is fully deterministic given a seed. Seeded RNG substreams are mai
 
 ```bash
 ros2 launch arena_humansim arena_humansim.launch.py \
-  mode:=master \
-  use_sim_time:=false \
-  markers:=true \
+  scenario:=queue \
+  local_planner:=socialgail \
+  markers:=2 \
   rviz:=true
 ```
+
+Module-selection launch args (`perception`, `global_planner`, `local_planner`, `animation`, `collision`, `occlusion`) all default to the values in the parameters table below; pass any of them on the command line to override.
 
 Scenarios (world objects, agents, flow, walls) are authored under [`config/scenarios/`](arena_humansim/config/scenarios/README.md).
 
@@ -151,10 +156,12 @@ Config format and stage semantics: [`config/benchmark/README.md`](arena_humansim
 | `seed` | `0` | RNG seed for deterministic runs |
 | `dt` | `0.05` | Simulation timestep (s) |
 | `bt_tick_interval` | `5` | BT ticks every N sim ticks |
-| `global_planner` | `dijkstra` | Global planner module |
+| `perception` | `default` | Perception module |
+| `global_planner` | `astar` | Global planner module |
 | `local_planner` | `sfm` | Local planner module |
 | `animation` | `noop` | Animation module |
 | `collision` | `wall_projection` | Collision resolver |
+| `occlusion` | `bitmap` | Occlusion module |
 | `publish_markers` | `0` | RViz markers: 0=off, 1=infrastructure+labels+interactions, 2=full |
 | `log_dir` | `""` | Directory for replay logs |
 

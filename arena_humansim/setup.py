@@ -30,6 +30,7 @@ setup(
     ],
     extras_require={
         "test": ["pytest>=7", "pytest-xdist", "hypothesis>=6"],
+        "socialgail": ["torch>=2.2", "torch-geometric>=2.5"],
         "nsp": ["torch>=2.2"],
     },
     zip_safe=True,

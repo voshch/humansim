@@ -18,6 +18,11 @@ _registry: ModuleRegistry[LocalPlanner] = ModuleRegistry()
 class LocalPlanner(WallAware, Loggable, ABC):
     supports_pool: bool = False
     needs_global_subgoal: bool = True
+    provides_heading: bool = False
+    # Set True to skip _apply_kinematic_constraints_vectorized for agents using
+    # this planner. Use when the planner's training distribution assumed direct
+    # velocity application (no per-tick angular/acceleration clamp).
+    bypasses_kinematic_constraints: bool = False
 
     @abstractmethod
     def compute(
@@ -61,6 +66,12 @@ def _load_straight() -> type[LocalPlanner]:
     return StraightToGoalPlanner
 
 
+def _load_socialgail() -> type[LocalPlanner]:
+    from .socialgail import SocialGAILPlanner
+
+    return SocialGAILPlanner
+
+
 def _load_nsp() -> type[LocalPlanner]:
     from .nsp.planner import NSPPlanner
 
@@ -70,4 +81,5 @@ def _load_nsp() -> type[LocalPlanner]:
 _registry.register("sfm")(_load_sfm)
 _registry.register("orca")(_load_orca)
 _registry.register("straight")(_load_straight)
+_registry.register("socialgail")(_load_socialgail)
 _registry.register("nsp")(_load_nsp)
