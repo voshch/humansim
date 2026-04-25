@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -96,5 +97,8 @@ _registry.register("sfm")(_load_sfm)
 _registry.register("orca")(_load_orca)
 _registry.register("straight")(_load_straight)
 _registry.register("hsfm")(_load_hsfm)
-_registry.register("socialgail")(_load_socialgail)
-_registry.register("nsp")(_load_nsp)
+
+if importlib.util.find_spec("torch") is not None:
+    if importlib.util.find_spec("torch_geometric") is not None:
+        _registry.register("socialgail")(_load_socialgail)
+    _registry.register("nsp")(_load_nsp)

@@ -1,0 +1,4 @@
+[console_scripts]
+arena_humansim_node = arena_humansim.core.agent_manager:main
+arena_humansim_render = arena_humansim.utils.renderer:main
+benchmark = arena_humansim.utils.benchmark:main

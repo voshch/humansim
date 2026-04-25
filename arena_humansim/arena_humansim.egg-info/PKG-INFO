@@ -1,0 +1,31 @@
+Metadata-Version: 2.4
+Name: arena_humansim
+Version: 0.0.0
+Summary: Arena human simulator: modular, deterministic pedestrian simulation
+Maintainer: voshch
+Maintainer-email: dev@voshch.dev
+License: MIT
+Requires-Dist: setuptools
+Requires-Dist: attrs
+Requires-Dist: cattrs
+Requires-Dist: pyyaml
+Requires-Dist: numpy
+Requires-Dist: scipy
+Requires-Dist: py_trees
+Requires-Dist: pyastar2d
+Requires-Dist: pydantic
+Provides-Extra: test
+Requires-Dist: pytest>=7; extra == "test"
+Requires-Dist: pytest-xdist; extra == "test"
+Requires-Dist: hypothesis>=6; extra == "test"
+Provides-Extra: socialgail
+Requires-Dist: torch>=2.2; extra == "socialgail"
+Requires-Dist: torch-geometric>=2.5; extra == "socialgail"
+Provides-Extra: nsp
+Requires-Dist: torch>=2.2; extra == "nsp"
+Dynamic: license
+Dynamic: maintainer
+Dynamic: maintainer-email
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: summary
