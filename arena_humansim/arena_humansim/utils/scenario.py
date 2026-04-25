@@ -43,6 +43,7 @@ class ModuleConfig:
     global_planner: str = "dijkstra"
     local_planner: str = "sfm"
     animation: str = "noop"
+    occlusion: str = "bitmap"
 
 
 @attrs.define

@@ -16,12 +16,6 @@ simulation:
   max_ticks: 100
   execution_mode: master
 
-modules:
-  perception: default
-  global_planner: dijkstra
-  local_planner: sfm
-  animation: kinematic
-
 flow:
   sources:
     - pose: {x: -5.0, y: 0.0, theta: 0.0}

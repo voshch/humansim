@@ -9,12 +9,6 @@ simulation:
   max_ticks: 1000
   execution_mode: master
 
-modules:
-  perception: default
-  global_planner: dijkstra
-  local_planner: sfm
-  animation: kinematic
-
 agent_types:
   go_to_walker:
     extends: adult

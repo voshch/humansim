@@ -17,13 +17,6 @@ simulation:
   max_ticks: 6000
   execution_mode: master
 
-modules:
-  perception: default
-  global_planner: dijkstra
-  local_planner: sfm
-  interaction_manager: default
-  animation: kinematic
-
 agents:
   # West entry -> North exit
   - agent_id: 0

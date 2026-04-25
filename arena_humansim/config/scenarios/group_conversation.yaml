@@ -13,13 +13,6 @@ simulation:
   max_ticks: 3000
   execution_mode: master
 
-modules:
-  perception: default
-  global_planner: dijkstra
-  local_planner: sfm
-  interaction_manager: default
-  animation: kinematic
-
 agents:
   # Pair A — meeting at (2, 0)
   - agent_id: 0

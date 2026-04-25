@@ -18,13 +18,6 @@ simulation:
   max_ticks: 2000
   execution_mode: master
 
-modules:
-  perception: default
-  global_planner: dijkstra
-  local_planner: sfm
-  interaction_manager: default
-  animation: kinematic
-
 agents:
   # Westbound humans (counter-flow against eastbound robots)
   - agent_id: 0

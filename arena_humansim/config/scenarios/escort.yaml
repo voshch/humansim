@@ -20,12 +20,6 @@ simulation:
   max_ticks: 6000
   execution_mode: master
 
-modules:
-  perception: default
-  global_planner: dijkstra
-  local_planner: sfm
-  animation: kinematic
-
 agent_types:
   escort:
     extends: adult
