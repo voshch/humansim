@@ -7,37 +7,22 @@ large language models to create realistic agent behaviors based on scenario desc
 and world semantic information.
 """
 
-import json
 import os
-from collections.abc import Sequence
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-import attrs
-import cattrs
 import yaml
-from apischema import settings
-from apischema.json_schema import deserialization_schema
-from apischema.objects import ObjectField
+from arena_simulation_setup.tree.World import World, WorldDescription
+from cattrs import Converter
+from pydantic import TypeAdapter
 
-from arena_humansim.core.agents.types import AgentType
 from arena_humansim.core.behavior.bt_generation.inference_client import GoogleGenAIClient, OpenAIClient
+from arena_humansim.core.behavior.bt_generation.schema import AgentConfig, AgentType
 from arena_humansim.core.behavior.bt_generation.system_prompts import behavior_tree_generation, spawn_position_selection, zone_selection
-from arena_humansim.utils.scenario import ScenarioConfig
-
-prev_default_object_fields = settings.default_object_fields
-
-
-def attrs_fields(cls: type) -> Sequence[ObjectField] | None:
-    if hasattr(cls, "__attrs_attrs__"):
-        return [ObjectField(a.name, a.type, required=a.default == attrs.NOTHING, default=a.default) for a in cls.__attrs_attrs__]
-
-    else:
-        return prev_default_object_fields(cls)
-
-
-settings.default_object_fields = attrs_fields
+from arena_humansim.utils.scenario import WorldObjectConfig
+from arena_humansim.utils.types import Pose2D
 
 
 class GenerationMode(Enum):
@@ -51,17 +36,46 @@ class GenerationMode(Enum):
 class WorldInfo:
     """World semantic information extracted from scenario config."""
 
-    scenario_config: ScenarioConfig
+    world_description: WorldDescription
 
-    def to_text(self) -> str:
+    def world_zones_metadata(self) -> str:
+        """
+        Extract world metadata
+        """
+        text_parts = []
+
+        text_parts.append("World Zones metadata:")
+        for zone in self.world_description.zones:
+            corners = [[corner.x, corner.y] for corner in zone.corners]
+            objects = [f"{obj.name}" for obj in zone.entities.static]
+            objects.extend([f"{door.name}" for door in zone.doors])
+
+            text_parts.append(f"Zone {zone.name} with bounding boxes:\n{corners},\ncontains objects:\n{objects}")
+
+        return "\n".join(text_parts)
+
+    def detail_info(self, zone_names: list[str]) -> str:
         """Convert world info to descriptive text."""
         text_parts = []
 
-        text_parts.append("World Objects:")
-        for obj in self.scenario_config.world_objects:
-            text_parts.append(f"- Object {obj.type} {obj.object_id} at position ({obj.pose.x}, {obj.pose.y})")
+        for zone in self.world_description.zones:
+            if zone.name in zone_names:
+                zone_names.remove(zone.name)
+                corners = [[corner.x, corner.y] for corner in zone.corners]
+                objects = [f"Object ID: {obj.name}, type: {obj.model.name} at ({obj.pose.position.x}, {obj.pose.position.y})" for obj in zone.entities.static]
+                objects.extend([f"{door.name} at start: ({door.start.x}, {door.start.y}), end: ({door.end.x}, {door.end.y})" for door in zone.doors])
+
+                text_parts.append(f"Zone {zone.name} with bounding boxes:\n{corners},\ncontains objects:\n{objects}")
 
         return "\n".join(text_parts)
+
+    def world_objects(self) -> list[WorldObjectConfig]:
+        _world_objects = []
+        for zone in self.world_description.zones:
+            zone_objects = [WorldObjectConfig(object_id=obj.name, type=obj.model.name, pose=Pose2D(obj.pose.position.x, obj.pose.position.y, obj.pose.orientation.to_yaw())) for obj in zone.entities.static]
+            _world_objects.extend(zone_objects)
+
+        return _world_objects
 
 
 @dataclass
@@ -72,52 +86,6 @@ class GenerationContext:
     world_info: WorldInfo
     mode: GenerationMode
     existing_agent_types: list[str] | None = None
-
-
-class TypeValidator:
-    """Typed validation + parsing using cattrs."""
-
-    def __init__(self):
-        self.converter = cattrs.Converter()
-
-    @staticmethod
-    def normalize_yaml_format(yaml_str: str) -> str:
-        try:
-            data = yaml.safe_load(yaml_str)
-            return yaml.dump(data, default_flow_style=False, sort_keys=False)
-        except yaml.YAMLError:
-            return yaml_str
-
-    def parse_agent_types(self, yaml_str: str | None) -> dict[str, AgentType]:
-        """
-        Parse and validate agent_types from YAML string.
-
-        Returns:
-            dict[str, AgentType]
-
-        Raises:
-            RuntimeError if parsing or structuring fails
-        """
-        assert yaml_str is not None
-
-        # normalize (optional)
-        yaml_str = self.normalize_yaml_format(yaml_str)
-
-        # YAML to dict
-        try:
-            raw = yaml.safe_load(yaml_str)
-        except yaml.YAMLError as e:
-            print("Raw yaml string:\n", yaml_str)
-            raise RuntimeError("yaml error") from e
-
-        if not isinstance(raw, dict):
-            raise RuntimeError("Agent types YAML must be a dict")
-
-        # dict to typed
-        try:
-            return {name: self.converter.structure(config, AgentType) for name, config in raw.items()}
-        except Exception as e:
-            raise RuntimeError("structure error") from e
 
 
 class LLMBehaviorTreeGenerator:
@@ -135,9 +103,6 @@ class LLMBehaviorTreeGenerator:
             raise ValueError(f"LLM_API_ENDPOINT must be one of ['GOOGLEGENAI', 'OPENAI'], got {_endpoint}")
 
         self.generated_scenario: str | None = None
-        # Kinda useless for now
-        # I tend to use `TypeValidator` for OpenAI API if I couldn't find a way to use it with apischema
-        self.type_validator = TypeValidator()
 
     def generate_scenario(self, context: GenerationContext) -> dict[str, Any]:
         """
@@ -149,12 +114,17 @@ class LLMBehaviorTreeGenerator:
         Returns:
             Complete scenario configuration dictionary
         """
+        start = time.time()
         if context.mode == GenerationMode.WORKFLOW:
-            return self._generate_workflow(context)
+            scenario = self._generate_workflow(context)
         elif context.mode == GenerationMode.AGENTIC:
-            return self._generate_agentic(context)
+            scenario = self._generate_agentic(context)
         else:
             raise ValueError(f"Unsupported generation mode: {context.mode}")
+        end = time.time()
+        print(f"Scenario generation took: {(end - start):.2f}s")
+
+        return scenario
 
     def generate_yaml(self, context: GenerationContext) -> str:
         """Generate scenario as YAML string."""
@@ -195,80 +165,88 @@ class LLMBehaviorTreeGenerator:
         """Generate using agentic AI approach with LangGraph."""
         raise NotImplementedError()
 
-    def _select_zones(self, context: GenerationContext) -> list[dict[str, Any]]:
+    def _select_zones(self, context: GenerationContext) -> list[str]:
         """Stage 1: Select relevant semantic zones."""
         system_prompt = zone_selection
-        user_prompt = f"Scenario: {context.user_prompt}\nWorld Information:\n{context.world_info.to_text()}\nIdentify the most relevant semantic zones for this scenario."
+        user_prompt = f"Scenario: {context.user_prompt}\nWorld Information:\n{context.world_info.world_zones_metadata()}\nIdentify the most relevant semantic zones for this scenario."
 
-        response = self.llm_client.generate(contents=user_prompt, system_instruction=system_prompt)
+        type_adapter = TypeAdapter(list[str])
+
+        start = time.time()
+        response = self.llm_client.generate(contents=user_prompt, system_instruction=system_prompt, response_json_schema=type_adapter.json_schema())
+        end = time.time()
+
         assert isinstance(response, str)
+        zones = type_adapter.validate_json(response)
 
-        try:
-            zones = json.loads(response)
-            return zones if isinstance(zones, list) else []
-        except json.JSONDecodeError:
-            return []
+        print(f"Zones selection took: {(end - start):.2f}s")
 
-    def _select_spawn_positions(self, context: GenerationContext, zones: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        return zones
+
+    def _select_spawn_positions(self, context: GenerationContext, zone_names: list[str]) -> list[AgentConfig]:
         """Stage 2: Select spawn positions for agents."""
         system_prompt = spawn_position_selection
-        user_prompt = f"Scenario: {context.user_prompt}\nSemantic Zones:\n{json.dumps(zones, indent=2)}\nWorld Information:\n{context.world_info.to_text()}\nSuggest spawn positions for different agent types."
+        user_prompt = f"Scenario: {context.user_prompt}\nWorld Information:\n{context.world_info.detail_info(zone_names)}\nSuggest spawn positions for different agent types."
 
-        response = self.llm_client.generate(system_prompt, user_prompt)
+        type_adaptor = TypeAdapter(list[AgentConfig])
+
+        start = time.time()
+        response = self.llm_client.generate(system_prompt, user_prompt, response_json_schema=type_adaptor.json_schema())
+        end = time.time()
+
         assert isinstance(response, str)
+        agent_configs = type_adaptor.validate_json(response)
 
-        try:
-            positions = json.loads(response)
-            return positions if isinstance(positions, dict) else {}
-        except json.JSONDecodeError:
-            return {}
+        print(f"Spawn positions selection took: {(end - start):.2f}s")
 
-    def _generate_behavior_trees(self, context: GenerationContext, zones: list[dict[str, Any]], spawn_positions: dict[str, list[dict[str, Any]]]) -> dict[str, AgentType]:
+        return agent_configs
+
+    def _generate_behavior_trees(self, context: GenerationContext, zone_names: list[str], spawn_positions: list[AgentConfig]) -> dict[str, AgentType]:
         """Stage 3: Generate behavior trees for agent types."""
         system_prompt = behavior_tree_generation
-        user_prompt = f"Scenario: {context.user_prompt}\nSemantic Zones:\n{json.dumps(zones, indent=2)}\nAgent Types and Spawn Positions:\n{json.dumps(spawn_positions, indent=2)}\nWorld Information:\n{context.world_info.to_text()}\nCreate behavior tree configurations for the agent types in this scenario."
+        _spawn_positions = [s.model_dump() for s in spawn_positions]
+        _world_info = context.world_info.detail_info(zone_names)
+        user_prompt = f"Scenario: {context.user_prompt}\nWorld Information:\n{_world_info}\nAgent Types and Spawn Positions:\n{_spawn_positions}\nCreate behavior tree configurations for the agent types in this scenario."
 
-        response = self.llm_client.generate(system_prompt, user_prompt, response_json_schema=deserialization_schema(dict[str, AgentType]))
-        assert isinstance(response, dict), f"Parsing error. Got response from LLM: {response}"
+        type_adapter = TypeAdapter(dict[str, AgentType])
 
-        for agent_type_name, agent_type in response.items():
-            if not isinstance(agent_type, AgentType) or not isinstance(agent_type_name, str):
-                raise ValueError(f"Parsing error of agent {agent_type_name}. Got response from LLM: {response}")
+        start = time.time()
+        response = self.llm_client.generate(system_prompt, user_prompt, response_json_schema=type_adapter.json_schema())
+        end = time.time()
 
-        return response
+        assert isinstance(response, str)
+        agent_types = type_adapter.validate_json(response)
 
-    def _assemble_scenario(self, context: GenerationContext, agent_types: dict[str, AgentType], spawn_positions: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+        print(f"Behavior generation took: {(end - start):.2f}s")
+
+        return agent_types
+
+    def _assemble_scenario(self, context: GenerationContext, agent_types: dict[str, AgentType], spawn_positions: list[AgentConfig]) -> dict[str, Any]:
         """Stage 4: Assemble complete scenario configuration."""
+        converter = Converter()
         scenario = {
             "name": f"generated_{context.user_prompt.replace(' ', '_')[:50]}",
             "description": context.user_prompt,
             "simulation": {"seed": 42, "dt": 0.05, "bt_tick_interval": 5, "execution_mode": "master"},
             "modules": {"perception": "default", "global_planner": "dijkstra", "local_planner": "sfm", "animation": "kinematic"},
-            "world_objects": context.world_info.scenario_config.world_objects,
-            "agent_types": agent_types,
-            "agents": [],
+            "agent_types": {k: v.model_dump() for k, v in agent_types.items()},
+            "agents": [s.model_dump() for s in spawn_positions],
+            "world_objects": converter.unstructure(world_info.world_objects()),
         }
-
-        # Create agent instances from spawn positions
-        agent_id = 1
-        for agent_type, positions in spawn_positions.items():
-            for pos in positions:
-                scenario["agents"].append({"agent_id": agent_id, "agent_type": agent_type, "spawn_pose": {"x": pos.get("x", 0), "y": pos.get("y", 0), "theta": pos.get("theta", 0)}})
-                agent_id += 1
 
         return scenario
 
 
 # Example usage
 if __name__ == "__main__":
-    from arena_humansim.utils.scenario import WorldObjectConfig
-    from arena_humansim.utils.types import Pose2D
+    from pathlib import Path
 
-    world_info = WorldInfo(
-        ScenarioConfig(
-            world_objects=[WorldObjectConfig(object_id="workstation", type="workstation", pose=Pose2D(0.0, 0.0, 0.0)), WorldObjectConfig(object_id="cafeteria", type="cafeteria", pose=Pose2D(5.0, 0.0, 0.0)), WorldObjectConfig(object_id="water_fountain", type="water_fountain", pose=Pose2D(3.0, 2.0, 0.0))],
-        )
-    )
+    from ament_index_python.packages import get_package_share_directory
+
+    world_path = Path(os.path.join(get_package_share_directory("arena_simulation_setup"), "worlds", "hospital_1"))
+    arena_world = World(path=world_path)
+
+    world_info = WorldInfo(world_description=arena_world.load())
 
     # Create generator with mock LLM
     generator = LLMBehaviorTreeGenerator()
@@ -276,6 +254,10 @@ if __name__ == "__main__":
     # Generate scenario
     context = GenerationContext(user_prompt="A busy office where workers perform tasks and take breaks for food and water", world_info=world_info, mode=GenerationMode.WORKFLOW)
 
+    start = time.time()
     scenario_yaml = generator.generate_yaml(context)
+    end = time.time()
+    print(f"Generation time: {(end - start):.2f}s")
     print(scenario_yaml)
-    generator.save_scenario("/opt/arena/deps/humansim/arena_humansim/arena_humansim/config/scenarios/test_scenario_generator.yaml")
+    scenario_path = os.path.join(get_package_share_directory("arena_humansim"), "config", "scenarios", "test_scenario_generator.yaml")
+    generator.save_scenario(scenario_path)

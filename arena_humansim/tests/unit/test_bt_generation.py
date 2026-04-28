@@ -121,6 +121,6 @@ class TestWorldInfo:
             ]
         )
 
-        text = world_info.to_text()
+        text = world_info.detail_info()
         assert "workstation" in text
         assert "work_zone" in text

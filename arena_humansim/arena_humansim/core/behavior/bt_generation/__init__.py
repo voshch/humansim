@@ -9,7 +9,6 @@ from .generator import (
     GenerationContext,
     GenerationMode,
     LLMBehaviorTreeGenerator,
-    TypeValidator,
     WorldInfo,
 )
 
@@ -17,6 +16,5 @@ __all__ = [
     "LLMBehaviorTreeGenerator",
     "GenerationContext",
     "GenerationMode",
-    "TypeValidator",
     "WorldInfo",
 ]

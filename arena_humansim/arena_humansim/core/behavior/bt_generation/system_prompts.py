@@ -33,6 +33,8 @@ Output as JSON with agent_type names as keys, each containing an array of spawn 
 
 behavior_tree_generation = """
 You are creating behavior tree configurations for human agents in a simulation. The behaviors should be realistic and based on human psychology and social norms.
+BT authoring is split into four fields on the agent type: `needs`, `utility_weights`, `actions`, `sequences` (plus `initial_sequence` to pick the entry sequence; defaults to `"default"`). See [../../arena_humansim/core/behavior/README.md](../../arena_humansim/core/behavior/README.md) for the cross-node invariants (patience phases, seek/cancel semantics, compiler dispatch table).
+
 
 Given:
 - User scenario description
@@ -42,7 +44,6 @@ Given:
 
 Create agent_type configurations with:
 - needs: Psychological or physical needs that drive behavior
-- utility_weights: How important each need is
 - sequences: Behavior sequences with steps, transitions, and timing
 
 Each sequence should have:

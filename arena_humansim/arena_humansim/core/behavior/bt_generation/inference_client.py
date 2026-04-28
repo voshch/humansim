@@ -25,7 +25,7 @@ class GoogleGenAIClient(InferenceClient):
         res = self.inference_client.models.generate_content(
             model=self.model,
             contents=contents,
-            config=GenerateContentConfig(system_instruction=system_instruction, thinking_config=ThinkingConfig(include_thoughts=False, thinking_level="low"), response_json_schema=response_json_schema, response_mime_type="application/json" if response_json_schema is not None else None),
+            config=GenerateContentConfig(system_instruction=system_instruction, thinking_config=ThinkingConfig(include_thoughts=False, thinking_level="low"), response_json_schema=response_json_schema, response_mime_type="application/json" if response_json_schema is not None else None, temperature=0.0),
         )
         answer = res.text
 
