@@ -9,6 +9,7 @@ and world semantic information.
 
 import os
 import time
+from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -50,17 +51,18 @@ class WorldInfo:
             objects = [f"{obj.name}" for obj in zone.entities.static]
             objects.extend([f"{door.name}" for door in zone.doors])
 
-            text_parts.append(f"Zone {zone.name} with bounding boxes:\n{corners},\ncontains objects:\n{objects}")
+            text_parts.append(f"Zone name: {zone.name} with bounding boxes:\n{corners},\ncontains objects:\n{objects}")
 
         return "\n".join(text_parts)
 
     def detail_info(self, zone_names: list[str], include_objects: bool = True) -> str:
         """Convert world info to descriptive text."""
         text_parts = []
+        _zone_names = deepcopy(zone_names)
 
         for zone in self.world_description.zones:
-            if zone.name in zone_names:
-                zone_names.remove(zone.name)
+            if zone.name in _zone_names:
+                _zone_names.remove(zone.name)
                 corners = [[corner.x, corner.y] for corner in zone.corners]
                 if include_objects:
                     objects = [f"`object_id`: {obj.name}, `type`: {obj.model.name} at `pose`: ({obj.pose.position.x}, {obj.pose.position.y})" for obj in zone.entities.static]
@@ -69,6 +71,9 @@ class WorldInfo:
                 objects.extend([f"{door.name} at start: ({door.start.x}, {door.start.y}), end: ({door.end.x}, {door.end.y})" for door in zone.doors])
 
                 text_parts.append(f"Zone {zone.name} with bounding boxes:\n{corners},\ncontains objects:\n{objects}")
+
+        if len(text_parts) == 0:
+            raise RuntimeError(f"Empty world info, could be that `zone_names` is invalid. Got: {zone_names}, ground truth: {[zone.name for zone in self.world_description.zones]}")
 
         return "\n".join(text_parts)
 
@@ -184,8 +189,14 @@ class LLMBehaviorTreeGenerator:
 
         assert isinstance(response, str)
         zones = type_adapter.validate_json(response)
+        assert len(zones) > 0
 
-        print(f"Zones selection took: {(end - start):.2f}s")
+        gt_zones = [zone.name for zone in context.world_info.world_description.zones]
+        for zone_name in zones:
+            if zone_name not in gt_zones:
+                raise ValueError(f"LLM chooses invalid zone: {zone_name}, available zones: {gt_zones}")
+
+        print(f"Zones selection took: {(end - start):.2f}s. {len(zones)} selected.")
 
         return zones
 
@@ -202,8 +213,9 @@ class LLMBehaviorTreeGenerator:
 
         assert isinstance(response, str)
         agent_configs = type_adaptor.validate_json(response)
+        assert len(agent_configs) > 0
 
-        print(f"Spawn positions selection took: {(end - start):.2f}s")
+        print(f"Spawn positions selection took: {(end - start):.2f}s. {len(agent_configs)} could be spawned.")
 
         return agent_configs
 
@@ -221,7 +233,7 @@ class LLMBehaviorTreeGenerator:
         assert isinstance(response, str)
         objects = type_adapter.validate_json(response)
 
-        print(f"Object selection took: {(end - start):.2f}s")
+        print(f"Object selection took: {(end - start):.2f}s. {len(objects)} selected as relevant objects for interactions.")
 
         return objects
 

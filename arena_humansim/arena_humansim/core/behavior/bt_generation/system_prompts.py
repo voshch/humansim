@@ -11,7 +11,7 @@ Identify 3-5 key semantic zones that are most relevant to the scenario. For each
 - objects: List of world object IDs that belong to this zone
 - agent_roles: What types of agents would use this zone
 
-Output as JSON array of zone objects.
+Output as JSON array of zone names.
 """
 
 object_selection = """
