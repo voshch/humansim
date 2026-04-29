@@ -20,7 +20,7 @@ from pydantic import TypeAdapter
 
 from arena_humansim.core.behavior.bt_generation.inference_client import GoogleGenAIClient, OpenAIClient
 from arena_humansim.core.behavior.bt_generation.schema import AgentConfig, AgentType
-from arena_humansim.core.behavior.bt_generation.system_prompts import behavior_tree_generation, spawn_position_selection, zone_selection
+from arena_humansim.core.behavior.bt_generation.system_prompts import behavior_tree_generation, object_selection, spawn_position_selection, zone_selection
 from arena_humansim.utils.scenario import WorldObjectConfig
 from arena_humansim.utils.types import Pose2D
 
@@ -54,7 +54,7 @@ class WorldInfo:
 
         return "\n".join(text_parts)
 
-    def detail_info(self, zone_names: list[str]) -> str:
+    def detail_info(self, zone_names: list[str], include_objects: bool = True) -> str:
         """Convert world info to descriptive text."""
         text_parts = []
 
@@ -62,7 +62,10 @@ class WorldInfo:
             if zone.name in zone_names:
                 zone_names.remove(zone.name)
                 corners = [[corner.x, corner.y] for corner in zone.corners]
-                objects = [f"Object ID: {obj.name}, type: {obj.model.name} at ({obj.pose.position.x}, {obj.pose.position.y})" for obj in zone.entities.static]
+                if include_objects:
+                    objects = [f"`object_id`: {obj.name}, `type`: {obj.model.name} at `pose`: ({obj.pose.position.x}, {obj.pose.position.y})" for obj in zone.entities.static]
+                else:
+                    objects = []
                 objects.extend([f"{door.name} at start: ({door.start.x}, {door.start.y}), end: ({door.end.x}, {door.end.y})" for door in zone.doors])
 
                 text_parts.append(f"Zone {zone.name} with bounding boxes:\n{corners},\ncontains objects:\n{objects}")
@@ -155,10 +158,13 @@ class LLMBehaviorTreeGenerator:
         # Stage 2: Spawn position selection
         spawn_positions = self._select_spawn_positions(context, zones)
 
-        # Stage 3: Behavior tree generation
-        agent_types = self._generate_behavior_trees(context, zones, spawn_positions)
+        # Stage 3: Relevant world objects for interactions selection
+        relevant_objs = self._select_objects(context)
 
-        # Stage 4: Assemble scenario
+        # Stage 4: Behavior tree generation
+        agent_types = self._generate_behavior_trees(context, zones, spawn_positions, relevant_objs)
+
+        # Stage 5: Assemble scenario
         return self._assemble_scenario(context, agent_types, spawn_positions)
 
     def _generate_agentic(self, context: GenerationContext) -> dict[str, Any]:
@@ -201,12 +207,30 @@ class LLMBehaviorTreeGenerator:
 
         return agent_configs
 
-    def _generate_behavior_trees(self, context: GenerationContext, zone_names: list[str], spawn_positions: list[AgentConfig]) -> dict[str, AgentType]:
-        """Stage 3: Generate behavior trees for agent types."""
+    def _select_objects(self, context: GenerationContext) -> list[str]:
+        """Stage 3: Select relevant semantic objects for interactions."""
+        system_prompt = object_selection
+        user_prompt = f"Scenario: {context.user_prompt}\nWorld Information:\n{context.world_info.world_zones_metadata()}\nIdentify the most relevant world objects for this scenario."
+
+        type_adapter = TypeAdapter(list[str])
+
+        start = time.time()
+        response = self.llm_client.generate(contents=user_prompt, system_instruction=system_prompt, response_json_schema=type_adapter.json_schema())
+        end = time.time()
+
+        assert isinstance(response, str)
+        objects = type_adapter.validate_json(response)
+
+        print(f"Object selection took: {(end - start):.2f}s")
+
+        return objects
+
+    def _generate_behavior_trees(self, context: GenerationContext, zone_names: list[str], spawn_positions: list[AgentConfig], relevant_world_obj: list[str]) -> dict[str, AgentType]:
+        """Stage 4: Generate behavior trees for agent types."""
         system_prompt = behavior_tree_generation
         _spawn_positions = [s.model_dump() for s in spawn_positions]
-        _world_info = context.world_info.detail_info(zone_names)
-        user_prompt = f"Scenario: {context.user_prompt}\nWorld Information:\n{_world_info}\nAgent Types and Spawn Positions:\n{_spawn_positions}\nCreate behavior tree configurations for the agent types in this scenario."
+        _world_info = context.world_info.detail_info(zone_names, include_objects=False)
+        user_prompt = f"Scenario: {context.user_prompt}\nWorld Information:\n{_world_info}\nAgent Types and Spawn Positions:\n{_spawn_positions}\nRelevant world objects for interactions:{relevant_world_obj}\nCreate behavior tree configurations for the agent types in this scenario."
 
         type_adapter = TypeAdapter(dict[str, AgentType])
 
@@ -215,14 +239,18 @@ class LLMBehaviorTreeGenerator:
         end = time.time()
 
         assert isinstance(response, str)
-        agent_types = type_adapter.validate_json(response)
+        try:
+            agent_types = type_adapter.validate_json(response)
 
-        print(f"Behavior generation took: {(end - start):.2f}s")
-
-        return agent_types
+            return agent_types
+        except Exception as e:
+            print(f"Raw LLM output: {response}")
+            raise RuntimeError(e) from e
+        finally:
+            print(f"Behavior generation took: {(end - start):.2f}s")
 
     def _assemble_scenario(self, context: GenerationContext, agent_types: dict[str, AgentType], spawn_positions: list[AgentConfig]) -> dict[str, Any]:
-        """Stage 4: Assemble complete scenario configuration."""
+        """Stage 5: Assemble complete scenario configuration."""
         converter = Converter()
         scenario = {
             "name": f"generated_{context.user_prompt.replace(' ', '_')[:50]}",

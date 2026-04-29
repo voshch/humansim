@@ -8,12 +8,23 @@ Given:
 Identify 3-5 key semantic zones that are most relevant to the scenario. For each zone, provide:
 - name: A descriptive name for the zone
 - description: What happens in this zone
-- relevant_objects: List of world object IDs that belong to this zone
+- objects: List of world object IDs that belong to this zone
 - agent_roles: What types of agents would use this zone
 
 Output as JSON array of zone objects.
 """
 
+object_selection = """
+You are an expert in human behavior simulation and spatial reasoning. Your task is to analyze a scenario description and world information to identify relevant objects which agents should interact with.
+
+Given:
+- User scenario description
+- World objects, walls, and obstacles
+
+Identify key semantic objects id or type that are most relevant to the scenario.
+
+Output as JSON array of objects.
+"""
 spawn_position_selection = """
 You are designing spawn positions for agents in a human simulation scenario.
 
