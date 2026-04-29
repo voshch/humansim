@@ -126,6 +126,9 @@ _C_WALL = rgba(0.6, 0.0, 0.0, 0.6)
 _C_WOBJ = rgba(0.3, 0.7, 1.0, 0.5)
 _C_OBST = rgba(0.8, 0.5, 0.1, 0.4)
 _C_OBST_LBL = rgba(1.0, 0.8, 0.3, 0.9)
+_C_BODY_HUMAN = rgba(0.95, 0.75, 0.55, 0.9)
+_C_BODY_ROBOT = rgba(0.4, 0.4, 0.5, 0.9)
+_C_HEADING = rgba(0.1, 0.1, 0.1, 0.9)
 _NEED_COLORS = [
     rgba(0.2, 0.8, 0.2, 0.8),
     rgba(0.8, 0.8, 0.2, 0.8),
@@ -305,6 +308,41 @@ class MarkerPublisher:
         self._touched.clear()
         self._touched_ns.clear()
         self._dirty.clear()
+
+
+def publish_agents(pub: MarkerPublisher, agents: Iterable[BaseAgent]) -> None:
+    from arena_humansim.utils.types import AgentKind
+
+    body_view = pub.view("agent_body", Marker.CYLINDER)
+    head_view = pub.view("agent_heading", Marker.ARROW)
+    for agent in agents:
+        aid = agent.state.agent_id
+        pose = agent.state.pose
+        radius = agent.params.agent_radius
+        is_robot = agent.state.kind == AgentKind.ROBOT
+        height = 0.5 if is_robot else 1.7
+        color = _C_BODY_ROBOT if is_robot else _C_BODY_HUMAN
+
+        m, new = body_view.get(aid)
+        m.pose.position.x, m.pose.position.y = pose.x, pose.y
+        m.pose.position.z = height / 2.0
+        m.pose.orientation.z = math.sin(pose.theta / 2.0)
+        m.pose.orientation.w = math.cos(pose.theta / 2.0)
+        m.scale.x = m.scale.y = radius * 2.0
+        m.scale.z = height
+        if new:
+            m.color = color
+
+        m, new = head_view.get(aid)
+        if new:
+            m.scale.x, m.scale.y, m.scale.z = 0.03, 0.06, 0.06
+            m.color = _C_HEADING
+            m.points = [Point(), Point()]
+        tip_len = radius + 0.2
+        m.points[0].x, m.points[0].y, m.points[0].z = pose.x, pose.y, height + 0.05
+        m.points[1].x = pose.x + tip_len * math.cos(pose.theta)
+        m.points[1].y = pose.y + tip_len * math.sin(pose.theta)
+        m.points[1].z = height + 0.05
 
 
 def publish_behavior(

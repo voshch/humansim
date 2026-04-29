@@ -7,7 +7,6 @@ import pytest
 import yaml
 
 from arena_humansim.core.agents.types import (
-    SampledLocalPlanner,
     SampledParams,
     SampledPerception,
 )
@@ -35,12 +34,12 @@ def _params(name: str = "adult") -> SampledParams:
         reaction_time=0.4,
         personal_space_min=0.6,
         perception=SampledPerception(vision_range=5.0, vision_fov=180.0),
-        local_planner_params=SampledLocalPlanner(
-            relaxation_time=0.5,
-            repulsion_strength=2.1,
-            repulsion_range=0.3,
-            anisotropy=0.5,
-        ),
+        local_planner_params={
+            "relaxation_time": 0.5,
+            "repulsion_strength": 2.1,
+            "repulsion_range": 0.3,
+            "anisotropy": 0.5,
+        },
         perception_stack=("default",),
         local_planner="sfm",
         global_planner="dijkstra",
@@ -104,6 +103,7 @@ def test_record_spawn_emits_expected_keys(tmp_path: Path) -> None:
         "vision_range": pytest.approx(5.0),
         "vision_fov": pytest.approx(180.0),
         "proximity_sense": pytest.approx(1.0),
+        "vision_occlusion": True,
     }
     assert params["local_planner_params"]["relaxation_time"] == pytest.approx(0.5)
     assert params["local_planner_params"]["repulsion_strength"] == pytest.approx(2.1)

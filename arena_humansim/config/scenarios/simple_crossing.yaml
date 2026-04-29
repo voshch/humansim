@@ -16,14 +16,6 @@ simulation:
   max_ticks: 2000
   execution_mode: master
 
-modules:
-  perception: default
-  global_planner: dijkstra
-  local_planner: sfm
-  interaction_manager: default
-  animation: kinematic
-
-# Inline agent type definitions (merged with builtins; overrides take precedence).
 agent_types:
   tourist_group:
     desired_velocity: {mean: 0.9, std: 0.2}

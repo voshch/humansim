@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from arena_humansim.core.pool import PoolAware
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
 
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
 _registry: ModuleRegistry[Perception] = ModuleRegistry()
 
 
-class Perception(Loggable, ABC):
+class Perception(PoolAware, Loggable, ABC):
     supports_pool: bool = False
 
     @abstractmethod

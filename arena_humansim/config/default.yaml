@@ -8,3 +8,4 @@ arena_humansim:
     local_planner: sfm
     animation: noop
     collision: wall_projection
+    occlusion: bitmap

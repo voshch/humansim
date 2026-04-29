@@ -43,7 +43,7 @@ def create_agent(
     if isinstance(agent_type, AgentType):
         if rng is None:
             raise ValueError("rng is required when agent_type is AgentType")
-        params = sample_agent_type(agent_type, rng)
+        params = sample_agent_type(agent_type, rng, default_local_planner=defaults["local_planner"])
     else:
         params = agent_type
 

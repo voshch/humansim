@@ -50,6 +50,19 @@ Maintained in `_add_membership` / `_drop_membership` / `_create_interaction` / `
 
 `_teardown(outcome)` clears indexes, drops memberships, leaves formations, and propagates outcome (`COMPLETED` / `CANCELED` / `INTERRUPTED`) to every ex-member's BT movement.
 
+## Drift eviction
+
+`_tick_drift_eviction` runs every `update(dt)` immediately before `_tick_formations`. For each `ACTIVE` interaction it computes a per-participant proximity check and `stop(aid, iid, INTERRUPTED)`s any participant past the threshold:
+
+- **Object-bound** (`kind.is_object_bound`): distance from the participant to `WorldKnowledge.object_pose(interaction.object_id)`.
+- **Otherwise** (`NONE` / `TAG` / `AGENT`): distance from the participant to its nearest other participant. Skipped while the interaction has fewer than two locatable participants.
+
+Threshold is `kind.interaction_radius * cohesion_multiplier` (`InteractionManager.__init__`, default 1.2). Same radius as request-time proximity, scaled up slightly for engagement-bubble slack — an evicted agent is past the seek-match boundary by construction, so a re-seek on the next BT tick can't immediately rejoin without first walking back into range.
+
+A per-participant latch (`interaction.state["_drift_arrived"]`) gates eviction: a participant is only evictable after first being observed within the threshold. "Drift" applies to participants who arrived and then left, not to ones still inbound — without this latch, a freshly-`ACTIVE` interaction whose formation hasn't pulled members in yet would self-evict on tick 1.
+
+Eviction surgically drops the offender from one interaction; if the participant count falls below `min_participants`, `stop()` cascades into `_teardown(INTERRUPTED)` as usual.
+
 ## BT state propagation
 
 All BT side-effects funnel through one helper:

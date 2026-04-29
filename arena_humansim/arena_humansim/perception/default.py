@@ -10,13 +10,15 @@ from . import Perception
 if TYPE_CHECKING:
     from arena_humansim.core.agents import BaseAgent
     from arena_humansim.core.pool import AgentPool
+    from arena_humansim.occlusion import Occluder
     from arena_humansim.utils.types import AgentState, BeliefState, WorldState
 
 
 class DefaultPerception(Perception):
     supports_pool: bool = True
 
-    def __init__(self) -> None:
+    def __init__(self, occluder: Occluder | None = None) -> None:
+        self._occluder = occluder
         self._shared_tree: cKDTree | None = None
         self._shared_ids: list[int] | None = None
         self._shared_positions: list[tuple[float, float]] | None = None
@@ -90,6 +92,23 @@ class DefaultPerception(Perception):
             prox_mask = dists <= proximity_sense[:, None]
             mask |= prox_mask
 
+        if self._occluder is not None:
+            row, col = np.where(mask)
+            if len(row) > 0:
+                needs_los = pool.vision_occlusion[:n][row]
+                if np.any(needs_los):
+                    p_a = positions[row]
+                    p_b = positions[col]
+                    los = self._occluder.clear(p_a, p_b)
+                    # agents with vision_occlusion=False always pass; others require clear LOS
+                    los_ok = los | ~needs_los
+                    flat = np.ravel_multi_index((row, col), (n, n))
+                    flat_blocked = flat[~los_ok]
+                    if len(flat_blocked) > 0:
+                        mask_flat = mask.ravel()
+                        mask_flat[flat_blocked] = False
+                        mask = mask_flat.reshape(n, n)
+
         row, col = np.where(mask)
         if len(row) == 0:
             pool.set_neighbor_csr(
@@ -148,6 +167,17 @@ class DefaultPerception(Perception):
             fov_ok[needs_fov] = angle_diff <= half_fov
 
         keep = (range_ok & fov_ok) | prox_ok
+
+        if self._occluder is not None and np.any(keep):
+            needs_los = pool.vision_occlusion[:n][row[keep]]
+            if np.any(needs_los):
+                p_a = positions[row[keep]]
+                p_b = positions[col[keep]]
+                los = self._occluder.clear(p_a, p_b)
+                los_ok = los | ~needs_los
+                keep_indices = np.where(keep)[0]
+                keep[keep_indices[~los_ok]] = False
+
         row = row[keep]
         col = col[keep]
 
@@ -171,6 +201,7 @@ class DefaultPerception(Perception):
         vision_range: float = agent.params.perception.vision_range
         vision_fov: float = agent.params.perception.vision_fov
         proximity_sense: float = agent.params.perception.proximity_sense
+        vision_occlusion: bool = agent.params.perception.vision_occlusion
 
         if agent_id not in all_agents:
             return belief
@@ -192,6 +223,7 @@ class DefaultPerception(Perception):
         query_radius = max(vision_range, proximity_sense)
         neighbor_indices = self._shared_tree.query_ball_point([ox, oy], query_radius)
 
+        candidates: list[int] = []
         for idx in neighbor_indices:
             nid = self._shared_ids[idx]
             if nid == agent_id:
@@ -207,6 +239,16 @@ class DefaultPerception(Perception):
                     angle_diff = abs(_wrap_angle(bearing - heading))
                     if angle_diff > half_fov:
                         continue
+            candidates.append(idx)
+
+        if self._occluder is not None and vision_occlusion and candidates:
+            p_a = np.array([[ox, oy]] * len(candidates), dtype=np.float64)
+            p_b = np.array([self._shared_positions[idx] for idx in candidates], dtype=np.float64)
+            los = self._occluder.clear(p_a, p_b)
+            candidates = [idx for idx, clear in zip(candidates, los, strict=True) if clear]
+
+        for idx in candidates:
+            nid = self._shared_ids[idx]
             belief.observed_agents.append(all_agents[nid])
 
         return belief

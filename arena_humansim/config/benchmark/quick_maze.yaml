@@ -1,0 +1,17 @@
+dt: 0.05
+ticks: 200
+warmup: 30
+rounds: 1
+
+stages:
+  - label: low/med/high (10x10 maze)
+    agents: [10, 50, 200]
+    walls: maze(10)
+
+reference:
+  label: default
+  params_file: pkg://arena_humansim/config/default.yaml
+
+candidate:
+  label: default (repeat)
+  params_file: pkg://arena_humansim/config/default.yaml

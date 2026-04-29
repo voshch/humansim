@@ -16,13 +16,6 @@ simulation:
   max_ticks: 5000
   execution_mode: master
 
-modules:
-  perception: default
-  global_planner: dijkstra
-  local_planner: sfm
-  interaction_manager: default
-  animation: kinematic
-
 agents:
   # Eastbound through the horizontal corridor
   - agent_id: 0

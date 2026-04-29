@@ -18,9 +18,13 @@ class ORCAPlanner(LocalPlanner):
         self,
         time_horizon: float = 5.0,
         max_neighbors: int = 10,
+        neighbor_dist: float = 5.0,
+        goal_radius: float = 0.15,
     ):
         self.time_horizon = time_horizon
         self.max_neighbors = max_neighbors
+        self.neighbor_dist = neighbor_dist
+        self.goal_radius = goal_radius
 
     def compute(
         self,
@@ -58,7 +62,7 @@ class ORCAPlanner(LocalPlanner):
 
             diff = goal_pos - pos
             dist = np.linalg.norm(diff)
-            if dist < _EPS:
+            if dist < self.goal_radius:
                 pref_vel = np.zeros(2)
             else:
                 pref_vel = (diff / dist) * desired_vel
@@ -66,11 +70,13 @@ class ORCAPlanner(LocalPlanner):
             neighbors: list[tuple[np.ndarray, np.ndarray, float]] = []
             if tree is not None:
                 k = min(self.max_neighbors + 1, len(agents))
-                distances, indices = tree.query(agent_positions[i], k=k)
+                distances, indices = tree.query(agent_positions[i], k=k, distance_upper_bound=self.neighbor_dist)
                 if np.ndim(distances) == 0:
                     distances = [distances]
                     indices = [indices]
-                for idx in indices:
+                for dist_n, idx in zip(distances, indices, strict=False):
+                    if not np.isfinite(dist_n):
+                        break
                     nid = agent_ids[idx]
                     if nid == aid:
                         continue

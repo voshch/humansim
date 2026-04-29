@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 
 from arena_humansim.core.agents import BaseAgent
+from arena_humansim.core.agents.types import ParamDist
 from arena_humansim.utils.types import Pose2D, Segments
 
 from . import LocalPlanner
@@ -30,8 +31,21 @@ _DEFAULT_ROBOT_STRENGTH_SCALE = 1.5
 _DEFAULT_ROBOT_RANGE_SCALE = 1.3
 
 
+def _resize_1d(arr: np.ndarray, new_capacity: int, old_capacity: int) -> np.ndarray:
+    out = np.zeros(new_capacity, dtype=arr.dtype)
+    out[:old_capacity] = arr[:old_capacity]
+    return out
+
+
 class SFMPlanner(LocalPlanner):
     supports_pool: bool = True
+
+    PARAM_DEFAULTS: ClassVar[dict[str, ParamDist]] = {
+        "relaxation_time": ParamDist(0.5, 0.05),
+        "repulsion_strength": ParamDist(2.1, 0.2),
+        "repulsion_range": ParamDist(0.3, 0.03),
+        "anisotropy": ParamDist(0.5, 0.0),
+    }
 
     def __init__(
         self,
@@ -50,6 +64,43 @@ class SFMPlanner(LocalPlanner):
         self._gain_range_scale = np.ones((_N_KINDS, _N_KINDS), dtype=np.float64)
         self._gain_strength_scale[_KIND_HUMAN, _KIND_ROBOT] = _DEFAULT_ROBOT_STRENGTH_SCALE
         self._gain_range_scale[_KIND_HUMAN, _KIND_ROBOT] = _DEFAULT_ROBOT_RANGE_SCALE
+
+        self._relaxation_time = np.zeros(0, dtype=np.float64)
+        self._repulsion_strength = np.zeros(0, dtype=np.float64)
+        self._repulsion_range = np.zeros(0, dtype=np.float64)
+        self._anisotropy = np.zeros(0, dtype=np.float64)
+
+    def attach(self, pool: AgentPool) -> None:
+        self._allocate_soa(pool.capacity)
+        pool.register_extension(self)
+
+    def _allocate_soa(self, cap: int) -> None:
+        self._relaxation_time = np.zeros(cap, dtype=np.float64)
+        self._repulsion_strength = np.zeros(cap, dtype=np.float64)
+        self._repulsion_range = np.zeros(cap, dtype=np.float64)
+        self._anisotropy = np.zeros(cap, dtype=np.float64)
+
+    def on_pool_grow(self, new_capacity: int, old_capacity: int) -> None:
+        self._relaxation_time = _resize_1d(self._relaxation_time, new_capacity, old_capacity)
+        self._repulsion_strength = _resize_1d(self._repulsion_strength, new_capacity, old_capacity)
+        self._repulsion_range = _resize_1d(self._repulsion_range, new_capacity, old_capacity)
+        self._anisotropy = _resize_1d(self._anisotropy, new_capacity, old_capacity)
+
+    def on_pool_add(self, idx: int, agent: BaseAgent) -> None:
+        lp = agent.params.local_planner_params
+        self._relaxation_time[idx] = lp["relaxation_time"]
+        self._repulsion_strength[idx] = lp["repulsion_strength"]
+        self._repulsion_range[idx] = lp["repulsion_range"]
+        self._anisotropy[idx] = lp["anisotropy"]
+
+    def on_pool_swap(self, idx: int, last: int) -> None:
+        self._relaxation_time[idx] = self._relaxation_time[last]
+        self._repulsion_strength[idx] = self._repulsion_strength[last]
+        self._repulsion_range[idx] = self._repulsion_range[last]
+        self._anisotropy[idx] = self._anisotropy[last]
+
+    def on_pool_reset(self) -> None:
+        pass
 
     def apply_policy_params(self, params_json: str) -> None:
         if not params_json:
@@ -90,24 +141,18 @@ class SFMPlanner(LocalPlanner):
         self._wall_len_sq = np.sum(self._wall_d**2, axis=1)
         self._logger.info(f"Loaded {len(segments)} wall segment(s)")
 
-    def compute_pool(self, pool: AgentPool, store_forces: bool = False, dt: float = 1.0) -> None:
+    def _compute_forces_pool(self, pool: AgentPool) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         n = pool.n
-        if n == 0:
-            self._last_forces = {}
-            self._last_force_arrays = None
-            return
-
         pos = pool.pos[:n]
         vel = pool.vel[:n]
         goal = pool.goal_pos[:n]
         has_goal = pool.has_goal[:n]
 
         desired_v = pool.desired_vel[:n]
-        relax = pool.relaxation_time[:n]
-        rep_str = pool.repulsion_strength[:n]
-        rep_rng = pool.repulsion_range[:n]
+        relax = self._relaxation_time[:n]
+        rep_str = self._repulsion_strength[:n]
+        rep_rng = self._repulsion_range[:n]
         radii = pool.agent_radius[:n]
-        max_v = pool.max_velocity[:n]
 
         d_goal = goal - pos
         dist_goal = np.hypot(d_goal[:, 0], d_goal[:, 1])[:, None]
@@ -122,7 +167,7 @@ class SFMPlanner(LocalPlanner):
         indptr = pool.neighbor_indptr
         indices = pool.neighbor_indices
 
-        aniso = pool.anisotropy[:n]
+        aniso = self._anisotropy[:n]
 
         if len(indices) > 0:
             pair_obs = np.repeat(np.arange(n, dtype=np.int32), np.diff(indptr))
@@ -154,6 +199,28 @@ class SFMPlanner(LocalPlanner):
 
         f_wall = self._compute_wall_forces_vectorized(pos, radii)
 
+        return f_att, f_rep, f_wall, at_goal
+
+    def _stash_force_arrays(self, pool: AgentPool, n: int, f_att: np.ndarray, f_rep: np.ndarray, f_wall: np.ndarray) -> None:
+        self._last_force_arrays = (
+            pool.agent_ids[:n].copy(),
+            pool.pos[:n].copy(),
+            f_att.copy(),
+            f_rep.copy(),
+            f_wall.copy(),
+        )
+
+    def compute_pool(self, pool: AgentPool, store_forces: bool = False, dt: float = 1.0) -> None:
+        n = pool.n
+        if n == 0:
+            self._last_forces = {}
+            self._last_force_arrays = None
+            return
+
+        f_att, f_rep, f_wall, at_goal = self._compute_forces_pool(pool)
+        vel = pool.vel[:n]
+        max_v = pool.max_velocity[:n]
+
         total_f = f_att + f_rep + f_wall
         new_vel = vel + total_f * dt
 
@@ -166,13 +233,7 @@ class SFMPlanner(LocalPlanner):
         pool.vel[:n] = new_vel
 
         if store_forces:
-            self._last_force_arrays = (
-                pool.agent_ids[:n].copy(),
-                pos.copy(),
-                f_att.copy(),
-                f_rep.copy(),
-                f_wall.copy(),
-            )
+            self._stash_force_arrays(pool, n, f_att, f_rep, f_wall)
         else:
             self._last_force_arrays = None
 
@@ -206,6 +267,64 @@ class SFMPlanner(LocalPlanner):
         forces = mag[:, :, None] * normals
         return forces.sum(axis=1)
 
+    def _compute_forces_scalar(
+        self,
+        agent: BaseAgent,
+        goal: Pose2D,
+    ) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float], tuple[float, float]] | None:
+        params = agent.params
+        belief = agent.belief
+
+        lp = params.local_planner_params
+        agent_radius: float = params.agent_radius
+
+        cur_x, cur_y = agent.state.pose.x, agent.state.pose.y
+        cur_vx, cur_vy = agent.state.velocity
+
+        dx_goal = goal.x - cur_x
+        dy_goal = goal.y - cur_y
+        dist_goal = np.hypot(dx_goal, dy_goal)
+        if dist_goal < _EPS:
+            return None
+
+        e_goal_x = dx_goal / dist_goal
+        e_goal_y = dy_goal / dist_goal
+
+        f_att_x = (params.desired_velocity * e_goal_x - cur_vx) / lp["relaxation_time"]
+        f_att_y = (params.desired_velocity * e_goal_y - cur_vy) / lp["relaxation_time"]
+
+        f_rep_x = 0.0
+        f_rep_y = 0.0
+        if belief is not None:
+            neighbors = [ag for ag in belief.observed_agents if ag.agent_id != agent.state.agent_id]
+            if neighbors:
+                other_pos = np.empty((len(neighbors), 2), dtype=np.float64)
+                for i, ag in enumerate(neighbors):
+                    other_pos[i, 0] = ag.pose.x
+                    other_pos[i, 1] = ag.pose.y
+
+                diff = np.array([cur_x, cur_y]) - other_pos
+                dists = np.maximum(np.linalg.norm(diff, axis=1), _EPS)
+                normals = diff / dists[:, np.newaxis]
+
+                r_ij = 2.0 * agent_radius
+                magnitudes = lp["repulsion_strength"] * np.exp((r_ij - dists) / lp["repulsion_range"])
+
+                cos_phi = -normals[:, 0] * e_goal_x + -normals[:, 1] * e_goal_y
+                w = lp["anisotropy"] + (1.0 - lp["anisotropy"]) * 0.5 * (1.0 + cos_phi)
+                magnitudes *= w
+
+                forces = magnitudes[:, np.newaxis] * normals
+                f_rep_x = float(forces[:, 0].sum())
+                f_rep_y = float(forces[:, 1].sum())
+
+        f_wall_x = 0.0
+        f_wall_y = 0.0
+        if self._wall_segments:
+            f_wall_x, f_wall_y = self._compute_wall_forces_scalar(cur_x, cur_y, agent_radius)
+
+        return (f_att_x, f_att_y), (f_rep_x, f_rep_y), (f_wall_x, f_wall_y), (e_goal_x, e_goal_y)
+
     def compute(
         self,
         agents: Sequence[BaseAgent],
@@ -222,86 +341,24 @@ class SFMPlanner(LocalPlanner):
 
         for agent in agents:
             agent_id = agent.state.agent_id
-            params = agent.params
-            belief = agent.belief
-
             goal = global_goals.get(agent_id)
             if goal is None:
                 velocities[agent_id] = (0.0, 0.0)
                 continue
 
-            desired_velocity: float = params.desired_velocity
-            lp = params.local_planner_params
-            relaxation_time: float = lp.relaxation_time
-            repulsion_strength: float = lp.repulsion_strength
-            repulsion_range: float = lp.repulsion_range
-            anisotropy: float = lp.anisotropy
-            agent_radius: float = params.agent_radius
-            max_velocity: float = params.max_velocity
-
-            gx, gy = goal.x, goal.y
-
-            cur_x, cur_y = agent.state.pose.x, agent.state.pose.y
-            cur_vx, cur_vy = agent.state.velocity
-
-            neighbors = []
-            if belief is not None:
-                for ag in belief.observed_agents:
-                    if ag.agent_id != agent_id:
-                        neighbors.append(ag)
-
-            dx_goal = gx - cur_x
-            dy_goal = gy - cur_y
-            dist_goal = np.hypot(dx_goal, dy_goal)
-
-            if dist_goal < _EPS:
+            forces = self._compute_forces_scalar(agent, goal)
+            if forces is None:
                 velocities[agent_id] = (0.0, 0.0)
                 continue
+            (f_att_x, f_att_y), (f_rep_x, f_rep_y), (f_wall_x, f_wall_y), _ = forces
 
-            e_goal_x = dx_goal / dist_goal
-            e_goal_y = dy_goal / dist_goal
-
-            f_att_x = (desired_velocity * e_goal_x - cur_vx) / relaxation_time
-            f_att_y = (desired_velocity * e_goal_y - cur_vy) / relaxation_time
-
-            f_rep_x = 0.0
-            f_rep_y = 0.0
-
-            if neighbors:
-                n_neighbors = len(neighbors)
-                other_pos = np.empty((n_neighbors, 2), dtype=np.float64)
-                for i, ag in enumerate(neighbors):
-                    other_pos[i, 0] = ag.pose.x
-                    other_pos[i, 1] = ag.pose.y
-
-                diff = np.array([cur_x, cur_y]) - other_pos
-                dists = np.linalg.norm(diff, axis=1)
-                dists = np.maximum(dists, _EPS)
-
-                normals = diff / dists[:, np.newaxis]
-
-                r_ij = 2.0 * agent_radius
-                magnitudes = repulsion_strength * np.exp((r_ij - dists) / repulsion_range)
-
-                cos_phi = -normals[:, 0] * e_goal_x + -normals[:, 1] * e_goal_y
-                w = anisotropy + (1.0 - anisotropy) * 0.5 * (1.0 + cos_phi)
-                magnitudes *= w
-
-                forces = magnitudes[:, np.newaxis] * normals
-                f_rep_x = float(forces[:, 0].sum())
-                f_rep_y = float(forces[:, 1].sum())
-
-            f_wall_x = 0.0
-            f_wall_y = 0.0
-            if self._wall_segments:
-                f_wall_x, f_wall_y = self._compute_wall_forces_scalar(cur_x, cur_y, agent_radius)
-
+            cur_vx, cur_vy = agent.state.velocity
             total_fx = f_att_x + f_rep_x + f_wall_x
             total_fy = f_att_y + f_rep_y + f_wall_y
-
             new_vx = cur_vx + total_fx * dt
             new_vy = cur_vy + total_fy * dt
 
+            max_velocity = agent.params.max_velocity
             speed = np.hypot(new_vx, new_vy)
             if speed > max_velocity:
                 scale = max_velocity / speed

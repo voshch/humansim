@@ -143,10 +143,10 @@ def test_get_spawn_params_nested(tmp_path: Path) -> None:
     assert params.agent_radius == pytest.approx(0.25)
     assert params.perception.vision_range == pytest.approx(7.5)
     assert params.perception.vision_fov == pytest.approx(200.0)
-    assert params.local_planner_params.relaxation_time == pytest.approx(0.7)
-    assert params.local_planner_params.repulsion_strength == pytest.approx(3.0)
-    assert params.local_planner_params.repulsion_range == pytest.approx(0.4)
-    assert params.local_planner_params.anisotropy == pytest.approx(0.6)
+    assert params.local_planner_params["relaxation_time"] == pytest.approx(0.7)
+    assert params.local_planner_params["repulsion_strength"] == pytest.approx(3.0)
+    assert params.local_planner_params["repulsion_range"] == pytest.approx(0.4)
+    assert params.local_planner_params["anisotropy"] == pytest.approx(0.6)
     assert params.perception_stack == ("default",)
     assert params.local_planner == "sfm"
 
@@ -158,10 +158,10 @@ def test_get_spawn_params_flat_legacy_fallback(tmp_path: Path) -> None:
     assert params.name == "child"
     assert params.perception.vision_range == pytest.approx(4.0)
     assert params.perception.vision_fov == pytest.approx(120.0)
-    assert params.local_planner_params.relaxation_time == pytest.approx(0.6)
-    assert params.local_planner_params.repulsion_strength == pytest.approx(2.5)
-    assert params.local_planner_params.repulsion_range == pytest.approx(0.35)
-    assert params.local_planner_params.anisotropy == pytest.approx(0.55)
+    assert params.local_planner_params["relaxation_time"] == pytest.approx(0.6)
+    assert params.local_planner_params["repulsion_strength"] == pytest.approx(2.5)
+    assert params.local_planner_params["repulsion_range"] == pytest.approx(0.35)
+    assert params.local_planner_params["anisotropy"] == pytest.approx(0.55)
 
 
 def test_get_spawn_params_missing_returns_none(tmp_path: Path) -> None:

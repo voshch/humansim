@@ -7,6 +7,7 @@ from collections.abc import Callable, Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from arena_humansim.core.agents import BaseAgent
+from arena_humansim.core.pool import PoolAware
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
 from arena_humansim.utils.types import HighLevelCommand, Pose2D, WallAware
@@ -67,7 +68,7 @@ def simplify_path(
     return [waypoints[i] for i in range(n) if not removed[i]]
 
 
-class GlobalPlanner(WallAware, Loggable, ABC):
+class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
     @abstractmethod
     def compute(
         self,

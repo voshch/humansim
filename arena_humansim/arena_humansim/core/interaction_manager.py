@@ -80,6 +80,7 @@ class InteractionManager(Loggable):
         world_knowledge: WorldKnowledge | None = None,
         agent_lookup: AgentLookup | None = None,
         formation_scale: float = 1.0,
+        cohesion_multiplier: float = 1.2,
     ):
         self.rng_manager = rng_manager
         self.interactions: dict[int, InteractionState] = {}
@@ -92,6 +93,7 @@ class InteractionManager(Loggable):
         self._agent_lookup: AgentLookup = agent_lookup or (lambda _aid: None)
         self._visibility_lookup: VisibilityLookup | None = None
         self._formation_scale = formation_scale
+        self._cohesion_multiplier = cohesion_multiplier
         self._formation_targets: dict[int, Pose2D] = {}
         self._current_departed: set[int] = set()
 
@@ -304,10 +306,51 @@ class InteractionManager(Loggable):
         for cmd in interaction_cmds:
             self._process_command(cmd)
 
+        self._tick_drift_eviction()
         self._tick_formations(dt)
         self._prune_dead_interactions()
         self._prune_ended_interactions()
         return self.interactions, dict(self._formation_targets), set(self._current_departed)
+
+    def _tick_drift_eviction(self) -> None:
+        # Same threshold as request-time proximity (x cohesion_multiplier)
+        victims: list[tuple[int, int]] = []
+        for iid, interaction in self.interactions.items():
+            if interaction.outcome != InteractionOutcome.ACTIVE:
+                continue
+            if not interaction.participants:
+                continue
+            kind = InteractionType(interaction.type).kind
+            radius = kind.interaction_radius * self._cohesion_multiplier
+            latched: set[int] = interaction.state.setdefault("_drift_arrived", set())
+            if kind.is_object_bound:
+                object_id = interaction.object_id
+                if object_id is None or self._world_knowledge is None:
+                    continue
+                anchor = self._world_knowledge.object_pose(object_id)
+                if anchor is None:
+                    continue
+                for aid in interaction.participants:
+                    pose = self._pose_lookup(aid)
+                    if pose is None:
+                        continue
+                    if pose_distance(pose, anchor) <= radius:
+                        latched.add(aid)
+                    elif aid in latched:
+                        victims.append((aid, iid))
+            else:
+                poses = {aid: self._pose_lookup(aid) for aid in interaction.participants}
+                poses = {aid: p for aid, p in poses.items() if p is not None}
+                if len(poses) < 2:
+                    continue
+                for aid, pose in poses.items():
+                    nearest = min(pose_distance(pose, peer) for pid, peer in poses.items() if pid != aid)
+                    if nearest <= radius:
+                        latched.add(aid)
+                    elif aid in latched:
+                        victims.append((aid, iid))
+        for aid, iid in victims:
+            self.stop(aid, iid, reason=InteractionOutcome.INTERRUPTED)
 
     def _tick_formations(self, dt: float) -> dict[int, Pose2D]:
         targets: dict[int, Pose2D] = {}

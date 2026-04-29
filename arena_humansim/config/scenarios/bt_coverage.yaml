@@ -16,12 +16,6 @@ simulation:
   max_ticks: 50
   execution_mode: master
 
-modules:
-  perception: default
-  global_planner: dijkstra
-  local_planner: sfm
-  animation: kinematic
-
 world_objects:
   - object_id: bench_a
     type: bench

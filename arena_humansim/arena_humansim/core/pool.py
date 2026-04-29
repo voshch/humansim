@@ -23,11 +23,29 @@ def is_human(pool: AgentPool, idx: int) -> bool:
     return int(pool.kind[idx]) == KIND_HUMAN
 
 
+class PoolAware:
+    def attach(self, pool: AgentPool) -> None:
+        pass
+
+    def on_pool_grow(self, new_capacity: int, old_capacity: int) -> None:
+        pass
+
+    def on_pool_add(self, idx: int, agent: BaseAgent) -> None:
+        pass
+
+    def on_pool_swap(self, idx: int, last: int) -> None:
+        pass
+
+    def on_pool_reset(self) -> None:
+        pass
+
+
 class AgentPool:
     def __init__(self, capacity: int = _DEFAULT_CAPACITY):
         self.capacity = capacity
         self.n: int = 0
         self._id_to_idx: dict[int, int] = {}
+        self._extensions: list[PoolAware] = []
 
         self.agent_ids = np.zeros(capacity, dtype=np.int32)
         self.pos = np.zeros((capacity, 2), dtype=np.float64)
@@ -43,14 +61,10 @@ class AgentPool:
         self.min_turning_radius = np.zeros(capacity, dtype=np.float64)
         self.pivot_angular_velocity = np.zeros(capacity, dtype=np.float64)
 
-        self.relaxation_time = np.zeros(capacity, dtype=np.float64)
-        self.repulsion_strength = np.zeros(capacity, dtype=np.float64)
-        self.repulsion_range = np.zeros(capacity, dtype=np.float64)
-        self.anisotropy = np.zeros(capacity, dtype=np.float64)
-
         self.vision_range = np.zeros(capacity, dtype=np.float64)
         self.vision_fov = np.zeros(capacity, dtype=np.float64)
         self.proximity_sense = np.zeros(capacity, dtype=np.float64)
+        self.vision_occlusion = np.ones(capacity, dtype=np.bool_)
 
         self.goal_pos = np.zeros((capacity, 2), dtype=np.float64)
         self.has_goal = np.zeros(capacity, dtype=np.bool_)
@@ -65,6 +79,10 @@ class AgentPool:
 
         self.neighbor_indptr = np.zeros(1, dtype=np.int32)
         self.neighbor_indices = np.empty(0, dtype=np.int32)
+
+    def register_extension(self, ext: PoolAware) -> None:
+        assert self.n == 0, "register_extension must be called before agents are added"
+        self._extensions.append(ext)
 
     def idx(self, agent_id: int) -> int:
         return self._id_to_idx[agent_id]
@@ -94,16 +112,11 @@ class AgentPool:
         self.min_turning_radius[i] = p.min_turning_radius
         self.pivot_angular_velocity[i] = p.pivot_angular_velocity
 
-        lp = p.local_planner_params
-        self.relaxation_time[i] = lp.relaxation_time
-        self.repulsion_strength[i] = lp.repulsion_strength
-        self.repulsion_range[i] = lp.repulsion_range
-        self.anisotropy[i] = lp.anisotropy
-
         perc = p.perception
         self.vision_range[i] = perc.vision_range
         self.vision_fov[i] = perc.vision_fov
         self.proximity_sense[i] = perc.proximity_sense
+        self.vision_occlusion[i] = perc.vision_occlusion
 
         self.has_goal[i] = False
         self.has_terminal[i] = False
@@ -112,6 +125,9 @@ class AgentPool:
         self.prev_vel[i] = self.vel[i]
         self.kind[i] = 0
         self.policy_idx[i] = -1
+
+        for ext in self._extensions:
+            ext.on_pool_add(i, agent)
         return i
 
     def swap_remove(self, agent_id: int) -> int | None:
@@ -130,13 +146,10 @@ class AgentPool:
                 self.max_deceleration,
                 self.min_turning_radius,
                 self.pivot_angular_velocity,
-                self.relaxation_time,
-                self.repulsion_strength,
-                self.repulsion_range,
-                self.anisotropy,
                 self.vision_range,
                 self.vision_fov,
                 self.proximity_sense,
+                self.vision_occlusion,
                 self.has_goal,
                 self.has_terminal,
                 self.goal_theta,
@@ -148,6 +161,8 @@ class AgentPool:
                 arr[idx] = arr[last]
             for arr in (self.pos, self.vel, self.prev_vel, self.goal_pos, self.terminal_pos):
                 arr[idx] = arr[last]
+            for ext in self._extensions:
+                ext.on_pool_swap(idx, last)
         else:
             swapped_id = None
         self.n = last
@@ -156,6 +171,8 @@ class AgentPool:
     def reset(self) -> None:
         self.n = 0
         self._id_to_idx.clear()
+        for ext in self._extensions:
+            ext.on_pool_reset()
 
     def sync_back(self, agents: Iterable[BaseAgent]) -> None:
         for i, agent in enumerate(agents):
@@ -237,13 +254,12 @@ class AgentPool:
         self.max_deceleration = _resize_1d(self.max_deceleration)
         self.min_turning_radius = _resize_1d(self.min_turning_radius)
         self.pivot_angular_velocity = _resize_1d(self.pivot_angular_velocity)
-        self.relaxation_time = _resize_1d(self.relaxation_time)
-        self.repulsion_strength = _resize_1d(self.repulsion_strength)
-        self.repulsion_range = _resize_1d(self.repulsion_range)
-        self.anisotropy = _resize_1d(self.anisotropy)
         self.vision_range = _resize_1d(self.vision_range)
         self.vision_fov = _resize_1d(self.vision_fov)
         self.proximity_sense = _resize_1d(self.proximity_sense)
+        occ_new = np.ones(new_cap, dtype=self.vision_occlusion.dtype)
+        occ_new[:old] = self.vision_occlusion[:old]
+        self.vision_occlusion = occ_new
         self.goal_pos = _resize_2d(self.goal_pos)
         self.has_goal = _resize_1d(self.has_goal)
         self.terminal_pos = _resize_2d(self.terminal_pos)
@@ -258,3 +274,6 @@ class AgentPool:
         pidx_new[:old] = self.policy_idx[:old]
         self.policy_idx = pidx_new
         self.capacity = new_cap
+
+        for ext in self._extensions:
+            ext.on_pool_grow(new_cap, old)

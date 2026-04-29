@@ -56,6 +56,8 @@ Bare names (`astar_vs_dijkstra`) resolve to `config/benchmark/<name>.yaml` in th
 | File | Purpose |
 |---|---|
 | `default.yaml` | Self-comparison (config vs itself). Sanity check: RTF spread should be within round-to-round noise. |
+| `quick.yaml` | Fast self-comparison across low/med/high agent counts (10/50/200) in one batch. ~30s to run. |
+| `quick_maze.yaml` | Same as `quick.yaml` but in a 10×10 maze. |
 | `astar_vs_dijkstra.yaml` | Global planner sweep across open space and a 10×10 maze. Canonical example for a stage-with-walls run. |
 
 ## Adding a benchmark

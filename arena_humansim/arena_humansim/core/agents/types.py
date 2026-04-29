@@ -2,12 +2,10 @@ __all__ = [
     "ActionDef",
     "AgentType",
     "GoToStepDef",
-    "LocalPlannerDist",
     "NeedCondition",
     "NeedDist",
     "ParamDist",
     "PerceptionDist",
-    "SampledLocalPlanner",
     "SampledNeed",
     "SampledParams",
     "SampledPerception",
@@ -138,14 +136,7 @@ class PerceptionDist:
     vision_range: ParamDist = attrs.field(default=ParamDist(5.0, 0.5), converter=_as_paramdist)
     vision_fov: ParamDist = attrs.field(default=ParamDist(180.0, 10.0), converter=_as_paramdist)
     proximity_sense: ParamDist = attrs.field(default=ParamDist(1.0, 0.2, clip_low=0.5, clip_high=2.0), converter=_as_paramdist)
-
-
-@attrs.frozen
-class LocalPlannerDist:
-    relaxation_time: ParamDist = attrs.field(default=ParamDist(0.5, 0.05), converter=_as_paramdist)
-    repulsion_strength: ParamDist = attrs.field(default=ParamDist(2.1, 0.2), converter=_as_paramdist)
-    repulsion_range: ParamDist = attrs.field(default=ParamDist(0.3, 0.03), converter=_as_paramdist)
-    anisotropy: ParamDist = attrs.field(default=ParamDist(0.5, 0.0), converter=_as_paramdist)
+    vision_occlusion: bool = True
 
 
 @attrs.frozen
@@ -168,7 +159,7 @@ class AgentType:
     idle_gaze_rate: ParamDist = attrs.field(default=ParamDist(0.0, 0.0, clip_low=0.0, clip_high=0.0), converter=_as_paramdist)
 
     perception: PerceptionDist = attrs.Factory(PerceptionDist)
-    local_planner_params: LocalPlannerDist = attrs.Factory(LocalPlannerDist)
+    local_planner_params: dict[str, ParamDist] = attrs.Factory(dict)
 
     perception_stack: tuple[str, ...] = ("default",)
     local_planner: str | None = None
@@ -197,14 +188,7 @@ class SampledPerception:
     vision_range: float = 5.0
     vision_fov: float = 180.0
     proximity_sense: float = 1.0
-
-
-@attrs.frozen
-class SampledLocalPlanner:
-    relaxation_time: float = 0.5
-    repulsion_strength: float = 2.1
-    repulsion_range: float = 0.3
-    anisotropy: float = 0.5
+    vision_occlusion: bool = True
 
 
 @attrs.frozen
@@ -223,7 +207,7 @@ class SampledParams:
     personal_space_min: float
 
     perception: SampledPerception = attrs.Factory(SampledPerception)
-    local_planner_params: SampledLocalPlanner = attrs.Factory(SampledLocalPlanner)
+    local_planner_params: dict[str, float] = attrs.Factory(dict)
 
     perception_stack: tuple[str, ...] = ("default",)
     local_planner: str | None = None
@@ -253,6 +237,7 @@ def _sample_lognormal_dist(dist: ParamDist, rng: np.random.Generator) -> float:
 def sample_agent_type(
     agent_type: AgentType,
     rng: np.random.Generator,
+    default_local_planner: str = "sfm",
 ) -> SampledParams:
     sampled_needs: dict[str, SampledNeed] = {}
     for need_name, need_dist in agent_type.needs.items():
@@ -261,33 +246,48 @@ def sample_agent_type(
             decay_rate=_sample_dist(need_dist.decay_rate, rng),
         )
 
+    desired_velocity = _sample_dist(agent_type.desired_velocity, rng)
+    agent_radius = _sample_dist(agent_type.agent_radius, rng)
+    max_velocity = _sample_dist(agent_type.max_velocity, rng)
+    max_acceleration = _sample_dist(agent_type.max_acceleration, rng)
+    max_deceleration = _sample_dist(agent_type.max_deceleration, rng)
+    min_turning_radius = _sample_dist(agent_type.min_turning_radius, rng)
+    pivot_angular_velocity = _sample_dist(agent_type.pivot_angular_velocity, rng)
+    reaction_time = _sample_lognormal_dist(agent_type.reaction_time, rng)
+    personal_space_min = _sample_dist(agent_type.personal_space_min, rng)
+    sampled_perception = SampledPerception(
+        vision_range=_sample_dist(agent_type.perception.vision_range, rng),
+        vision_fov=_sample_dist(agent_type.perception.vision_fov, rng),
+        proximity_sense=_sample_dist(agent_type.perception.proximity_sense, rng),
+        vision_occlusion=agent_type.perception.vision_occlusion,
+    )
+
+    from arena_humansim.local_planner import LocalPlanner
+
+    planner_name = agent_type.local_planner or default_local_planner
+    lp_dists = {**LocalPlanner.get_class(planner_name).PARAM_DEFAULTS, **agent_type.local_planner_params}
+    sampled_lp = {k: _sample_dist(d, rng) for k, d in lp_dists.items()}
+
+    idle_gaze_rate_hz = _sample_dist(agent_type.idle_gaze_rate, rng)
+
     return SampledParams(
         name=agent_type.name,
-        desired_velocity=_sample_dist(agent_type.desired_velocity, rng),
-        agent_radius=_sample_dist(agent_type.agent_radius, rng),
-        max_velocity=_sample_dist(agent_type.max_velocity, rng),
-        max_acceleration=_sample_dist(agent_type.max_acceleration, rng),
-        max_deceleration=_sample_dist(agent_type.max_deceleration, rng),
-        min_turning_radius=_sample_dist(agent_type.min_turning_radius, rng),
-        pivot_angular_velocity=_sample_dist(agent_type.pivot_angular_velocity, rng),
-        reaction_time=_sample_lognormal_dist(agent_type.reaction_time, rng),
-        personal_space_min=_sample_dist(agent_type.personal_space_min, rng),
-        perception=SampledPerception(
-            vision_range=_sample_dist(agent_type.perception.vision_range, rng),
-            vision_fov=_sample_dist(agent_type.perception.vision_fov, rng),
-            proximity_sense=_sample_dist(agent_type.perception.proximity_sense, rng),
-        ),
-        local_planner_params=SampledLocalPlanner(
-            relaxation_time=_sample_dist(agent_type.local_planner_params.relaxation_time, rng),
-            repulsion_strength=_sample_dist(agent_type.local_planner_params.repulsion_strength, rng),
-            repulsion_range=_sample_dist(agent_type.local_planner_params.repulsion_range, rng),
-            anisotropy=_sample_dist(agent_type.local_planner_params.anisotropy, rng),
-        ),
+        desired_velocity=desired_velocity,
+        agent_radius=agent_radius,
+        max_velocity=max_velocity,
+        max_acceleration=max_acceleration,
+        max_deceleration=max_deceleration,
+        min_turning_radius=min_turning_radius,
+        pivot_angular_velocity=pivot_angular_velocity,
+        reaction_time=reaction_time,
+        personal_space_min=personal_space_min,
+        perception=sampled_perception,
+        local_planner_params=sampled_lp,
         perception_stack=agent_type.perception_stack,
         local_planner=agent_type.local_planner,
         global_planner=agent_type.global_planner,
         animation=agent_type.animation,
         needs=sampled_needs,
         utility_weights=dict(agent_type.utility_weights),
-        idle_gaze_rate_hz=_sample_dist(agent_type.idle_gaze_rate, rng),
+        idle_gaze_rate_hz=idle_gaze_rate_hz,
     )

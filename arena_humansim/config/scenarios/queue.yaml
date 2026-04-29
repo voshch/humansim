@@ -19,12 +19,6 @@ simulation:
   execution_mode: master
   formation_scale: 1.0
 
-modules:
-  perception: default
-  global_planner: dijkstra
-  local_planner: sfm
-  animation: kinematic
-
 world_objects:
   - object_id: fountain
     type: fountain

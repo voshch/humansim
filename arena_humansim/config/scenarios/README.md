@@ -31,7 +31,12 @@ Pick one. Mixing them on the same step is allowed (duration is a fallback if Can
 
 ## `interaction_radius` (meters)
 
-How close an agent must get to an object-bound target before `SeekNode` is reached in the compiled sequence. Cascade (first non-null wins):
+Two roles, same number:
+
+- **Request:** how close an agent must get to an object-bound target before `SeekNode` is reached in the compiled sequence.
+- **Drift eviction:** how far a participant may drift from the nearest peer (or from the bound object) once `ACTIVE`, scaled by `cohesion_multiplier` (default 1.2 in `InteractionManager`). A participant past `interaction_radius * cohesion_multiplier` is evicted with `INTERRUPTED`. Tightening this field tightens both gates together.
+
+Cascade (first non-null wins):
 
 1. `StepDef.interaction_radius` — per-step override.
 2. `WorldObject.interaction_radius` — per-object override on the target.

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import attrs
 
 from arena_humansim.core.agents import SampledParams
-from arena_humansim.core.agents.types import SampledLocalPlanner, SampledPerception
+from arena_humansim.core.agents.types import SampledPerception
 from arena_humansim.utils.loggable import Loggable
 from arena_humansim.utils.types import AgentState, CommandType, HighLevelCommand, Pose2D
 
@@ -90,12 +90,12 @@ class ReplayManager(Loggable):
                 vision_range=perc.get("vision_range", p.get("vision_range", 5.0)),
                 vision_fov=perc.get("vision_fov", p.get("vision_fov", 180.0)),
             ),
-            local_planner_params=SampledLocalPlanner(
-                relaxation_time=lp.get("relaxation_time", p.get("relaxation_time", 0.5)),
-                repulsion_strength=lp.get("repulsion_strength", p.get("repulsion_strength", 2.1)),
-                repulsion_range=lp.get("repulsion_range", p.get("repulsion_range", 0.3)),
-                anisotropy=lp.get("anisotropy", p.get("anisotropy", 0.5)),
-            ),
+            local_planner_params={
+                "relaxation_time": lp.get("relaxation_time", p.get("relaxation_time", 0.5)),
+                "repulsion_strength": lp.get("repulsion_strength", p.get("repulsion_strength", 2.1)),
+                "repulsion_range": lp.get("repulsion_range", p.get("repulsion_range", 0.3)),
+                "anisotropy": lp.get("anisotropy", p.get("anisotropy", 0.5)),
+            },
             perception_stack=tuple(p["perception_stack"]),
             local_planner=p["local_planner"],
             global_planner=p["global_planner"],
