@@ -1,3 +1,4 @@
 *.py[cod]
 __pycache__/
 *.pt
+arena_humansim/scripts/recordings/
