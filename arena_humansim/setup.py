@@ -43,6 +43,7 @@ setup(
             "arena_humansim_node = arena_humansim.core.agent_manager:main",
             "benchmark = arena_humansim.utils.benchmark:main",
             "arena_humansim_render = arena_humansim.utils.renderer:main",
+            'run_ablations = arena_humansim.scripts.run_ablations:main',
         ],
     },
 )
