@@ -97,7 +97,8 @@ def generate_launch_description():
              "local_planner": LaunchConfiguration("local_planner"),
              "animation": LaunchConfiguration("animation"),
              "collision": LaunchConfiguration("collision"),
-             "occlusion": LaunchConfiguration("occlusion")},
+             "occlusion": LaunchConfiguration("occlusion"),
+             "seed": LaunchConfiguration("seed")}
         ],
         output="screen",
     )
@@ -133,6 +134,7 @@ def generate_launch_description():
         DeclareLaunchArgument("animation", default_value="noop", description="animation module"),
         DeclareLaunchArgument("collision", default_value="wall_projection", description="collision resolver module"),
         DeclareLaunchArgument("occlusion", default_value="bitmap", description="occlusion module"),
+        DeclareLaunchArgument("seed", default_value="0", description="Random seed for the simulation RNG"),
         OpaqueFunction(function=_compute_record_dir),
         map_tf,
         node,
