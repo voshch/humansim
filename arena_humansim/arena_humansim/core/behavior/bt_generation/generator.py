@@ -7,14 +7,18 @@ large language models to create realistic agent behaviors based on scenario desc
 and world semantic information.
 """
 
+import asyncio
 import os
 import time
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 import yaml
+from arena_simulation_setup.shared import Obstacle
+from arena_simulation_setup.tree.assets.Object import ObjectIdentifier
 from arena_simulation_setup.tree.World import World, WorldDescription
 from cattrs import Converter
 from pydantic import TypeAdapter
@@ -22,7 +26,7 @@ from pydantic import TypeAdapter
 from arena_humansim.core.behavior.bt_generation.inference_client import GoogleGenAIClient, OpenAIClient
 from arena_humansim.core.behavior.bt_generation.schema import AgentConfig, AgentType
 from arena_humansim.core.behavior.bt_generation.system_prompts import behavior_tree_generation, object_selection, spawn_position_selection, zone_selection
-from arena_humansim.utils.scenario import WorldObjectConfig
+from arena_humansim.utils.scenario import ObstacleBB, ObstacleSceneConfig, WallConfig, WorldObjectConfig
 from arena_humansim.utils.types import Pose2D
 
 
@@ -84,6 +88,63 @@ class WorldInfo:
             _world_objects.extend(zone_objects)
 
         return _world_objects
+
+    def world_walls(self) -> list[WallConfig]:
+        _world_walls = []
+        for id, wall in enumerate(self.world_description.all_walls):
+            _world_walls.append(WallConfig(name=str(id), start=Pose2D(x=wall.start.x, y=wall.start.y, theta=wall.start.to_orientation().to_yaw()), end=Pose2D(x=wall.end.x, y=wall.end.y, theta=wall.end.to_orientation().to_yaw())))
+
+        return _world_walls
+
+    async def _resolve_obstacles(self) -> list[tuple[Obstacle, Path]]:
+        unique_models = {obs.model.name: obs.model for obs in self.world_description.all_static_entities}
+
+        semaphore = asyncio.Semaphore(10)  # tune this (5–20 is typical)
+
+        async def resolve(name: str, model: ObjectIdentifier) -> tuple[str, Path]:
+            async with semaphore:
+                print(f"Resolving path for model: {model}")
+                start = time.time()
+
+                path = await model.resolve_path()
+
+                print(f"Resolved path for model: {model}, took: {(time.time() - start):.2f}")
+                return name, path
+
+        tasks = [resolve(name, model) for name, model in unique_models.items()]
+
+        results = await asyncio.gather(*tasks)
+
+        resolved = dict(results)
+
+        return [(obs, resolved[obs.model.name]) for obs in self.world_description.all_static_entities]
+
+    def world_obstacles(self) -> list[ObstacleSceneConfig]:
+        _world_obstacles = []
+
+        obstacles = asyncio.run(self._resolve_obstacles())
+
+        i = 0
+        for obs, annotation_base_path in obstacles:
+            print(i)
+            annotation_path = annotation_base_path / "annotation.yaml"
+
+            with open(annotation_path) as file:
+                annotation_dict = yaml.safe_load(file)
+
+            (x_min, x_max), (y_min, y_max), _ = annotation_dict["bounding_box"]
+
+            _world_obstacles.append(
+                ObstacleSceneConfig(
+                    name=obs.name,
+                    pose=Pose2D(x=obs.pose.position.x, y=obs.pose.position.y, theta=obs.pose.orientation.to_yaw()),
+                    bb=ObstacleBB(x_min=x_min, x_max=x_max, y_min=y_min, y_max=y_max),
+                    obstacle_type=obs.model.name,
+                )
+            )
+            i += 1
+
+        return _world_obstacles
 
 
 @dataclass
@@ -272,6 +333,8 @@ class LLMBehaviorTreeGenerator:
             "agent_types": {k: v.model_dump() for k, v in agent_types.items()},
             "agents": [s.model_dump() for s in spawn_positions],
             "world_objects": converter.unstructure(world_info.world_objects()),
+            "walls": converter.unstructure(world_info.world_walls()),
+            "obstacles": converter.unstructure(world_info.world_obstacles()),
         }
 
         return scenario
@@ -279,8 +342,6 @@ class LLMBehaviorTreeGenerator:
 
 # Example usage
 if __name__ == "__main__":
-    from pathlib import Path
-
     from ament_index_python.packages import get_package_share_directory
 
     world_path = Path(os.path.join(get_package_share_directory("arena_simulation_setup"), "worlds", "hospital_1"))
@@ -292,12 +353,14 @@ if __name__ == "__main__":
     generator = LLMBehaviorTreeGenerator()
 
     # Generate scenario
-    context = GenerationContext(user_prompt="A busy office where workers perform tasks and take breaks for food and water", world_info=world_info, mode=GenerationMode.WORKFLOW)
+    user_prompt = "A busy office where workers perform tasks and take breaks for food and water"
+    context = GenerationContext(user_prompt=user_prompt, world_info=world_info, mode=GenerationMode.WORKFLOW)
+    context.world_info.world_obstacles()
 
     start = time.time()
     scenario_yaml = generator.generate_yaml(context)
     end = time.time()
     print(f"Generation time: {(end - start):.2f}s")
     print(scenario_yaml)
-    scenario_path = os.path.join(get_package_share_directory("arena_humansim"), "config", "scenarios", "test_scenario_generator.yaml")
+    scenario_path = os.path.join(get_package_share_directory("arena_humansim"), "config", "scenarios", f"{user_prompt.replace(' ', '_')[:10]}.yaml")
     generator.save_scenario(scenario_path)
