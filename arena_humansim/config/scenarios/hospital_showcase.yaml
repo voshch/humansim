@@ -1,0 +1,4646 @@
+name: hospital_showcase
+description: >-
+  Use case 1 -Nurse escort: nurse agent advertises FOLLOW, patient accepts.
+             Shared contract duration ensures coordinated teardown.
+  Use case 2 -Doctor consultation: doctor and patient engage in TALK_TO with
+             shared contract duration. Outcome propagates to behavior tree.
+  Use case 3 -Reception queue: patients QUEUE_USE at reception desk.
+             If a participant leaves, others see INTERRUPTED outcome.
+
+
+simulation:
+  seed: 11
+  dt: 0.05
+  bt_tick_interval: 5
+  # max_ticks: 6000
+  execution_mode: master
+  formation_scale: 1.0
+
+modules:
+  perception: default
+  global_planner: dijkstra
+  local_planner: sfm
+  animation: kinematic
+
+agent_types:
+  nurse:
+    extends: adult
+    mode: behavior_tree
+    desired_velocity: {mean: 1.2, std: 0.1, clip_low: 0.8, clip_high: 1.6}
+    perception:
+      vision_range: {mean: 6.0, std: 0.5, clip_low: 3.0, clip_high: 10.0}
+    local_planner_params:
+      relaxation_time: {mean: 0.4, std: 0.05, clip_low: 0.2, clip_high: 0.8}
+      repulsion_strength: {mean: 2.0, std: 0.2, clip_low: 0.5, clip_high: 4.0}
+    needs:
+      duty:
+        initial: {mean: 30.0, std: 5.0, clip_low: 10.0, clip_high: 50.0}
+        decay_rate: {mean: 1.0, std: 0.1}
+    utility_weights:
+      duty: 1.0
+    sequences:
+      leg_bed:
+        steps:
+          go:
+            kind: go_to
+            target: SM_HospitalBed_01b
+            patience: {mean: 90.0, std: 15.0, clip_low: 45.0, clip_high: 180.0}
+          offer:
+            interaction: SERVICE
+            target: nurse_escort
+            offer: true
+            min_participants: 2
+            max_participants: 2
+            queueable: false
+            formation_spec: {type: line, anchor_kind: provider, params: {base_step: 0.8}}
+            patience: {mean: 20.0, std: 5.0, clip_low: 10.0, clip_high: 45.0}
+          ride:
+            kind: go_to
+            target: exam_chair_1
+            patience: {mean: 90.0, std: 15.0, clip_low: 45.0, clip_high: 180.0}
+          drop:
+            cancel: true
+            satisfies:
+              duty: 40.0
+        then: leg_exam
+        on_failure: leg_exam
+      leg_exam:
+        steps:
+          go:
+            kind: go_to
+            target: exam_chair_1
+            patience: {mean: 90.0, std: 15.0, clip_low: 45.0, clip_high: 180.0}
+          offer:
+            interaction: SERVICE
+            target: nurse_escort
+            offer: true
+            min_participants: 2
+            max_participants: 2
+            queueable: false
+            formation_spec: {type: line, anchor_kind: provider, params: {base_step: 0.8}}
+            patience: {mean: 20.0, std: 5.0, clip_low: 10.0, clip_high: 45.0}
+          ride:
+            kind: go_to
+            target: SM_HospitalBed_01b
+            patience: {mean: 90.0, std: 15.0, clip_low: 45.0, clip_high: 180.0}
+          drop:
+            cancel: true
+            satisfies:
+              duty: 40.0
+        then: leg_bed
+        on_failure: leg_bed
+    initial_sequence: leg_bed
+
+  escort_patient:
+    mode: behavior_tree
+    extends: elder
+    desired_velocity: {mean: 0.9, std: 0.1, clip_low: 0.6, clip_high: 1.2}
+    perception:
+      vision_fov: {mean: 160.0, std: 15.0, clip_low: 90.0, clip_high: 270.0}
+      vision_range: {mean: 5.0, std: 0.5, clip_low: 3.0, clip_high: 10.0}
+    sequences:
+      default:
+        steps:
+          go_to_bed:
+            kind: go_to
+            target: SM_HospitalBed_01b
+            patience: {mean: 60.0, std: 15.0, clip_low: 30.0, clip_high: 120.0}
+          wait_for_nurse:
+            interaction: SERVICE
+            target: nurse_escort
+            wait_for_outcome: true
+            patience: {mean: 180.0, std: 30.0, clip_low: 90.0, clip_high: 360.0}
+          idle:
+            duration: {mean: 5.0, std: 2.0, clip_low: 2.0, clip_high: 15.0}
+        then: default
+        on_failure: default
+    initial_sequence: default
+  
+  doctor:
+    mode: behavior_tree
+    extends: adult
+    desired_velocity: {mean: 1.2, std: 0.1, clip_low: 0.8, clip_high: 1.6}
+    perception:
+      vision_range: {mean: 6.0, std: 0.5, clip_low: 3.0, clip_high: 10.0}
+    local_planner_params:
+      relaxation_time: {mean: 0.4, std: 0.05, clip_low: 0.2, clip_high: 0.8}
+      repulsion_strength: {mean: 2.0, std: 0.2, clip_low: 0.5, clip_high: 4.0}
+    needs:
+      rounds:
+        initial: {mean: 40.0, std: 10.0, clip_low: 10.0, clip_high: 60.0}
+        decay_rate: {mean: 0.6, std: 0.1}
+    utility_weights:
+      rounds: 1.0
+    sequences:
+      default:
+        steps:
+          walk_to_chair:
+            kind: go_to
+            target: exam_chair_1
+            patience: {mean: 60.0, std: 15.0, clip_low: 30.0, clip_high: 120.0}
+          consult:
+            interaction: TALK_TO
+            duration: {mean: 25.0, std: 5.0, clip_low: 10.0, clip_high: 45.0}
+            patience: {mean: 180.0, std: 30.0, clip_low: 90.0, clip_high: 360.0}
+            satisfies:
+              rounds: 50.0
+          rest:
+            duration: {mean: 10.0, std: 3.0, clip_low: 5.0, clip_high: 20.0}
+        then: default
+        on_failure: default
+    initial_sequence: default
+
+  patient:
+    mode: behavior_tree
+    extends: elder
+    desired_velocity: {mean: 0.9, std: 0.15, clip_low: 0.5, clip_high: 1.4}
+    perception:
+      vision_fov: {mean: 160.0, std: 15.0, clip_low: 90.0, clip_high: 270.0}
+      vision_range: {mean: 5.0, std: 0.5, clip_low: 3.0, clip_high: 10.0}
+    needs:
+      checkin:
+        initial: {mean: 20.0, std: 5.0, clip_low: 5.0, clip_high: 40.0}
+        decay_rate: {mean: 0.8, std: 0.1}
+      treatment:
+        initial: {mean: 60.0, std: 10.0, clip_low: 30.0, clip_high: 80.0}
+        decay_rate: {mean: 0.3, std: 0.05}
+    utility_weights:
+      checkin: 1.5
+      treatment: 1.0
+    sequences:
+      default:
+        steps:
+          check_in:
+            target: reception_counter_1
+            interaction: QUEUE_USE
+            duration: {mean: 15.0, std: 3.0, clip_low: 5.0, clip_high: 30.0}
+            patience: {mean: 120.0, std: 20.0, clip_low: 60.0, clip_high: 300.0}
+            satisfies:
+              checkin: 80.0
+          wait:
+            duration: {mean: 20.0, std: 5.0, clip_low: 10.0, clip_high: 40.0}
+          walk_to_chair:
+            kind: go_to
+            target: exam_chair_1
+            patience: {mean: 90.0, std: 15.0, clip_low: 45.0, clip_high: 180.0}
+          consult:
+            interaction: TALK_TO
+            duration: {mean: 25.0, std: 5.0, clip_low: 10.0, clip_high: 45.0}
+            patience: {mean: 120.0, std: 20.0, clip_low: 60.0, clip_high: 240.0}
+            satisfies:
+              treatment: 60.0
+        then: default
+        on_failure: default
+    initial_sequence: default
+
+  queue_patient:
+    mode: behavior_tree
+    extends: elder
+    desired_velocity: {mean: 0.9, std: 0.15, clip_low: 0.4, clip_high: 1.4}
+    perception:
+      vision_fov: {mean: 160.0, std: 15.0, clip_low: 90.0, clip_high: 270.0}
+    needs:
+      checkin:
+        initial: {mean: 20.0, std: 5.0, clip_low: 5.0, clip_high: 40.0}
+        decay_rate: {mean: 0.8, std: 0.1}
+    utility_weights:
+      checkin: 1.0
+    sequences:
+      default:
+        steps:
+          check_in:
+            target: reception_counter_1
+            interaction: QUEUE_USE
+            duration: {mean: 15.0, std: 3.0, clip_low: 5.0, clip_high: 30.0}
+            patience: {mean: 60.0, std: 10.0, clip_low: 30.0, clip_high: 120.0}
+            satisfies:
+              checkin: 80.0
+          depart:
+            duration: {mean: 30.0, std: 10.0, clip_low: 10.0, clip_high: 60.0}
+        then: default
+    initial_sequence: default
+
+agents:
+  # --- Use case 1: nurse escort ---
+  - name: nurse_1
+    model: female_adult_medical_01
+    pose: central_hallway
+    agent: {agent_type: nurse, desired_velocity: 1.5}
+    waypoints:
+      - patient_ward
+      - central_hallway
+
+  - name: escort_patient
+    model: male_adult_construction_01
+    pose: patient_ward
+    agent: {agent_type: escort_patient, desired_velocity: 0.9}
+    waypoints:
+      - patient_ward
+
+  # --- Use case 2: doctor consultation ---
+  - name: doctor_1
+    model: male_adult_medical_01
+    pose: exam_room_1
+    agent: {agent_type: doctor, desired_velocity: 1.4}
+    waypoints:
+      - exam_room_1
+      - patient_ward
+      - exam_room_1
+
+  - name: consult_patient
+    model: female_adult_business_02
+    pose: waiting_area
+    agent: {agent_type: patient.yaml, desired_velocity: 1.0}
+    waypoints:
+      - central_hallway
+      - exam_room_1
+
+  # --- Use case 3: reception queue ---
+  - name: queue_patient_1
+    model: male_adult_construction_02
+    pose: {x: 9.5, y: 0.5}
+    agent: {agent_type: queue_patient.yaml, desired_velocity: 1.1}
+    waypoints:
+      - {x: 4.0, y: 1.0}
+
+  - name: queue_patient_2
+    model: female_adult_business_02
+    pose: {x: 10.0, y: 0.8}
+    agent: {agent_type: queue_patient.yaml, desired_velocity: 0.9}
+    waypoints:
+      - {x: 4.0, y: 1.0}
+
+  - name: queue_patient_3
+    model: male_adult_construction_03
+    pose: {x: 10.5, y: 0.5}
+    agent: {agent_type: queue_patient.yaml, desired_velocity: 1.0}
+    waypoints:
+      - {x: 4.0, y: 1.0}
+
+  # --- Background flow ---
+  - name: doctor_2
+    model: female_adult_medical_01
+    pose: laboratory
+    agent: {agent_type: adult, desired_velocity: 1.3}
+    waypoints:
+      - central_hallway
+      - operating_room
+      - central_hallway
+      - laboratory
+
+flow:
+  sources:
+    - pose: {x: 10.0, y: 0.7, theta: 0.0}
+      shape: {type: circle, radius: 0.5}
+      rate_profile:
+        - {t: 0.0, rate: 0.1}
+        - {t: 30.0, rate: 0.3}
+      max_concurrent: 4
+      max_total: 15
+      agent_template:
+        agent_type: adult
+        desired_velocity_min: 1.0
+        desired_velocity_max: 1.5
+  sinks:
+  - pose: {x: 6.4, y: 26.3, theta: 0.0}
+    shape: {type: circle, radius: 0.5}
+    capacity: 4
+
+world_objects:
+- object_id: reception_counter_1
+  type: SM_ReceptionDesk_01a
+  pose:
+    x: 4.0
+    y: 2.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: reception_waiting_sofa_1
+  type: Waiting_Room_Sofa
+  pose:
+    x: 1.8
+    y: 4.55
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: reception_waiting_sofa_2
+  type: Waiting_Room_Sofa
+  pose:
+    x: 3.7
+    y: 4.55
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: reception_waiting_sofa_3
+  type: Waiting_Room_Sofa
+  pose:
+    x: 0.45
+    y: 3.15
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: reception_waiting_chair_1
+  type: SM_Chair_02a
+  pose:
+    x: 5.9
+    y: 4.7
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: reception_display_board_1
+  type: Display_Board
+  pose:
+    x: 0.4
+    y: 0.5
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: reception_water_dispenser_1
+  type: SM_WaterDispenser_01a
+  pose:
+    x: 7.7
+    y: 0.2
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: reception_trashcan_1
+  type: SM_TrashCan
+  pose:
+    x: 7.7
+    y: 4.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_exam_table_1
+  type: Exam_Table
+  pose:
+    x: 5.0
+    y: 7.55
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_medical_stool_1
+  type: Medical_Stool
+  pose:
+    x: 5.1
+    y: 7.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_instrument_table_1
+  type: Instrument_Table
+  pose:
+    x: 5.9
+    y: 7.0
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_vital_signal_station_1
+  type: Vital_Signal_Station
+  pose:
+    x: 4.85
+    y: 8.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_exam_table_2
+  type: Exam_Table
+  pose:
+    x: 3.0
+    y: 7.55
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_medical_stool_2
+  type: Medical_Stool
+  pose:
+    x: 3.1
+    y: 7.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_instrument_table_2
+  type: Instrument_Table
+  pose:
+    x: 3.9
+    y: 7.0
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_vital_signal_station_2
+  type: Vital_Signal_Station
+  pose:
+    x: 2.85
+    y: 8.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_SM_MedicalCabinet_01a_1
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 0.65
+    y: 9.2
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_SM_MedicalCabinet_01a_2
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 0.65
+    y: 8.325
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_SM_MedicalCabinet_01a_3
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 0.65
+    y: 7.45
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_supply_cart_1
+  type: SM_SupplyCart_01e
+  pose:
+    x: 0.55
+    y: 5.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_supply_cart_2
+  type: SM_SupplyCart_01e
+  pose:
+    x: 1.7
+    y: 5.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_scale_1
+  type: SM_Scale_01a
+  pose:
+    x: 7.6
+    y: 5.5
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_trashcan_1
+  type: SM_TrashCan
+  pose:
+    x: 7.7
+    y: 9.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_bed_1
+  type: SM_HospitalBed_01b
+  pose:
+    x: 4.0
+    y: 13.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_bedside_table_1
+  type: SM_BedSideTable_01b
+  pose:
+    x: 4.9
+    y: 14.4
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_iv_stand_1
+  type: IV_Stand
+  pose:
+    x: 2.8
+    y: 14.5
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_vital_signal_1
+  type: Vital_Signal_Station
+  pose:
+    x: 4.9
+    y: 13.4
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_privacy_curtain_1
+  type: Privacy_Curtain_Rail
+  pose:
+    x: 4.0
+    y: 15.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_armchair_1
+  type: SM_Chair_04a
+  pose:
+    x: 2.2
+    y: 13.5
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_biohazard_container_1
+  type: Biohazard_Container
+  pose:
+    x: 4.9
+    y: 12.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_bed_2
+  type: SM_HospitalBed_01b
+  pose:
+    x: 4.0
+    y: 19.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_bedside_table_2
+  type: SM_BedSideTable_01b
+  pose:
+    x: 4.9
+    y: 20.4
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_iv_stand_2
+  type: IV_Stand
+  pose:
+    x: 2.8
+    y: 20.5
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_vital_signal_2
+  type: Vital_Signal_Station
+  pose:
+    x: 4.9
+    y: 19.4
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_privacy_curtain_2
+  type: Privacy_Curtain_Rail
+  pose:
+    x: 4.0
+    y: 21.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_armchair_2
+  type: SM_Chair_04a
+  pose:
+    x: 2.2
+    y: 19.5
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_biohazard_container_2
+  type: Biohazard_Container
+  pose:
+    x: 4.9
+    y: 18.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_SM_MedicalCabinet_01a_1
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 0.8
+    y: 24.0
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_SM_MedicalCabinet_01a_2
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 0.8
+    y: 1.2
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_supply_cart_1
+  type: SM_SupplyCart_03a
+  pose:
+    x: 2.3
+    y: 12.0
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_supply_cart_2
+  type: SM_SupplyCart_03a
+  pose:
+    x: 2.3
+    y: 18.0
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_gurney_1
+  type: SM_Gurney_01b
+  pose:
+    x: 6.5
+    y: 11.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_wheelchair_1
+  type: SM_WheelChair_01a
+  pose:
+    x: 0.7
+    y: 18.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_wheelchair_2
+  type: SM_WheelChair_01a
+  pose:
+    x: 0.7
+    y: 17.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_trashcan_1
+  type: SM_TrashCan
+  pose:
+    x: 7.7
+    y: 10.3
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_desk_1
+  type: SM_ReceptionDesk_01a
+  pose:
+    x: 4.0
+    y: 28.0
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_chair_1
+  type: SM_Chair_01a
+  pose:
+    x: 5.1
+    y: 26.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_shelf_1
+  type: Pharmacy_Shelf
+  pose:
+    x: 0.25
+    y: 26.55
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_shelf_2
+  type: Pharmacy_Shelf
+  pose:
+    x: 0.25
+    y: 28.5
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_shelf_3
+  type: Pharmacy_Shelf
+  pose:
+    x: 3.4
+    y: 25.4
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_shelf_4
+  type: Pharmacy_Shelf
+  pose:
+    x: 1.4
+    y: 25.4
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_refrigerated_unit_1
+  type: Refrigerated_Medicine_Unit
+  pose:
+    x: 3.2
+    y: 29.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_SM_MedicalCabinet_01a_1
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 0.8
+    y: 29.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_SM_MedicalCabinet_01a_2
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 1.7
+    y: 29.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_med_shelf_1
+  type: SM_MedShelf_01d
+  pose:
+    x: 4.3
+    y: 29.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_med_shelf_2
+  type: SM_MedShelf_01d
+  pose:
+    x: 5.25
+    y: 29.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_supply_cart_1
+  type: SM_SupplyCart_01e
+  pose:
+    x: 1.3
+    y: 28.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_supply_cart_2
+  type: SM_SupplyCart_03a
+  pose:
+    x: 7.5
+    y: 25.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_biohazard_container_1
+  type: Biohazard_Container
+  pose:
+    x: 7.3
+    y: 29.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_trashcan_1
+  type: SM_TrashCan
+  pose:
+    x: 7.7
+    y: 29.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_bed_1
+  type: SM_HospitalBed_02d
+  pose:
+    x: 13.1
+    y: 1.7
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_bed_2
+  type: SM_HospitalBed_02d
+  pose:
+    x: 13.1
+    y: 3.4
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_desk_1
+  type: SM_Desk_04a
+  pose:
+    x: 17.3
+    y: 3.3
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_desk_chair_1
+  type: SM_Chair_01a
+  pose:
+    x: 17.9
+    y: 3.1
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_computer_1
+  type: SM_Computer_02a
+  pose:
+    x: 17.2
+    y: 3.3
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_desk_2
+  type: SM_Desk_04a
+  pose:
+    x: 17.3
+    y: 5.2
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_desk_chair_2
+  type: SM_Chair_01a
+  pose:
+    x: 17.9
+    y: 5.0
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_computer_2
+  type: SM_Computer_02a
+  pose:
+    x: 17.2
+    y: 5.2
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_chair_1
+  type: SM_Chair_02a
+  pose:
+    x: 12.4
+    y: 6.0
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_chair_2
+  type: SM_Chair_02a
+  pose:
+    x: 12.4
+    y: 8.4
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_chair_3
+  type: SM_Chair_02a
+  pose:
+    x: 18.1
+    y: 8.4
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_sidetable_1
+  type: SM_SideTable_02a
+  pose:
+    x: 13.4
+    y: 6.0
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_sidetable_2
+  type: SM_SideTable_02a
+  pose:
+    x: 13.4
+    y: 8.4
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_sidetable_3
+  type: SM_SideTable_02a
+  pose:
+    x: 17.1
+    y: 8.4
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_cabinet_1
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 18.4
+    y: 0.6
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_cabinet_2
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 17.5
+    y: 0.6
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_cabinet_3
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 16.6
+    y: 0.6
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_cabinet_4
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 15.7
+    y: 0.6
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_sofa_3
+  type: Waiting_Room_Sofa
+  pose:
+    x: 20.3
+    y: 8.5
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_sofa_4
+  type: Waiting_Room_Sofa
+  pose:
+    x: 23.4
+    y: 8.5
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_chair_8
+  type: SM_Chair_02a
+  pose:
+    x: 20.3
+    y: 6.0
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_chair_9
+  type: SM_Chair_02a
+  pose:
+    x: 20.3
+    y: 5.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_chair_10
+  type: SM_Chair_02a
+  pose:
+    x: 23.2
+    y: 6.0
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_chair_11
+  type: SM_Chair_02a
+  pose:
+    x: 23.2
+    y: 5.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_bench_3
+  type: Waiting_Room_Bench
+  pose:
+    x: 20.1
+    y: 3.5
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_bench_4
+  type: Waiting_Room_Bench
+  pose:
+    x: 23.5
+    y: 3.5
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_side_table_1
+  type: SM_SideTable_02a
+  pose:
+    x: 19.6
+    y: 4.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_side_table_2
+  type: SM_SideTable_02a
+  pose:
+    x: 20.6
+    y: 4.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_side_table_3
+  type: SM_SideTable_02a
+  pose:
+    x: 23.0
+    y: 4.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_side_table_4
+  type: SM_SideTable_02a
+  pose:
+    x: 24.0
+    y: 4.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_trashcan_2
+  type: SM_TrashCan
+  pose:
+    x: 24.6
+    y: 0.3
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_mop_set_1
+  type: SM_MopSet_01a
+  pose:
+    x: 24.7
+    y: 0.7
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_mop_set_2
+  type: SM_MopSet_01b
+  pose:
+    x: 24.7
+    y: 0.7
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_operating_table_1
+  type: Operating_Table
+  pose:
+    x: 15.0
+    y: 19.0
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_surgical_table_1
+  type: Surgical_Table
+  pose:
+    x: 15.0
+    y: 15.5
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_anesthesia_machine_1
+  type: Anesthesia_Machine
+  pose:
+    x: 14.2
+    y: 19.0
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_instrument_table_1
+  type: Instrument_Table
+  pose:
+    x: 15.8
+    y: 17.7
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_surgical_tray_1
+  type: SM_UtilitiesTray_01e
+  pose:
+    x: 15.8
+    y: 17.7
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_vital_monitor_1
+  type: Vital_Signal_Station
+  pose:
+    x: 15.8
+    y: 19.0
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_defibrillator_1
+  type: Defibrillator
+  pose:
+    x: 15.8
+    y: 17.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_ventilator_1
+  type: Ventilator
+  pose:
+    x: 14.2
+    y: 15.35
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_SM_MedicalCabinet_01a_1
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 12.7
+    y: 20.7
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_supply_cabinet_1
+  type: SM_SupplyCabinet_01c
+  pose:
+    x: 17.05
+    y: 21.0
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_biohazard_container_1
+  type: Biohazard_Container
+  pose:
+    x: 17.7
+    y: 13.7
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_trashcan_1
+  type: SM_TrashCan
+  pose:
+    x: 17.7
+    y: 13.3
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_bench_1
+  type: Lab_Bench
+  pose:
+    x: 15.0
+    y: 26.65
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_bench_2
+  type: Lab_Bench
+  pose:
+    x: 15.0
+    y: 28.65
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_microscope_1
+  type: Microscope_Station
+  pose:
+    x: 14.4
+    y: 26.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_microscope_2
+  type: Microscope_Station
+  pose:
+    x: 14.4
+    y: 28.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_stool_1
+  type: Lab_Stool
+  pose:
+    x: 14.5
+    y: 25.9
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_stool_2
+  type: Lab_Stool
+  pose:
+    x: 14.5
+    y: 27.9
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_stool_3
+  type: Lab_Stool
+  pose:
+    x: 15.5
+    y: 25.9
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_SM_MedicalCabinet_01a_1
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 12.7
+    y: 29.2
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_refrigerated_unit_1
+  type: Refrigerated_Medicine_Unit
+  pose:
+    x: 17.5
+    y: 29.65
+    theta: -1.5731853071795865
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_shelf_1
+  type: SM_Shelf_06f
+  pose:
+    x: 12.5
+    y: 28.5
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_shelf_2
+  type: SM_Shelf_06f
+  pose:
+    x: 17.5
+    y: 28.5
+    theta: -1.5731853071795865
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_shelf_set_1
+  type: SM_ShelfSet_01a
+  pose:
+    x: 12.5
+    y: 24.0
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_shelf_set_2
+  type: SM_ShelfSet_01a
+  pose:
+    x: 17.5
+    y: 24.0
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_biohazard_container_1
+  type: Biohazard_Container
+  pose:
+    x: 16.0
+    y: 26.5
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_biohazard_container_2
+  type: Biohazard_Container
+  pose:
+    x: 16.0
+    y: 28.5
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_autoclave_1
+  type: Autoclave
+  pose:
+    x: 17.5
+    y: 27.5
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_trashcan_1
+  type: SM_TrashCan
+  pose:
+    x: 16.0
+    y: 26.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_trashcan_2
+  type: SM_TrashCan
+  pose:
+    x: 16.0
+    y: 28.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_washbasin_1
+  type: SM_Washbasin
+  pose:
+    x: 4.6
+    y: 34.2
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_washbasin_2
+  type: SM_Washbasin
+  pose:
+    x: 5.6
+    y: 34.2
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_washbasin_3
+  type: SM_Washbasin
+  pose:
+    x: 6.6
+    y: 34.2
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_washbasin_4
+  type: SM_Washbasin
+  pose:
+    x: 4.6
+    y: 30.2
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_washbasin_5
+  type: SM_Washbasin
+  pose:
+    x: 5.6
+    y: 30.2
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_washbasin_6
+  type: SM_Washbasin
+  pose:
+    x: 6.6
+    y: 30.2
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_toilet_1
+  type: SM_Toilet
+  pose:
+    x: 0.5
+    y: 30.85
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_toilet_paper_1
+  type: SM_ToiletPaper
+  pose:
+    x: 0.5
+    y: 31.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_toilet_2
+  type: SM_Toilet
+  pose:
+    x: 0.5
+    y: 32.15
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_toilet_paper_2
+  type: SM_ToiletPaper
+  pose:
+    x: 0.5
+    y: 32.7
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_toilet_3
+  type: SM_Toilet
+  pose:
+    x: 0.5
+    y: 33.5
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_toilet_paper_3
+  type: SM_ToiletPaper
+  pose:
+    x: 0.5
+    y: 34.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_washbasin_1
+  type: SM_Washbasin
+  pose:
+    x: 21.5
+    y: 13.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_washbasin_2
+  type: SM_Washbasin
+  pose:
+    x: 21.5
+    y: 15.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_washbasin_3
+  type: SM_Washbasin
+  pose:
+    x: 21.5
+    y: 16.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_toilet_1
+  type: SM_Toilet
+  pose:
+    x: 18.08
+    y: 13.75
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_toilet_paper_1
+  type: SM_ToiletPaper
+  pose:
+    x: 18.1
+    y: 13.75
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_toilet_2
+  type: SM_Toilet
+  pose:
+    x: 18.08
+    y: 15.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_toilet_paper_2
+  type: SM_ToiletPaper
+  pose:
+    x: 18.1
+    y: 15.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_toilet_3
+  type: SM_Toilet
+  pose:
+    x: 18.08
+    y: 16.42
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_toilet_paper_3
+  type: SM_ToiletPaper
+  pose:
+    x: 18.1
+    y: 16.42
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: doctors_resting_room_bed_1
+  type: SM_HospitalBed_02d
+  pose:
+    x: 17.5
+    y: 31.4
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: doctors_resting_room_desk_1
+  type: SM_Desk_04a
+  pose:
+    x: 15.0
+    y: 31.0
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: doctors_resting_room_desk_chair_1
+  type: SM_Chair_01a
+  pose:
+    x: 14.6
+    y: 30.5
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: doctors_resting_room_sidetable_1
+  type: SM_SideTable_02a
+  pose:
+    x: 15.0
+    y: 33.0
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: doctors_resting_room_cabinet_1
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 17.1
+    y: 33.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: doctors_resting_room_computer_1
+  type: SM_Computer_02a
+  pose:
+    x: 15.0
+    y: 31.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: doctors_resting_room_chair_1
+  type: SM_Chair_02a
+  pose:
+    x: 15.0
+    y: 33.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+walls:
+- name: '0'
+  start:
+    x: 8.0
+    y: 0.0
+    theta: 0.0
+  end:
+    x: 9.25
+    y: 0.0
+    theta: 0.0
+- name: '1'
+  start:
+    x: 10.75
+    y: 0.0
+    theta: 0.0
+  end:
+    x: 12.0
+    y: 0.0
+    theta: 0.0
+- name: '2'
+  start:
+    x: 8.0
+    y: 34.2
+    theta: 1.3410098649240938
+  end:
+    x: 12.0
+    y: 34.2
+    theta: 1.2333402575671149
+- name: '3'
+  start:
+    x: 0.0
+    y: 0.0
+    theta: 0.0
+  end:
+    x: 0.0
+    y: 5.0
+    theta: 1.5707963267948963
+- name: '4'
+  start:
+    x: 0.0
+    y: 5.0
+    theta: 1.5707963267948963
+  end:
+    x: 8.0
+    y: 5.0
+    theta: 0.5585993153435624
+- name: '5'
+  start:
+    x: 8.0
+    y: 5.0
+    theta: 0.5585993153435624
+  end:
+    x: 8.0
+    y: 3.25
+    theta: 0.3858826693980737
+- name: '6'
+  start:
+    x: 8.0
+    y: 1.75
+    theta: 0.21535769969773808
+  end:
+    x: 8.0
+    y: 0.0
+    theta: 0.0
+- name: '7'
+  start:
+    x: 8.0
+    y: 0.0
+    theta: 0.0
+  end:
+    x: 0.0
+    y: 0.0
+    theta: 0.0
+- name: '8'
+  start:
+    x: 0.0
+    y: 5.05
+    theta: 1.5707963267948963
+  end:
+    x: 0.0
+    y: 10.05
+    theta: 1.5707963267948963
+- name: '9'
+  start:
+    x: 0.0
+    y: 10.05
+    theta: 1.5707963267948963
+  end:
+    x: 8.0
+    y: 10.05
+    theta: 0.8984869907211225
+- name: '10'
+  start:
+    x: 8.0
+    y: 10.05
+    theta: 0.8984869907211225
+  end:
+    x: 8.0
+    y: 8.3
+    theta: 0.8038009936317606
+- name: '11'
+  start:
+    x: 8.0
+    y: 6.8
+    theta: 0.7044940642422177
+  end:
+    x: 8.0
+    y: 5.05
+    theta: 0.5630810780532186
+- name: '12'
+  start:
+    x: 8.0
+    y: 5.05
+    theta: 0.5630810780532186
+  end:
+    x: 0.0
+    y: 5.05
+    theta: 1.5707963267948963
+- name: '13'
+  start:
+    x: 0.0
+    y: 10.1
+    theta: 1.5707963267948963
+  end:
+    x: 0.0
+    y: 25.1
+    theta: 1.5707963267948963
+- name: '14'
+  start:
+    x: 0.0
+    y: 25.1
+    theta: 1.5707963267948963
+  end:
+    x: 8.0
+    y: 25.1
+    theta: 1.2622502870146757
+- name: '15'
+  start:
+    x: 8.0
+    y: 25.1
+    theta: 1.2622502870146757
+  end:
+    x: 8.0
+    y: 21.85
+    theta: 1.2198222792259736
+- name: '16'
+  start:
+    x: 8.0
+    y: 20.35
+    theta: 1.196234677954537
+  end:
+    x: 8.0
+    y: 14.85
+    theta: 1.0766541949789965
+- name: '17'
+  start:
+    x: 8.0
+    y: 13.35
+    theta: 1.0309277906558898
+  end:
+    x: 8.0
+    y: 10.1
+    theta: 0.900903831427952
+- name: '18'
+  start:
+    x: 8.0
+    y: 10.1
+    theta: 0.900903831427952
+  end:
+    x: 0.0
+    y: 10.1
+    theta: 1.5707963267948963
+- name: '19'
+  start:
+    x: 0.0
+    y: 25.15
+    theta: 1.5707963267948963
+  end:
+    x: 0.0
+    y: 30.15
+    theta: 1.5707963267948963
+- name: '20'
+  start:
+    x: 0.0
+    y: 30.15
+    theta: 1.5707963267948963
+  end:
+    x: 8.0
+    y: 30.15
+    theta: 1.311432963840455
+- name: '21'
+  start:
+    x: 8.0
+    y: 30.15
+    theta: 1.311432963840455
+  end:
+    x: 8.0
+    y: 28.4
+    theta: 1.2962210453552712
+- name: '22'
+  start:
+    x: 8.0
+    y: 26.9
+    theta: 1.2817286062699607
+  end:
+    x: 8.0
+    y: 25.15
+    theta: 1.2628256071528496
+- name: '23'
+  start:
+    x: 8.0
+    y: 25.15
+    theta: 1.2628256071528496
+  end:
+    x: 0.0
+    y: 25.15
+    theta: 1.5707963267948963
+- name: '24'
+  start:
+    x: 12.0
+    y: 0.0
+    theta: 0.0
+  end:
+    x: 12.0
+    y: 10.0
+    theta: 0.6947382761967031
+- name: '25'
+  start:
+    x: 12.0
+    y: 10.0
+    theta: 0.6947382761967031
+  end:
+    x: 14.25
+    y: 10.0
+    theta: 0.6119024344346667
+- name: '26'
+  start:
+    x: 15.75
+    y: 10.0
+    theta: 0.5657014686561777
+  end:
+    x: 18.5
+    y: 10.0
+    theta: 0.4955516734858285
+- name: '27'
+  start:
+    x: 18.5
+    y: 10.0
+    theta: 0.4955516734858285
+  end:
+    x: 18.5
+    y: 0.0
+    theta: 0.0
+- name: '28'
+  start:
+    x: 18.5
+    y: 0.0
+    theta: 0.0
+  end:
+    x: 12.0
+    y: 0.0
+    theta: 0.0
+- name: '29'
+  start:
+    x: 18.5
+    y: 0.0
+    theta: 0.0
+  end:
+    x: 18.5
+    y: 10.0
+    theta: 0.4955516734858285
+- name: '30'
+  start:
+    x: 18.5
+    y: 10.0
+    theta: 0.4955516734858285
+  end:
+    x: 21.25
+    y: 10.0
+    theta: 0.43984258281573624
+- name: '31'
+  start:
+    x: 22.75
+    y: 10.0
+    theta: 0.4141385504762116
+  end:
+    x: 25.0
+    y: 10.0
+    theta: 0.3805063771123649
+- name: '32'
+  start:
+    x: 25.0
+    y: 10.0
+    theta: 0.3805063771123649
+  end:
+    x: 25.0
+    y: 0.0
+    theta: 0.0
+- name: '33'
+  start:
+    x: 25.0
+    y: 0.0
+    theta: 0.0
+  end:
+    x: 18.5
+    y: 0.0
+    theta: 0.0
+- name: '34'
+  start:
+    x: 12.0
+    y: 13.05
+    theta: 0.8272898084933774
+  end:
+    x: 19.25
+    y: 13.05
+    theta: 0.5957543862597745
+- name: '35'
+  start:
+    x: 20.75
+    y: 13.05
+    theta: 0.5614101187519906
+  end:
+    x: 25.0
+    y: 13.05
+    theta: 0.48109231026353994
+- name: '36'
+  start:
+    x: 25.0
+    y: 13.05
+    theta: 0.48109231026353994
+  end:
+    x: 25.0
+    y: 10.05
+    theta: 0.3822293250973463
+- name: '37'
+  start:
+    x: 25.0
+    y: 10.05
+    theta: 0.3822293250973463
+  end:
+    x: 22.75
+    y: 10.05
+    theta: 0.41597897715749005
+- name: '38'
+  start:
+    x: 21.25
+    y: 10.05
+    theta: 0.44176718136778087
+  end:
+    x: 15.75
+    y: 10.05
+    theta: 0.5679607439945008
+- name: '39'
+  start:
+    x: 14.25
+    y: 10.05
+    theta: 0.6142495579812663
+  end:
+    x: 12.0
+    y: 10.05
+    theta: 0.6971922590007654
+- name: '40'
+  start:
+    x: 12.0
+    y: 13.1
+    theta: 0.8291948402413114
+  end:
+    x: 12.0
+    y: 16.6
+    theta: 0.9448715328461077
+- name: '41'
+  start:
+    x: 12.0
+    y: 18.1
+    theta: 0.9853479961087062
+  end:
+    x: 12.0
+    y: 21.6
+    theta: 1.0636978224025597
+- name: '42'
+  start:
+    x: 12.0
+    y: 21.6
+    theta: 1.0636978224025597
+  end:
+    x: 18.0
+    y: 21.6
+    theta: 0.8760580505981934
+- name: '43'
+  start:
+    x: 18.0
+    y: 21.6
+    theta: 0.8760580505981934
+  end:
+    x: 18.0
+    y: 13.1
+    theta: 0.6291265373941796
+- name: '44'
+  start:
+    x: 18.0
+    y: 13.1
+    theta: 0.6291265373941796
+  end:
+    x: 12.0
+    y: 13.1
+    theta: 0.8291948402413114
+- name: '45'
+  start:
+    x: 12.0
+    y: 21.65
+    theta: 1.0646787912854645
+  end:
+    x: 12.0
+    y: 25.15
+    theta: 1.1256056906794691
+- name: '46'
+  start:
+    x: 12.0
+    y: 26.65
+    theta: 1.1477083913058532
+  end:
+    x: 12.0
+    y: 30.15
+    theta: 1.1920066861934417
+- name: '47'
+  start:
+    x: 12.0
+    y: 30.15
+    theta: 1.1920066861934417
+  end:
+    x: 18.0
+    y: 30.15
+    theta: 1.0325746251834182
+- name: '48'
+  start:
+    x: 18.0
+    y: 30.15
+    theta: 1.0325746251834182
+  end:
+    x: 18.0
+    y: 21.65
+    theta: 0.8771949305085707
+- name: '49'
+  start:
+    x: 18.0
+    y: 21.65
+    theta: 0.8771949305085707
+  end:
+    x: 12.0
+    y: 21.65
+    theta: 1.0646787912854645
+- name: '50'
+  start:
+    x: 0.0
+    y: 34.2
+    theta: 1.5707963267948963
+  end:
+    x: 8.0
+    y: 34.2
+    theta: 1.3410098649240938
+- name: '51'
+  start:
+    x: 8.0
+    y: 34.2
+    theta: 1.3410098649240938
+  end:
+    x: 8.0
+    y: 33.0
+    theta: 1.332960399337446
+- name: '52'
+  start:
+    x: 8.0
+    y: 31.5
+    theta: 1.3220863377013736
+  end:
+    x: 8.0
+    y: 30.2
+    theta: 1.3118434180876681
+- name: '53'
+  start:
+    x: 8.0
+    y: 30.2
+    theta: 1.3118434180876681
+  end:
+    x: 0.0
+    y: 30.2
+    theta: 1.5707963267948963
+- name: '54'
+  start:
+    x: 0.0
+    y: 30.2
+    theta: 1.5707963267948963
+  end:
+    x: 0.0
+    y: 34.2
+    theta: 1.5707963267948963
+- name: '55'
+  start:
+    x: 0.0
+    y: 31.5
+    theta: 1.5707963267948963
+  end:
+    x: 2.0
+    y: 31.5
+    theta: 1.5073893748280647
+- name: '56'
+  start:
+    x: 0.0
+    y: 32.8
+    theta: 1.5707963267948963
+  end:
+    x: 2.0
+    y: 32.8
+    theta: 1.5098961185169086
+- name: '57'
+  start:
+    x: 2.0
+    y: 30.2
+    theta: 1.5046677234303236
+  end:
+    x: 2.0
+    y: 30.5
+    theta: 1.5053163018714317
+- name: '58'
+  start:
+    x: 2.0
+    y: 31.2
+    theta: 1.5067813489605526
+  end:
+    x: 2.0
+    y: 31.8
+    theta: 1.5079859741407957
+- name: '59'
+  start:
+    x: 2.0
+    y: 32.5
+    theta: 1.5093353709121304
+  end:
+    x: 2.0
+    y: 33.1
+    theta: 1.5104467388268745
+- name: '60'
+  start:
+    x: 2.0
+    y: 33.8
+    theta: 1.5116936431843089
+  end:
+    x: 2.0
+    y: 34.2
+    theta: 1.5123833220294056
+- name: '61'
+  start:
+    x: 18.05
+    y: 17.1
+    theta: 0.7583777142101835
+  end:
+    x: 22.05
+    y: 17.1
+    theta: 0.6596287426369206
+- name: '62'
+  start:
+    x: 22.05
+    y: 17.1
+    theta: 0.6596287426369206
+  end:
+    x: 22.05
+    y: 13.1
+    theta: 0.5360731551886284
+- name: '63'
+  start:
+    x: 22.05
+    y: 13.1
+    theta: 0.5360731551886284
+  end:
+    x: 20.75
+    y: 13.1
+    theta: 0.563134921390592
+- name: '64'
+  start:
+    x: 19.25
+    y: 13.1
+    theta: 0.5975317969370411
+  end:
+    x: 18.05
+    y: 13.1
+    theta: 0.6278073300871108
+- name: '65'
+  start:
+    x: 18.05
+    y: 13.1
+    theta: 0.6278073300871108
+  end:
+    x: 18.05
+    y: 17.1
+    theta: 0.7583777142101835
+- name: '66'
+  start:
+    x: 18.05
+    y: 14.43
+    theta: 0.6744030359040487
+  end:
+    x: 20.05
+    y: 14.43
+    theta: 0.6238259413221262
+- name: '67'
+  start:
+    x: 18.05
+    y: 15.77
+    theta: 0.7180842876047432
+  end:
+    x: 20.05
+    y: 15.77
+    theta: 0.6664756556373349
+- name: '68'
+  start:
+    x: 20.05
+    y: 13.1
+    theta: 0.5787382478750013
+  end:
+    x: 20.05
+    y: 13.4
+    theta: 0.5891526892969647
+- name: '69'
+  start:
+    x: 20.05
+    y: 14.1
+    theta: 0.6128984208645656
+  end:
+    x: 20.05
+    y: 14.43
+    theta: 0.6238259413221262
+- name: '70'
+  start:
+    x: 20.05
+    y: 14.43
+    theta: 0.6238259413221262
+  end:
+    x: 20.05
+    y: 14.73
+    theta: 0.6336131763747328
+- name: '71'
+  start:
+    x: 20.05
+    y: 15.43
+    theta: 0.6559125198397739
+  end:
+    x: 20.05
+    y: 15.77
+    theta: 0.6664756556373349
+- name: '72'
+  start:
+    x: 20.05
+    y: 15.77
+    theta: 0.6664756556373349
+  end:
+    x: 20.05
+    y: 16.07
+    theta: 0.6756526298090464
+- name: '73'
+  start:
+    x: 20.05
+    y: 16.77
+    theta: 0.6965506670606729
+  end:
+    x: 20.05
+    y: 17.1
+    theta: 0.7061566331888919
+- name: '74'
+  start:
+    x: 12.0
+    y: 30.2
+    theta: 1.1925756599876949
+  end:
+    x: 12.0
+    y: 31.5
+    theta: 1.2068173702852525
+- name: '75'
+  start:
+    x: 12.0
+    y: 33.0
+    theta: 1.2220253232109899
+  end:
+    x: 12.0
+    y: 34.2
+    theta: 1.2333402575671149
+- name: '76'
+  start:
+    x: 12.0
+    y: 34.2
+    theta: 1.2333402575671149
+  end:
+    x: 18.0
+    y: 34.2
+    theta: 1.0863183977578734
+- name: '77'
+  start:
+    x: 18.0
+    y: 34.2
+    theta: 1.0863183977578734
+  end:
+    x: 18.0
+    y: 30.2
+    theta: 1.0333036474352535
+- name: '78'
+  start:
+    x: 18.0
+    y: 30.2
+    theta: 1.0333036474352535
+  end:
+    x: 12.0
+    y: 30.2
+    theta: 1.1925756599876949
+obstacles:
+- name: reception_counter_1
+  pose:
+    x: 4.0
+    y: 2.8
+    theta: 0.0
+  bb:
+    x_min: 0.0
+    x_max: 2.4197
+    y_min: -2.7646
+    y_max: 0.1027
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_ReceptionDesk_01a
+  interaction_types: []
+- name: reception_waiting_sofa_1
+  pose:
+    x: 1.8
+    y: 4.55
+    theta: 0.0
+  bb:
+    x_min: -0.938
+    x_max: 0.938
+    y_min: -0.4297
+    y_max: 0.4294
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Waiting_Room_Sofa
+  interaction_types: []
+- name: reception_waiting_sofa_2
+  pose:
+    x: 3.7
+    y: 4.55
+    theta: 0.0
+  bb:
+    x_min: -0.938
+    x_max: 0.938
+    y_min: -0.4297
+    y_max: 0.4294
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Waiting_Room_Sofa
+  interaction_types: []
+- name: reception_waiting_sofa_3
+  pose:
+    x: 0.45
+    y: 3.15
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.938
+    x_max: 0.938
+    y_min: -0.4297
+    y_max: 0.4294
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Waiting_Room_Sofa
+  interaction_types: []
+- name: reception_waiting_chair_1
+  pose:
+    x: 5.9
+    y: 4.7
+    theta: 0.0
+  bb:
+    x_min: -1.1776
+    x_max: 1.1776
+    y_min: -0.3705
+    y_max: 0.3705
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Chair_02a
+  interaction_types: []
+- name: reception_display_board_1
+  pose:
+    x: 0.4
+    y: 0.5
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.3312
+    x_max: 0.3311
+    y_min: -0.2125
+    y_max: 0.2129
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Display_Board
+  interaction_types: []
+- name: reception_water_dispenser_1
+  pose:
+    x: 7.7
+    y: 0.2
+    theta: -1.5707899999999997
+  bb:
+    x_min: -0.1998
+    x_max: 0.2006
+    y_min: -0.17
+    y_max: 0.17
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_WaterDispenser_01a
+  interaction_types: []
+- name: reception_trashcan_1
+  pose:
+    x: 7.7
+    y: 4.8
+    theta: 0.0
+  bb:
+    x_min: -0.15
+    x_max: 0.15
+    y_min: -0.15
+    y_max: 0.15
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_TrashCan
+  interaction_types: []
+- name: exam_exam_table_1
+  pose:
+    x: 5.0
+    y: 7.55
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.1884
+    x_max: 0.1884
+    y_min: -0.3365
+    y_max: 0.3357
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Exam_Table
+  interaction_types: []
+- name: exam_medical_stool_1
+  pose:
+    x: 5.1
+    y: 7.1
+    theta: 0.0
+  bb:
+    x_min: -0.183
+    x_max: 0.183
+    y_min: -0.1534
+    y_max: 0.1718
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Medical_Stool
+  interaction_types: []
+- name: exam_instrument_table_1
+  pose:
+    x: 5.9
+    y: 7.0
+    theta: 0.0
+  bb:
+    x_min: -0.4168
+    x_max: 0.4167
+    y_min: -0.3367
+    y_max: 0.3438
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Instrument_Table
+  interaction_types: []
+- name: exam_vital_signal_station_1
+  pose:
+    x: 4.85
+    y: 8.2
+    theta: 0.0
+  bb:
+    x_min: -0.5635
+    x_max: 0.5602
+    y_min: -0.2902
+    y_max: 0.2952
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Vital_Signal_Station
+  interaction_types: []
+- name: exam_exam_table_2
+  pose:
+    x: 3.0
+    y: 7.55
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.1884
+    x_max: 0.1884
+    y_min: -0.3365
+    y_max: 0.3357
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Exam_Table
+  interaction_types: []
+- name: exam_medical_stool_2
+  pose:
+    x: 3.1
+    y: 7.1
+    theta: 0.0
+  bb:
+    x_min: -0.183
+    x_max: 0.183
+    y_min: -0.1534
+    y_max: 0.1718
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Medical_Stool
+  interaction_types: []
+- name: exam_instrument_table_2
+  pose:
+    x: 3.9
+    y: 7.0
+    theta: 0.0
+  bb:
+    x_min: -0.4168
+    x_max: 0.4167
+    y_min: -0.3367
+    y_max: 0.3438
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Instrument_Table
+  interaction_types: []
+- name: exam_vital_signal_station_2
+  pose:
+    x: 2.85
+    y: 8.2
+    theta: 0.0
+  bb:
+    x_min: -0.5635
+    x_max: 0.5602
+    y_min: -0.2902
+    y_max: 0.2952
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Vital_Signal_Station
+  interaction_types: []
+- name: exam_SM_MedicalCabinet_01a_1
+  pose:
+    x: 0.65
+    y: 9.2
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.0204
+    x_max: 0.8518
+    y_min: -0.0239
+    y_max: 0.6313
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MedicalCabinet_01a
+  interaction_types: []
+- name: exam_SM_MedicalCabinet_01a_2
+  pose:
+    x: 0.65
+    y: 8.325
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.0204
+    x_max: 0.8518
+    y_min: -0.0239
+    y_max: 0.6313
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MedicalCabinet_01a
+  interaction_types: []
+- name: exam_SM_MedicalCabinet_01a_3
+  pose:
+    x: 0.65
+    y: 7.45
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.0204
+    x_max: 0.8518
+    y_min: -0.0239
+    y_max: 0.6313
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MedicalCabinet_01a
+  interaction_types: []
+- name: exam_supply_cart_1
+  pose:
+    x: 0.55
+    y: 5.4
+    theta: 0.0
+  bb:
+    x_min: -0.4619
+    x_max: 0.6399
+    y_min: -0.2625
+    y_max: 0.265
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_SupplyCart_01e
+  interaction_types: []
+- name: exam_supply_cart_2
+  pose:
+    x: 1.7
+    y: 5.4
+    theta: 0.0
+  bb:
+    x_min: -0.4619
+    x_max: 0.6399
+    y_min: -0.2625
+    y_max: 0.265
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_SupplyCart_01e
+  interaction_types: []
+- name: exam_scale_1
+  pose:
+    x: 7.6
+    y: 5.5
+    theta: 3.14159
+  bb:
+    x_min: -0.225
+    x_max: 0.2374
+    y_min: -0.3051
+    y_max: 0.3051
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Scale_01a
+  interaction_types: []
+- name: exam_trashcan_1
+  pose:
+    x: 7.7
+    y: 9.8
+    theta: 0.0
+  bb:
+    x_min: -0.15
+    x_max: 0.15
+    y_min: -0.15
+    y_max: 0.15
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_TrashCan
+  interaction_types: []
+- name: ward_bed_1
+  pose:
+    x: 4.0
+    y: 13.6
+    theta: 0.0
+  bb:
+    x_min: -0.5533
+    x_max: 0.5533
+    y_min: -1.2127
+    y_max: 1.341
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_HospitalBed_01b
+  interaction_types: []
+- name: ward_bedside_table_1
+  pose:
+    x: 4.9
+    y: 14.4
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.2795
+    x_max: 0.25
+    y_min: -0.25
+    y_max: 0.25
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_BedSideTable_01b
+  interaction_types: []
+- name: ward_iv_stand_1
+  pose:
+    x: 2.8
+    y: 14.5
+    theta: 0.0
+  bb:
+    x_min: -0.2288
+    x_max: 0.2297
+    y_min: -0.3948
+    y_max: 0.3977
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: IV_Stand
+  interaction_types: []
+- name: ward_vital_signal_1
+  pose:
+    x: 4.9
+    y: 13.4
+    theta: -1.5707899999999997
+  bb:
+    x_min: -0.5635
+    x_max: 0.5602
+    y_min: -0.2902
+    y_max: 0.2952
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Vital_Signal_Station
+  interaction_types: []
+- name: ward_privacy_curtain_1
+  pose:
+    x: 4.0
+    y: 15.1
+    theta: 0.0
+  bb:
+    x_min: -1.357
+    x_max: 1.357
+    y_min: -0.1733
+    y_max: 0.1747
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Privacy_Curtain_Rail
+  interaction_types: []
+- name: ward_armchair_1
+  pose:
+    x: 2.2
+    y: 13.5
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.362
+    x_max: 0.3324
+    y_min: -0.327
+    y_max: 0.3587
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Chair_04a
+  interaction_types: []
+- name: ward_biohazard_container_1
+  pose:
+    x: 4.9
+    y: 12.4
+    theta: 0.0
+  bb:
+    x_min: -0.1755
+    x_max: 0.1754
+    y_min: -0.1631
+    y_max: 0.1625
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Biohazard_Container
+  interaction_types: []
+- name: ward_bed_2
+  pose:
+    x: 4.0
+    y: 19.6
+    theta: 0.0
+  bb:
+    x_min: -0.5533
+    x_max: 0.5533
+    y_min: -1.2127
+    y_max: 1.341
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_HospitalBed_01b
+  interaction_types: []
+- name: ward_bedside_table_2
+  pose:
+    x: 4.9
+    y: 20.4
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.2795
+    x_max: 0.25
+    y_min: -0.25
+    y_max: 0.25
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_BedSideTable_01b
+  interaction_types: []
+- name: ward_iv_stand_2
+  pose:
+    x: 2.8
+    y: 20.5
+    theta: 0.0
+  bb:
+    x_min: -0.2288
+    x_max: 0.2297
+    y_min: -0.3948
+    y_max: 0.3977
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: IV_Stand
+  interaction_types: []
+- name: ward_vital_signal_2
+  pose:
+    x: 4.9
+    y: 19.4
+    theta: -1.5707899999999997
+  bb:
+    x_min: -0.5635
+    x_max: 0.5602
+    y_min: -0.2902
+    y_max: 0.2952
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Vital_Signal_Station
+  interaction_types: []
+- name: ward_privacy_curtain_2
+  pose:
+    x: 4.0
+    y: 21.1
+    theta: 0.0
+  bb:
+    x_min: -1.357
+    x_max: 1.357
+    y_min: -0.1733
+    y_max: 0.1747
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Privacy_Curtain_Rail
+  interaction_types: []
+- name: ward_armchair_2
+  pose:
+    x: 2.2
+    y: 19.5
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.362
+    x_max: 0.3324
+    y_min: -0.327
+    y_max: 0.3587
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Chair_04a
+  interaction_types: []
+- name: ward_biohazard_container_2
+  pose:
+    x: 4.9
+    y: 18.4
+    theta: 0.0
+  bb:
+    x_min: -0.1755
+    x_max: 0.1754
+    y_min: -0.1631
+    y_max: 0.1625
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Biohazard_Container
+  interaction_types: []
+- name: ward_SM_MedicalCabinet_01a_1
+  pose:
+    x: 0.8
+    y: 24.0
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.0204
+    x_max: 0.8518
+    y_min: -0.0239
+    y_max: 0.6313
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MedicalCabinet_01a
+  interaction_types: []
+- name: ward_SM_MedicalCabinet_01a_2
+  pose:
+    x: 0.8
+    y: 1.2
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.0204
+    x_max: 0.8518
+    y_min: -0.0239
+    y_max: 0.6313
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MedicalCabinet_01a
+  interaction_types: []
+- name: ward_supply_cart_1
+  pose:
+    x: 2.3
+    y: 12.0
+    theta: 0.0
+  bb:
+    x_min: -0.2982
+    x_max: 0.2982
+    y_min: -0.5564
+    y_max: 0.5564
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_SupplyCart_03a
+  interaction_types: []
+- name: ward_supply_cart_2
+  pose:
+    x: 2.3
+    y: 18.0
+    theta: 0.0
+  bb:
+    x_min: -0.2982
+    x_max: 0.2982
+    y_min: -0.5564
+    y_max: 0.5564
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_SupplyCart_03a
+  interaction_types: []
+- name: ward_gurney_1
+  pose:
+    x: 6.5
+    y: 11.6
+    theta: 0.0
+  bb:
+    x_min: -1.0796
+    x_max: 1.0999
+    y_min: -0.386
+    y_max: 0.386
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Gurney_01b
+  interaction_types: []
+- name: ward_wheelchair_1
+  pose:
+    x: 0.7
+    y: 18.2
+    theta: 0.0
+  bb:
+    x_min: -0.5527
+    x_max: 0.5527
+    y_min: -0.4126
+    y_max: 0.4126
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_WheelChair_01a
+  interaction_types: []
+- name: ward_wheelchair_2
+  pose:
+    x: 0.7
+    y: 17.4
+    theta: 0.0
+  bb:
+    x_min: -0.5527
+    x_max: 0.5527
+    y_min: -0.4126
+    y_max: 0.4126
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_WheelChair_01a
+  interaction_types: []
+- name: ward_trashcan_1
+  pose:
+    x: 7.7
+    y: 10.3
+    theta: 0.0
+  bb:
+    x_min: -0.15
+    x_max: 0.15
+    y_min: -0.15
+    y_max: 0.15
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_TrashCan
+  interaction_types: []
+- name: pharmacy_desk_1
+  pose:
+    x: 4.0
+    y: 28.0
+    theta: 0.0
+  bb:
+    x_min: 0.0
+    x_max: 2.4197
+    y_min: -2.7646
+    y_max: 0.1027
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_ReceptionDesk_01a
+  interaction_types: []
+- name: pharmacy_chair_1
+  pose:
+    x: 5.1
+    y: 26.6
+    theta: 0.0
+  bb:
+    x_min: -0.3806
+    x_max: 0.3859
+    y_min: -0.4004
+    y_max: 0.3343
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Chair_01a
+  interaction_types: []
+- name: pharmacy_shelf_1
+  pose:
+    x: 0.25
+    y: 26.55
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.9702
+    x_max: 0.97
+    y_min: -0.213
+    y_max: 0.2097
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Pharmacy_Shelf
+  interaction_types: []
+- name: pharmacy_shelf_2
+  pose:
+    x: 0.25
+    y: 28.5
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.9702
+    x_max: 0.97
+    y_min: -0.213
+    y_max: 0.2097
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Pharmacy_Shelf
+  interaction_types: []
+- name: pharmacy_shelf_3
+  pose:
+    x: 3.4
+    y: 25.4
+    theta: 3.14159
+  bb:
+    x_min: -0.9702
+    x_max: 0.97
+    y_min: -0.213
+    y_max: 0.2097
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Pharmacy_Shelf
+  interaction_types: []
+- name: pharmacy_shelf_4
+  pose:
+    x: 1.4
+    y: 25.4
+    theta: 3.14159
+  bb:
+    x_min: -0.9702
+    x_max: 0.97
+    y_min: -0.213
+    y_max: 0.2097
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Pharmacy_Shelf
+  interaction_types: []
+- name: pharmacy_refrigerated_unit_1
+  pose:
+    x: 3.2
+    y: 29.6
+    theta: 0.0
+  bb:
+    x_min: -0.6118
+    x_max: 0.6108
+    y_min: -0.4248
+    y_max: 0.4261
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Refrigerated_Medicine_Unit
+  interaction_types: []
+- name: pharmacy_SM_MedicalCabinet_01a_1
+  pose:
+    x: 0.8
+    y: 29.4
+    theta: 0.0
+  bb:
+    x_min: -0.0204
+    x_max: 0.8518
+    y_min: -0.0239
+    y_max: 0.6313
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MedicalCabinet_01a
+  interaction_types: []
+- name: pharmacy_SM_MedicalCabinet_01a_2
+  pose:
+    x: 1.7
+    y: 29.4
+    theta: 0.0
+  bb:
+    x_min: -0.0204
+    x_max: 0.8518
+    y_min: -0.0239
+    y_max: 0.6313
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MedicalCabinet_01a
+  interaction_types: []
+- name: pharmacy_med_shelf_1
+  pose:
+    x: 4.3
+    y: 29.6
+    theta: 0.0
+  bb:
+    x_min: -0.4574
+    x_max: 0.4526
+    y_min: -0.4045
+    y_max: 0.4008
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MedShelf_01d
+  interaction_types: []
+- name: pharmacy_med_shelf_2
+  pose:
+    x: 5.25
+    y: 29.6
+    theta: 0.0
+  bb:
+    x_min: -0.4574
+    x_max: 0.4526
+    y_min: -0.4045
+    y_max: 0.4008
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MedShelf_01d
+  interaction_types: []
+- name: pharmacy_supply_cart_1
+  pose:
+    x: 1.3
+    y: 28.8
+    theta: 0.0
+  bb:
+    x_min: -0.4619
+    x_max: 0.6399
+    y_min: -0.2625
+    y_max: 0.265
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_SupplyCart_01e
+  interaction_types: []
+- name: pharmacy_supply_cart_2
+  pose:
+    x: 7.5
+    y: 25.8
+    theta: 0.0
+  bb:
+    x_min: -0.2982
+    x_max: 0.2982
+    y_min: -0.5564
+    y_max: 0.5564
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_SupplyCart_03a
+  interaction_types: []
+- name: pharmacy_biohazard_container_1
+  pose:
+    x: 7.3
+    y: 29.8
+    theta: 0.0
+  bb:
+    x_min: -0.1755
+    x_max: 0.1754
+    y_min: -0.1631
+    y_max: 0.1625
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Biohazard_Container
+  interaction_types: []
+- name: pharmacy_trashcan_1
+  pose:
+    x: 7.7
+    y: 29.8
+    theta: 0.0
+  bb:
+    x_min: -0.15
+    x_max: 0.15
+    y_min: -0.15
+    y_max: 0.15
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_TrashCan
+  interaction_types: []
+- name: nurse_resting_bed_1
+  pose:
+    x: 13.1
+    y: 1.7
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.546
+    x_max: 0.546
+    y_min: -1.1069
+    y_max: 1.1069
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_HospitalBed_02d
+  interaction_types: []
+- name: nurse_resting_bed_2
+  pose:
+    x: 13.1
+    y: 3.4
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.546
+    x_max: 0.546
+    y_min: -1.1069
+    y_max: 1.1069
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_HospitalBed_02d
+  interaction_types: []
+- name: nurse_resting_desk_1
+  pose:
+    x: 17.3
+    y: 3.3
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.7453
+    x_max: 0.7453
+    y_min: -0.2271
+    y_max: 0.2271
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Desk_04a
+  interaction_types: []
+- name: nurse_resting_desk_chair_1
+  pose:
+    x: 17.9
+    y: 3.1
+    theta: -1.5707899999999997
+  bb:
+    x_min: -0.3806
+    x_max: 0.3859
+    y_min: -0.4004
+    y_max: 0.3343
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Chair_01a
+  interaction_types: []
+- name: nurse_resting_computer_1
+  pose:
+    x: 17.2
+    y: 3.3
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.4134
+    x_max: 0.4871
+    y_min: -0.4507
+    y_max: 0.1718
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Computer_02a
+  interaction_types: []
+- name: nurse_resting_desk_2
+  pose:
+    x: 17.3
+    y: 5.2
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.7453
+    x_max: 0.7453
+    y_min: -0.2271
+    y_max: 0.2271
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Desk_04a
+  interaction_types: []
+- name: nurse_resting_desk_chair_2
+  pose:
+    x: 17.9
+    y: 5.0
+    theta: -1.5707899999999997
+  bb:
+    x_min: -0.3806
+    x_max: 0.3859
+    y_min: -0.4004
+    y_max: 0.3343
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Chair_01a
+  interaction_types: []
+- name: nurse_resting_computer_2
+  pose:
+    x: 17.2
+    y: 5.2
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.4134
+    x_max: 0.4871
+    y_min: -0.4507
+    y_max: 0.1718
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Computer_02a
+  interaction_types: []
+- name: nurse_resting_chair_1
+  pose:
+    x: 12.4
+    y: 6.0
+    theta: 1.5707899999999997
+  bb:
+    x_min: -1.1776
+    x_max: 1.1776
+    y_min: -0.3705
+    y_max: 0.3705
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Chair_02a
+  interaction_types: []
+- name: nurse_resting_chair_2
+  pose:
+    x: 12.4
+    y: 8.4
+    theta: 1.5707899999999997
+  bb:
+    x_min: -1.1776
+    x_max: 1.1776
+    y_min: -0.3705
+    y_max: 0.3705
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Chair_02a
+  interaction_types: []
+- name: nurse_resting_chair_3
+  pose:
+    x: 18.1
+    y: 8.4
+    theta: -1.5707899999999997
+  bb:
+    x_min: -1.1776
+    x_max: 1.1776
+    y_min: -0.3705
+    y_max: 0.3705
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Chair_02a
+  interaction_types: []
+- name: nurse_resting_sidetable_1
+  pose:
+    x: 13.4
+    y: 6.0
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.4588
+    x_max: 0.4593
+    y_min: -0.2106
+    y_max: 0.2106
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_SideTable_02a
+  interaction_types: []
+- name: nurse_resting_sidetable_2
+  pose:
+    x: 13.4
+    y: 8.4
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.4588
+    x_max: 0.4593
+    y_min: -0.2106
+    y_max: 0.2106
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_SideTable_02a
+  interaction_types: []
+- name: nurse_resting_sidetable_3
+  pose:
+    x: 17.1
+    y: 8.4
+    theta: -1.5707899999999997
+  bb:
+    x_min: -0.4588
+    x_max: 0.4593
+    y_min: -0.2106
+    y_max: 0.2106
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_SideTable_02a
+  interaction_types: []
+- name: nurse_resting_cabinet_1
+  pose:
+    x: 18.4
+    y: 0.6
+    theta: 3.14159
+  bb:
+    x_min: -0.0204
+    x_max: 0.8518
+    y_min: -0.0239
+    y_max: 0.6313
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MedicalCabinet_01a
+  interaction_types: []
+- name: nurse_resting_cabinet_2
+  pose:
+    x: 17.5
+    y: 0.6
+    theta: 3.14159
+  bb:
+    x_min: -0.0204
+    x_max: 0.8518
+    y_min: -0.0239
+    y_max: 0.6313
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MedicalCabinet_01a
+  interaction_types: []
+- name: nurse_resting_cabinet_3
+  pose:
+    x: 16.6
+    y: 0.6
+    theta: 3.14159
+  bb:
+    x_min: -0.0204
+    x_max: 0.8518
+    y_min: -0.0239
+    y_max: 0.6313
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MedicalCabinet_01a
+  interaction_types: []
+- name: nurse_resting_cabinet_4
+  pose:
+    x: 15.7
+    y: 0.6
+    theta: 3.14159
+  bb:
+    x_min: -0.0204
+    x_max: 0.8518
+    y_min: -0.0239
+    y_max: 0.6313
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MedicalCabinet_01a
+  interaction_types: []
+- name: waiting_sofa_3
+  pose:
+    x: 20.3
+    y: 8.5
+    theta: 3.14159
+  bb:
+    x_min: -0.938
+    x_max: 0.938
+    y_min: -0.4297
+    y_max: 0.4294
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Waiting_Room_Sofa
+  interaction_types: []
+- name: waiting_sofa_4
+  pose:
+    x: 23.4
+    y: 8.5
+    theta: 3.14159
+  bb:
+    x_min: -0.938
+    x_max: 0.938
+    y_min: -0.4297
+    y_max: 0.4294
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Waiting_Room_Sofa
+  interaction_types: []
+- name: waiting_chair_8
+  pose:
+    x: 20.3
+    y: 6.0
+    theta: 3.14159
+  bb:
+    x_min: -1.1776
+    x_max: 1.1776
+    y_min: -0.3705
+    y_max: 0.3705
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Chair_02a
+  interaction_types: []
+- name: waiting_chair_9
+  pose:
+    x: 20.3
+    y: 5.2
+    theta: 0.0
+  bb:
+    x_min: -1.1776
+    x_max: 1.1776
+    y_min: -0.3705
+    y_max: 0.3705
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Chair_02a
+  interaction_types: []
+- name: waiting_chair_10
+  pose:
+    x: 23.2
+    y: 6.0
+    theta: 3.14159
+  bb:
+    x_min: -1.1776
+    x_max: 1.1776
+    y_min: -0.3705
+    y_max: 0.3705
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Chair_02a
+  interaction_types: []
+- name: waiting_chair_11
+  pose:
+    x: 23.2
+    y: 5.2
+    theta: 0.0
+  bb:
+    x_min: -1.1776
+    x_max: 1.1776
+    y_min: -0.3705
+    y_max: 0.3705
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Chair_02a
+  interaction_types: []
+- name: waiting_bench_3
+  pose:
+    x: 20.1
+    y: 3.5
+    theta: 3.14159
+  bb:
+    x_min: -0.9321
+    x_max: 0.9325
+    y_min: -0.3202
+    y_max: 0.3199
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Waiting_Room_Bench
+  interaction_types: []
+- name: waiting_bench_4
+  pose:
+    x: 23.5
+    y: 3.5
+    theta: 3.14159
+  bb:
+    x_min: -0.9321
+    x_max: 0.9325
+    y_min: -0.3202
+    y_max: 0.3199
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Waiting_Room_Bench
+  interaction_types: []
+- name: waiting_side_table_1
+  pose:
+    x: 19.6
+    y: 4.2
+    theta: 0.0
+  bb:
+    x_min: -0.4588
+    x_max: 0.4593
+    y_min: -0.2106
+    y_max: 0.2106
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_SideTable_02a
+  interaction_types: []
+- name: waiting_side_table_2
+  pose:
+    x: 20.6
+    y: 4.2
+    theta: 0.0
+  bb:
+    x_min: -0.4588
+    x_max: 0.4593
+    y_min: -0.2106
+    y_max: 0.2106
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_SideTable_02a
+  interaction_types: []
+- name: waiting_side_table_3
+  pose:
+    x: 23.0
+    y: 4.2
+    theta: 0.0
+  bb:
+    x_min: -0.4588
+    x_max: 0.4593
+    y_min: -0.2106
+    y_max: 0.2106
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_SideTable_02a
+  interaction_types: []
+- name: waiting_side_table_4
+  pose:
+    x: 24.0
+    y: 4.2
+    theta: 0.0
+  bb:
+    x_min: -0.4588
+    x_max: 0.4593
+    y_min: -0.2106
+    y_max: 0.2106
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_SideTable_02a
+  interaction_types: []
+- name: waiting_trashcan_2
+  pose:
+    x: 24.6
+    y: 0.3
+    theta: 0.0
+  bb:
+    x_min: -0.15
+    x_max: 0.15
+    y_min: -0.15
+    y_max: 0.15
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_TrashCan
+  interaction_types: []
+- name: waiting_mop_set_1
+  pose:
+    x: 24.7
+    y: 0.7
+    theta: 0.0
+  bb:
+    x_min: -0.3088
+    x_max: -0.0124
+    y_min: -0.1276
+    y_max: 0.7588
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MopSet_01a
+  interaction_types: []
+- name: waiting_mop_set_2
+  pose:
+    x: 24.7
+    y: 0.7
+    theta: 0.0
+  bb:
+    x_min: -0.3839
+    x_max: 0.3674
+    y_min: -0.2281
+    y_max: 0.2281
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MopSet_01b
+  interaction_types: []
+- name: or_operating_table_1
+  pose:
+    x: 15.0
+    y: 19.0
+    theta: 0.0
+  bb:
+    x_min: -0.1689
+    x_max: 0.1687
+    y_min: -0.4768
+    y_max: 0.4771
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Operating_Table
+  interaction_types: []
+- name: or_surgical_table_1
+  pose:
+    x: 15.0
+    y: 15.5
+    theta: 0.0
+  bb:
+    x_min: -0.1564
+    x_max: 0.1497
+    y_min: -0.4626
+    y_max: 0.4636
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Surgical_Table
+  interaction_types: []
+- name: or_anesthesia_machine_1
+  pose:
+    x: 14.2
+    y: 19.0
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.2465
+    x_max: 0.2466
+    y_min: -0.4331
+    y_max: 0.4317
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Anesthesia_Machine
+  interaction_types: []
+- name: or_instrument_table_1
+  pose:
+    x: 15.8
+    y: 17.7
+    theta: -1.5707899999999997
+  bb:
+    x_min: -0.4168
+    x_max: 0.4167
+    y_min: -0.3367
+    y_max: 0.3438
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Instrument_Table
+  interaction_types: []
+- name: or_surgical_tray_1
+  pose:
+    x: 15.8
+    y: 17.7
+    theta: 0.0
+  bb:
+    x_min: -0.2633
+    x_max: 0.2691
+    y_min: -0.1574
+    y_max: 0.1489
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_UtilitiesTray_01e
+  interaction_types: []
+- name: or_vital_monitor_1
+  pose:
+    x: 15.8
+    y: 19.0
+    theta: -1.5707899999999997
+  bb:
+    x_min: -0.5635
+    x_max: 0.5602
+    y_min: -0.2902
+    y_max: 0.2952
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Vital_Signal_Station
+  interaction_types: []
+- name: or_defibrillator_1
+  pose:
+    x: 15.8
+    y: 17.6
+    theta: 0.0
+  bb:
+    x_min: -0.1174
+    x_max: 0.1166
+    y_min: -0.1337
+    y_max: 0.1338
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Defibrillator
+  interaction_types: []
+- name: or_ventilator_1
+  pose:
+    x: 14.2
+    y: 15.35
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.3096
+    x_max: 0.3094
+    y_min: -0.3842
+    y_max: 0.3817
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Ventilator
+  interaction_types: []
+- name: or_SM_MedicalCabinet_01a_1
+  pose:
+    x: 12.7
+    y: 20.7
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.0204
+    x_max: 0.8518
+    y_min: -0.0239
+    y_max: 0.6313
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MedicalCabinet_01a
+  interaction_types: []
+- name: or_supply_cabinet_1
+  pose:
+    x: 17.05
+    y: 21.0
+    theta: -1.5707899999999997
+  bb:
+    x_min: -0.3667
+    x_max: 0.3667
+    y_min: -0.7371
+    y_max: 0.7371
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_SupplyCabinet_01c
+  interaction_types: []
+- name: or_biohazard_container_1
+  pose:
+    x: 17.7
+    y: 13.7
+    theta: 0.0
+  bb:
+    x_min: -0.1755
+    x_max: 0.1754
+    y_min: -0.1631
+    y_max: 0.1625
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Biohazard_Container
+  interaction_types: []
+- name: or_trashcan_1
+  pose:
+    x: 17.7
+    y: 13.3
+    theta: 0.0
+  bb:
+    x_min: -0.15
+    x_max: 0.15
+    y_min: -0.15
+    y_max: 0.15
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_TrashCan
+  interaction_types: []
+- name: lab_bench_1
+  pose:
+    x: 15.0
+    y: 26.65
+    theta: 0.0
+  bb:
+    x_min: -0.8136
+    x_max: 0.8142
+    y_min: -0.3929
+    y_max: 0.3861
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Lab_Bench
+  interaction_types: []
+- name: lab_bench_2
+  pose:
+    x: 15.0
+    y: 28.65
+    theta: 0.0
+  bb:
+    x_min: -0.8136
+    x_max: 0.8142
+    y_min: -0.3929
+    y_max: 0.3861
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Lab_Bench
+  interaction_types: []
+- name: lab_microscope_1
+  pose:
+    x: 14.4
+    y: 26.4
+    theta: 0.0
+  bb:
+    x_min: -0.1793
+    x_max: 0.1793
+    y_min: -0.0942
+    y_max: 0.0939
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Microscope_Station
+  interaction_types: []
+- name: lab_microscope_2
+  pose:
+    x: 14.4
+    y: 28.4
+    theta: 0.0
+  bb:
+    x_min: -0.1793
+    x_max: 0.1793
+    y_min: -0.0942
+    y_max: 0.0939
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Microscope_Station
+  interaction_types: []
+- name: lab_stool_1
+  pose:
+    x: 14.5
+    y: 25.9
+    theta: 3.14159
+  bb:
+    x_min: -0.3284
+    x_max: 0.3286
+    y_min: -0.2658
+    y_max: 0.3064
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Lab_Stool
+  interaction_types: []
+- name: lab_stool_2
+  pose:
+    x: 14.5
+    y: 27.9
+    theta: 3.14159
+  bb:
+    x_min: -0.3284
+    x_max: 0.3286
+    y_min: -0.2658
+    y_max: 0.3064
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Lab_Stool
+  interaction_types: []
+- name: lab_stool_3
+  pose:
+    x: 15.5
+    y: 25.9
+    theta: 3.14159
+  bb:
+    x_min: -0.3284
+    x_max: 0.3286
+    y_min: -0.2658
+    y_max: 0.3064
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Lab_Stool
+  interaction_types: []
+- name: lab_SM_MedicalCabinet_01a_1
+  pose:
+    x: 12.7
+    y: 29.2
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.0204
+    x_max: 0.8518
+    y_min: -0.0239
+    y_max: 0.6313
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MedicalCabinet_01a
+  interaction_types: []
+- name: lab_refrigerated_unit_1
+  pose:
+    x: 17.5
+    y: 29.65
+    theta: -1.5731853071795865
+  bb:
+    x_min: -0.6118
+    x_max: 0.6108
+    y_min: -0.4248
+    y_max: 0.4261
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Refrigerated_Medicine_Unit
+  interaction_types: []
+- name: lab_shelf_1
+  pose:
+    x: 12.5
+    y: 28.5
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.5255
+    x_max: 0.4384
+    y_min: -0.4312
+    y_max: 0.4467
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Shelf_06f
+  interaction_types: []
+- name: lab_shelf_2
+  pose:
+    x: 17.5
+    y: 28.5
+    theta: -1.5731853071795865
+  bb:
+    x_min: -0.5255
+    x_max: 0.4384
+    y_min: -0.4312
+    y_max: 0.4467
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Shelf_06f
+  interaction_types: []
+- name: lab_shelf_set_1
+  pose:
+    x: 12.5
+    y: 24.0
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.861
+    x_max: 0.8616
+    y_min: -0.3077
+    y_max: 0.2518
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_ShelfSet_01a
+  interaction_types: []
+- name: lab_shelf_set_2
+  pose:
+    x: 17.5
+    y: 24.0
+    theta: -1.5707899999999997
+  bb:
+    x_min: -0.861
+    x_max: 0.8616
+    y_min: -0.3077
+    y_max: 0.2518
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_ShelfSet_01a
+  interaction_types: []
+- name: lab_biohazard_container_1
+  pose:
+    x: 16.0
+    y: 26.5
+    theta: 0.0
+  bb:
+    x_min: -0.1755
+    x_max: 0.1754
+    y_min: -0.1631
+    y_max: 0.1625
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Biohazard_Container
+  interaction_types: []
+- name: lab_biohazard_container_2
+  pose:
+    x: 16.0
+    y: 28.5
+    theta: 0.0
+  bb:
+    x_min: -0.1755
+    x_max: 0.1754
+    y_min: -0.1631
+    y_max: 0.1625
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Biohazard_Container
+  interaction_types: []
+- name: lab_autoclave_1
+  pose:
+    x: 17.5
+    y: 27.5
+    theta: -1.5707899999999997
+  bb:
+    x_min: -0.5725
+    x_max: 0.5721
+    y_min: -0.4056
+    y_max: 0.4059
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: Autoclave
+  interaction_types: []
+- name: lab_trashcan_1
+  pose:
+    x: 16.0
+    y: 26.1
+    theta: 0.0
+  bb:
+    x_min: -0.15
+    x_max: 0.15
+    y_min: -0.15
+    y_max: 0.15
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_TrashCan
+  interaction_types: []
+- name: lab_trashcan_2
+  pose:
+    x: 16.0
+    y: 28.1
+    theta: 0.0
+  bb:
+    x_min: -0.15
+    x_max: 0.15
+    y_min: -0.15
+    y_max: 0.15
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_TrashCan
+  interaction_types: []
+- name: wc_pharmacy_washbasin_1
+  pose:
+    x: 4.6
+    y: 34.2
+    theta: -1.5707899999999997
+  bb:
+    x_min: -0.0
+    x_max: 0.55
+    y_min: -0.5
+    y_max: 0.5
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Washbasin
+  interaction_types: []
+- name: wc_pharmacy_washbasin_2
+  pose:
+    x: 5.6
+    y: 34.2
+    theta: -1.5707899999999997
+  bb:
+    x_min: -0.0
+    x_max: 0.55
+    y_min: -0.5
+    y_max: 0.5
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Washbasin
+  interaction_types: []
+- name: wc_pharmacy_washbasin_3
+  pose:
+    x: 6.6
+    y: 34.2
+    theta: -1.5707899999999997
+  bb:
+    x_min: -0.0
+    x_max: 0.55
+    y_min: -0.5
+    y_max: 0.5
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Washbasin
+  interaction_types: []
+- name: wc_pharmacy_washbasin_4
+  pose:
+    x: 4.6
+    y: 30.2
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.0
+    x_max: 0.55
+    y_min: -0.5
+    y_max: 0.5
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Washbasin
+  interaction_types: []
+- name: wc_pharmacy_washbasin_5
+  pose:
+    x: 5.6
+    y: 30.2
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.0
+    x_max: 0.55
+    y_min: -0.5
+    y_max: 0.5
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Washbasin
+  interaction_types: []
+- name: wc_pharmacy_washbasin_6
+  pose:
+    x: 6.6
+    y: 30.2
+    theta: 1.5707899999999997
+  bb:
+    x_min: -0.0
+    x_max: 0.55
+    y_min: -0.5
+    y_max: 0.5
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Washbasin
+  interaction_types: []
+- name: wc_pharmacy_toilet_1
+  pose:
+    x: 0.5
+    y: 30.85
+    theta: 0.0
+  bb:
+    x_min: -0.0003
+    x_max: 0.5599
+    y_min: -0.18
+    y_max: 0.18
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Toilet
+  interaction_types: []
+- name: wc_pharmacy_toilet_paper_1
+  pose:
+    x: 0.5
+    y: 31.4
+    theta: 0.0
+  bb:
+    x_min: -0.0
+    x_max: 0.12
+    y_min: -0.1352
+    y_max: 0.1352
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_ToiletPaper
+  interaction_types: []
+- name: wc_pharmacy_toilet_2
+  pose:
+    x: 0.5
+    y: 32.15
+    theta: 0.0
+  bb:
+    x_min: -0.0003
+    x_max: 0.5599
+    y_min: -0.18
+    y_max: 0.18
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Toilet
+  interaction_types: []
+- name: wc_pharmacy_toilet_paper_2
+  pose:
+    x: 0.5
+    y: 32.7
+    theta: 0.0
+  bb:
+    x_min: -0.0
+    x_max: 0.12
+    y_min: -0.1352
+    y_max: 0.1352
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_ToiletPaper
+  interaction_types: []
+- name: wc_pharmacy_toilet_3
+  pose:
+    x: 0.5
+    y: 33.5
+    theta: 0.0
+  bb:
+    x_min: -0.0003
+    x_max: 0.5599
+    y_min: -0.18
+    y_max: 0.18
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Toilet
+  interaction_types: []
+- name: wc_pharmacy_toilet_paper_3
+  pose:
+    x: 0.5
+    y: 34.1
+    theta: 0.0
+  bb:
+    x_min: -0.0
+    x_max: 0.12
+    y_min: -0.1352
+    y_max: 0.1352
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_ToiletPaper
+  interaction_types: []
+- name: wc_waiting_washbasin_1
+  pose:
+    x: 21.5
+    y: 13.8
+    theta: 0.0
+  bb:
+    x_min: -0.0
+    x_max: 0.55
+    y_min: -0.5
+    y_max: 0.5
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Washbasin
+  interaction_types: []
+- name: wc_waiting_washbasin_2
+  pose:
+    x: 21.5
+    y: 15.1
+    theta: 0.0
+  bb:
+    x_min: -0.0
+    x_max: 0.55
+    y_min: -0.5
+    y_max: 0.5
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Washbasin
+  interaction_types: []
+- name: wc_waiting_washbasin_3
+  pose:
+    x: 21.5
+    y: 16.4
+    theta: 0.0
+  bb:
+    x_min: -0.0
+    x_max: 0.55
+    y_min: -0.5
+    y_max: 0.5
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Washbasin
+  interaction_types: []
+- name: wc_waiting_toilet_1
+  pose:
+    x: 18.08
+    y: 13.75
+    theta: 0.0
+  bb:
+    x_min: -0.0003
+    x_max: 0.5599
+    y_min: -0.18
+    y_max: 0.18
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Toilet
+  interaction_types: []
+- name: wc_waiting_toilet_paper_1
+  pose:
+    x: 18.1
+    y: 13.75
+    theta: 0.0
+  bb:
+    x_min: -0.0
+    x_max: 0.12
+    y_min: -0.1352
+    y_max: 0.1352
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_ToiletPaper
+  interaction_types: []
+- name: wc_waiting_toilet_2
+  pose:
+    x: 18.08
+    y: 15.1
+    theta: 0.0
+  bb:
+    x_min: -0.0003
+    x_max: 0.5599
+    y_min: -0.18
+    y_max: 0.18
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Toilet
+  interaction_types: []
+- name: wc_waiting_toilet_paper_2
+  pose:
+    x: 18.1
+    y: 15.1
+    theta: 0.0
+  bb:
+    x_min: -0.0
+    x_max: 0.12
+    y_min: -0.1352
+    y_max: 0.1352
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_ToiletPaper
+  interaction_types: []
+- name: wc_waiting_toilet_3
+  pose:
+    x: 18.08
+    y: 16.42
+    theta: 0.0
+  bb:
+    x_min: -0.0003
+    x_max: 0.5599
+    y_min: -0.18
+    y_max: 0.18
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Toilet
+  interaction_types: []
+- name: wc_waiting_toilet_paper_3
+  pose:
+    x: 18.1
+    y: 16.42
+    theta: 0.0
+  bb:
+    x_min: -0.0
+    x_max: 0.12
+    y_min: -0.1352
+    y_max: 0.1352
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_ToiletPaper
+  interaction_types: []
+- name: doctors_resting_room_bed_1
+  pose:
+    x: 17.5
+    y: 31.4
+    theta: 3.14159
+  bb:
+    x_min: -0.546
+    x_max: 0.546
+    y_min: -1.1069
+    y_max: 1.1069
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_HospitalBed_02d
+  interaction_types: []
+- name: doctors_resting_room_desk_1
+  pose:
+    x: 15.0
+    y: 31.0
+    theta: 0.0
+  bb:
+    x_min: -0.7453
+    x_max: 0.7453
+    y_min: -0.2271
+    y_max: 0.2271
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Desk_04a
+  interaction_types: []
+- name: doctors_resting_room_desk_chair_1
+  pose:
+    x: 14.6
+    y: 30.5
+    theta: 3.14159
+  bb:
+    x_min: -0.3806
+    x_max: 0.3859
+    y_min: -0.4004
+    y_max: 0.3343
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Chair_01a
+  interaction_types: []
+- name: doctors_resting_room_sidetable_1
+  pose:
+    x: 15.0
+    y: 33.0
+    theta: 0.0
+  bb:
+    x_min: -0.4588
+    x_max: 0.4593
+    y_min: -0.2106
+    y_max: 0.2106
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_SideTable_02a
+  interaction_types: []
+- name: doctors_resting_room_cabinet_1
+  pose:
+    x: 17.1
+    y: 33.6
+    theta: 0.0
+  bb:
+    x_min: -0.0204
+    x_max: 0.8518
+    y_min: -0.0239
+    y_max: 0.6313
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_MedicalCabinet_01a
+  interaction_types: []
+- name: doctors_resting_room_computer_1
+  pose:
+    x: 15.0
+    y: 31.2
+    theta: 0.0
+  bb:
+    x_min: -0.4134
+    x_max: 0.4871
+    y_min: -0.4507
+    y_max: 0.1718
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Computer_02a
+  interaction_types: []
+- name: doctors_resting_room_chair_1
+  pose:
+    x: 15.0
+    y: 33.8
+    theta: 0.0
+  bb:
+    x_min: -1.1776
+    x_max: 1.1776
+    y_min: -0.3705
+    y_max: 0.3705
+    z_min: 0.0
+    z_max: 0.0
+  obstacle_type: SM_Chair_02a
+  interaction_types: []
