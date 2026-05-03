@@ -1,4 +1,5 @@
 import argparse
+import subprocess
 import warnings
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from rosbags.highlevel import AnyReader
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
+
 def extract_agent_states(bag_path):
     extracted_data = []
     with AnyReader([bag_path]) as reader:
@@ -15,7 +17,7 @@ def extract_agent_states(bag_path):
             if 'agent_states' not in connection.topic:
                 continue
             msg = reader.deserialize(rawdata, connection.msgtype)
-            time_sec = timestamp * 1e-9 
+            time_sec = timestamp * 1e-9
             for agent in msg.agents:
                 extracted_data.append({
                     'time': time_sec,
@@ -29,8 +31,9 @@ def extract_agent_states(bag_path):
                 })
     return pd.DataFrame(extracted_data)
 
+
 def calculate_kinematic_metrics(agent_df):
-    dt = 0.05 
+    dt = 0.05
     v = agent_df[['vx', 'vy']].values
     v_next = np.roll(v, -1, axis=0)
     v_prev = np.roll(v, 1, axis=0)
@@ -47,6 +50,7 @@ def calculate_kinematic_metrics(agent_df):
     curvature = np.where(denominator > 1e-5, numerator / denominator, 0)
     mean_curvature = np.nanmean(curvature)
     return pd.Series({'mean_jerk': mean_jerk, 'mean_curvature': mean_curvature})
+
 
 def calculate_run_collisions(run_df):
     collision_pairs = set()
@@ -68,12 +72,18 @@ def calculate_run_collisions(run_df):
             collision_pairs.add(pair)
     return len(collision_pairs)
 
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate arena_humansim ablations.")
     parser.add_argument("--recordings_dir", type=str, required=True)
     args = parser.parse_args()
+
     recordings_path = Path(args.recordings_dir)
     all_metrics = []
+    generated_videos = []
+
+    COLLISION_THRESHOLD = 50
+
     print(f"Scanning {recordings_path} for ablation data...\n")
     for run_dir in recordings_path.iterdir():
         if run_dir.is_dir():
@@ -81,15 +91,37 @@ def main():
             if bag_dir.exists():
                 folder_name = run_dir.name
                 scenario_name = folder_name.split('_')[-1] if '_' in folder_name else "unknown"
+
                 df = extract_agent_states(bag_dir)
                 if df.empty:
                     continue
+
                 planner_name = df['planner'].iloc[0] if 'planner' in df.columns else "unknown"
                 total_collisions = calculate_run_collisions(df)
+
+                if total_collisions >= COLLISION_THRESHOLD:
+                    print(f"    -> [HEURISTIC TRIGGERED] {total_collisions} collisions in {folder_name}. Triggering native rendering script...")
+
+                    try:
+                        render_command = [
+                            "python3",
+                            "/opt/arena_ws/src/arena_humansim/arena_humansim/arena_humansim/utils/renderer.py",
+                            str(bag_dir),
+                            "--format", "mp4",
+                            "--fps", "20"
+                        ]
+
+                        subprocess.run(render_command, check=True)
+                        generated_videos.append(str(bag_dir.parent / "scenario.mp4"))
+                    except subprocess.CalledProcessError as e:
+                        print(f"    -> [ERROR] Rendering script failed for {folder_name}: {e}")
+
                 df = df.sort_values(['agent_id', 'time'])
                 run_metrics = df.groupby('agent_id').apply(calculate_kinematic_metrics).reset_index()
+
                 avg_run_jerk = run_metrics['mean_jerk'].mean()
                 avg_run_curvature = run_metrics['mean_curvature'].mean()
+
                 all_metrics.append({
                     'Scenario': scenario_name,
                     'Planner': planner_name,
@@ -97,6 +129,7 @@ def main():
                     'Curvature': avg_run_curvature,
                     'Collisions': total_collisions
                 })
+
     results_df = pd.DataFrame(all_metrics)
     if not results_df.empty:
         summary_df = results_df.groupby(['Scenario', 'Planner']).mean().reset_index()
@@ -105,8 +138,16 @@ def main():
         print("=======================================================")
         print(summary_df.to_string(index=False, float_format="{:.4f}".format))
         print("=======================================================\n")
+        if generated_videos:
+            print("=======================================================")
+            print(f"    SUCCESSFULLY RENDERED {len(generated_videos)} EDGE-CASE VIDEOS")
+            print("=======================================================")
+            for video_path in generated_videos:
+                print(f" * {video_path}")
+            print("\n")
     else:
         print("No valid metrics were generated. Check bag data.")
+
 
 if __name__ == "__main__":
     main()
