@@ -44,6 +44,7 @@ setup(
             "benchmark = arena_humansim.utils.benchmark:main",
             "arena_humansim_render = arena_humansim.utils.renderer:main",
             'run_ablations = arena_humansim.scripts.run_ablations:main',
+            'evaluate_ablations = arena_humansim.scripts.evaluate_ablations:main',
         ],
     },
 )
