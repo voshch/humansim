@@ -68,15 +68,15 @@ def main():
 
                 try:
                     print(f"Simulation started at max speed. Waiting for {args.sim_duration} sim-seconds to elapse...")
-                    
+
                     subprocess.run(cmd, check=True)
-                    
+
                     print("Simulation closed cleanly.")
-                    
+
                     if current_run < total_runs:
                         print("Waiting 5 seconds to clear ROS network before next run...")
                         time.sleep(5)
-                        
+
                 except subprocess.CalledProcessError as e:
                     print(f"An error occurred during {scenario} with {planner} (Seed {seed}): {e}")
 

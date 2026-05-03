@@ -10,7 +10,7 @@ from rosbags.highlevel import AnyReader
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 
-def extract_agent_states(bag_path):
+def extract_agent_states(bag_path: Path) -> pd.DataFrame:
     extracted_data = []
     with AnyReader([bag_path]) as reader:
         for connection, timestamp, rawdata in reader.messages():
@@ -32,7 +32,7 @@ def extract_agent_states(bag_path):
     return pd.DataFrame(extracted_data)
 
 
-def calculate_kinematic_metrics(agent_df):
+def calculate_kinematic_metrics(agent_df: pd.DataFrame) -> pd.Series:
     dt = 0.05
     v = agent_df[['vx', 'vy']].values
     v_next = np.roll(v, -1, axis=0)
@@ -52,7 +52,7 @@ def calculate_kinematic_metrics(agent_df):
     return pd.Series({'mean_jerk': mean_jerk, 'mean_curvature': mean_curvature})
 
 
-def calculate_run_collisions(run_df):
+def calculate_run_collisions(run_df: pd.DataFrame) -> int:
     collision_pairs = set()
     for _, frame in run_df.groupby('time'):
         if len(frame) < 2:
