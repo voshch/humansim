@@ -1,6 +1,4 @@
 import argparse
-import os
-import signal
 import subprocess
 import time
 
@@ -20,59 +18,67 @@ def main():
         help="List of local planners to test (e.g., --planners sfm socialgail)",
     )
     parser.add_argument(
-        "--duration",
+        "--seeds",
+        nargs="+",
         type=int,
         required=True,
-        help="Duration of each simulation run in seconds",
+        help="List of random seeds to test (e.g., --seeds 42 100 999)",
+    )
+    parser.add_argument(
+        "--sim_duration",
+        type=int,
+        required=True,
+        help="Exact simulated seconds to record",
     )
 
     args = parser.parse_args()
 
     scenarios = args.scenarios
     planners = args.planners
-    run_duration = args.duration
+    seeds = args.seeds
+    sim_duration = args.sim_duration
 
-    total_runs = len(scenarios) * len(planners)
+    total_runs = len(scenarios) * len(planners) *  len(seeds)
     current_run = 0
 
     for scenario in scenarios:
         for planner in planners:
-            current_run += 1
-            print("=========================================")
-            print(f"Running ablation ({current_run}/{total_runs}): Scenario={scenario}, Planner={planner}")
-            print("=========================================")
+            for seed in seeds:
 
-            cmd = [
-                "ros2",
-                "launch",
-                "arena_humansim",
-                "arena_humansim.launch.py",
-                f"scenario:={scenario}",
-                f"local_planner:={planner}",
-                "record:=True",
-                "render:=False",
-                "rviz:=false",
-                "markers:=0",
-            ]
+                current_run += 1
+                print("=========================================")
+                print(f"Running ablation ({current_run}/{total_runs}): Scenario={scenario}, Planner={planner}, Seed={seed}")
+                print("=========================================")
 
-            try:
-                process = subprocess.Popen(cmd, preexec_fn=os.setsid)
+                cmd = [
+                    "ros2",
+                    "launch",
+                    "arena_humansim",
+                    "arena_humansim.launch.py",
+                    f"scenario:={scenario}",
+                    f"local_planner:={planner}",
+                    f"seed:={seed}",
+                    "rtf:=0",
+                    f"time:={sim_duration}",
+                    "record:=True",
+                    "render:=False",
+                    "rviz:=false",
+                    "markers:=0",
+                ]
 
-                print(f"Simulation started. Waiting for {run_duration} seconds...")
-                time.sleep(run_duration)
+                try:
+                    print(f"Simulation started at max speed. Waiting for {args.sim_duration} sim-seconds to elapse...")
 
-                print("Sending SIGINT to terminate simulation and save bag...")
-                os.killpg(os.getpgid(process.pid), signal.SIGINT)
-                process.wait()
+                    subprocess.run(cmd, check=True)
 
-                print("Simulation closed cleanly.")
+                    print("Simulation closed cleanly.")
 
-                if current_run < total_runs:
-                    print("Waiting 5 seconds before next run...")
-                    time.sleep(5)
+                    if current_run < total_runs:
+                        print("Waiting 5 seconds to clear ROS network before next run...")
+                        time.sleep(5)
 
-            except Exception as e:
-                print(f"An error occurred during {scenario} with {planner}: {e}")
+                except subprocess.CalledProcessError as e:
+                    print(f"An error occurred during {scenario} with {planner} (Seed {seed}): {e}")
 
     print("All ablations completed!")
 
