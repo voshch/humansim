@@ -1,0 +1,1736 @@
+name: generated_A_busy_office_where_workers_perform_tasks_and_take
+description: A busy office where workers perform tasks and take breaks for food and water
+simulation:
+  seed: 42
+  dt: 0.05
+  bt_tick_interval: 5
+  execution_mode: master
+modules:
+  perception: default
+  global_planner: dijkstra
+  local_planner: sfm
+  animation: kinematic
+agent_types:
+  receptionist:
+    name: receptionist
+    mode: behavior_tree
+    needs:
+      hunger:
+        initial:
+          mean: 80.0
+          std: 0.0
+          clip_low: 0.01
+          clip_high: 1000000000.0
+        decay_rate:
+          mean: 0.005
+          std: 0.0
+          clip_low: 0.01
+          clip_high: 1000000000.0
+      thirst:
+        initial:
+          mean: 80.0
+          std: 0.0
+          clip_low: 0.01
+          clip_high: 1000000000.0
+        decay_rate:
+          mean: 0.008
+          std: 0.0
+          clip_low: 0.01
+          clip_high: 1000000000.0
+    sequences:
+      work_at_desk:
+        steps:
+          sit_and_work:
+            target: nurse_resting_desk_chair_1
+            interaction: SIT_ON
+            duration:
+              mean: 300.0
+              std: 50.0
+              clip_low: 60.0
+              clip_high: 600.0
+            patience: null
+            satisfies: {}
+            on_failure: abort
+            autonomous: false
+            until: null
+            until_need: null
+            allowed_actions: null
+            blocked_actions: null
+            interruptible: true
+            interaction_radius: null
+            offer: false
+            cancel: false
+            queueable: null
+            min_participants: null
+            max_participants: null
+            formation_spec: null
+            wait_for_outcome: false
+        then: null
+        on_failure: null
+        interruptible: true
+        transitions:
+        - when:
+            hunger:
+              below: 30.0
+              above: null
+          goto: go_eat
+        - when:
+            thirst:
+              below: 30.0
+              above: null
+          goto: go_drink
+      go_eat:
+        steps:
+          find_food:
+            target: doctors_resting_room_sidetable_1
+            interaction: USE
+            duration:
+              mean: 120.0
+              std: 20.0
+              clip_low: 60.0
+              clip_high: 300.0
+            patience: null
+            satisfies:
+              hunger: 50.0
+            on_failure: abort
+            autonomous: false
+            until: null
+            until_need: null
+            allowed_actions: null
+            blocked_actions: null
+            interruptible: null
+            interaction_radius: null
+            offer: false
+            cancel: false
+            queueable: null
+            min_participants: null
+            max_participants: null
+            formation_spec: null
+            wait_for_outcome: false
+        then: work_at_desk
+        on_failure: null
+        interruptible: true
+        transitions: []
+      go_drink:
+        steps:
+          find_water:
+            target: doctors_resting_room_sidetable_1
+            interaction: USE
+            duration:
+              mean: 30.0
+              std: 5.0
+              clip_low: 10.0
+              clip_high: 60.0
+            patience: null
+            satisfies:
+              thirst: 40.0
+            on_failure: abort
+            autonomous: false
+            until: null
+            until_need: null
+            allowed_actions: null
+            blocked_actions: null
+            interruptible: null
+            interaction_radius: null
+            offer: false
+            cancel: false
+            queueable: null
+            min_participants: null
+            max_participants: null
+            formation_spec: null
+            wait_for_outcome: false
+        then: work_at_desk
+        on_failure: null
+        interruptible: true
+        transitions: []
+    initial_sequence: work_at_desk
+    vars:
+      is_busy:
+        type: bool
+        default: true
+        min: null
+        max: null
+agents:
+- agent_id: 1
+  agent_type: receptionist
+  spawn_pose:
+    x: 4.0
+    y: 3.5
+    theta: 4.71
+  desired_velocity: 1.0
+  agent_radius: 0.3
+  policy: sfm
+  policy_params: ''
+  services: []
+  spawn_tick: 0
+- agent_id: 2
+  agent_type: nurse
+  spawn_pose:
+    x: 17.9
+    y: 3.1
+    theta: 3.14
+  desired_velocity: 1.2
+  agent_radius: 0.3
+  policy: sfm
+  policy_params: ''
+  services: []
+  spawn_tick: 0
+- agent_id: 3
+  agent_type: doctor
+  spawn_pose:
+    x: 14.6
+    y: 30.5
+    theta: 0.0
+  desired_velocity: 1.2
+  agent_radius: 0.3
+  policy: sfm
+  policy_params: ''
+  services: []
+  spawn_tick: 0
+- agent_id: 4
+  agent_type: lab_technician
+  spawn_pose:
+    x: 14.5
+    y: 25.9
+    theta: 1.57
+  desired_velocity: 1.0
+  agent_radius: 0.3
+  policy: sfm
+  policy_params: ''
+  services: []
+  spawn_tick: 0
+- agent_id: 5
+  agent_type: patient
+  spawn_pose:
+    x: 1.8
+    y: 4.55
+    theta: 4.71
+  desired_velocity: 0.8
+  agent_radius: 0.3
+  policy: sfm
+  policy_params: ''
+  services: []
+  spawn_tick: 0
+- agent_id: 6
+  agent_type: visitor
+  spawn_pose:
+    x: 7.5
+    y: 2.5
+    theta: 3.14
+  desired_velocity: 1.1
+  agent_radius: 0.3
+  policy: sfm
+  policy_params: ''
+  services: []
+  spawn_tick: 50
+world_objects:
+- object_id: reception_counter_1
+  type: SM_ReceptionDesk_01a
+  pose:
+    x: 4.0
+    y: 2.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: reception_waiting_sofa_1
+  type: Waiting_Room_Sofa
+  pose:
+    x: 1.8
+    y: 4.55
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: reception_waiting_sofa_2
+  type: Waiting_Room_Sofa
+  pose:
+    x: 3.7
+    y: 4.55
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: reception_waiting_sofa_3
+  type: Waiting_Room_Sofa
+  pose:
+    x: 0.45
+    y: 3.15
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: reception_waiting_chair_1
+  type: SM_Chair_02a
+  pose:
+    x: 5.9
+    y: 4.7
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: reception_display_board_1
+  type: Display_Board
+  pose:
+    x: 0.4
+    y: 0.5
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: reception_water_dispenser_1
+  type: SM_WaterDispenser_01a
+  pose:
+    x: 7.7
+    y: 0.2
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: reception_trashcan_1
+  type: SM_TrashCan
+  pose:
+    x: 7.7
+    y: 4.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_exam_table_1
+  type: Exam_Table
+  pose:
+    x: 5.0
+    y: 7.55
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_medical_stool_1
+  type: Medical_Stool
+  pose:
+    x: 5.1
+    y: 7.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_instrument_table_1
+  type: Instrument_Table
+  pose:
+    x: 5.9
+    y: 7.0
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_vital_signal_station_1
+  type: Vital_Signal_Station
+  pose:
+    x: 4.85
+    y: 8.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_exam_table_2
+  type: Exam_Table
+  pose:
+    x: 3.0
+    y: 7.55
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_medical_stool_2
+  type: Medical_Stool
+  pose:
+    x: 3.1
+    y: 7.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_instrument_table_2
+  type: Instrument_Table
+  pose:
+    x: 3.9
+    y: 7.0
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_vital_signal_station_2
+  type: Vital_Signal_Station
+  pose:
+    x: 2.85
+    y: 8.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_SM_MedicalCabinet_01a_1
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 0.65
+    y: 9.2
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_SM_MedicalCabinet_01a_2
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 0.65
+    y: 8.325
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_SM_MedicalCabinet_01a_3
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 0.65
+    y: 7.45
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_supply_cart_1
+  type: SM_SupplyCart_01e
+  pose:
+    x: 0.55
+    y: 5.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_supply_cart_2
+  type: SM_SupplyCart_01e
+  pose:
+    x: 1.7
+    y: 5.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_scale_1
+  type: SM_Scale_01a
+  pose:
+    x: 7.6
+    y: 5.5
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: exam_trashcan_1
+  type: SM_TrashCan
+  pose:
+    x: 7.7
+    y: 9.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_bed_1
+  type: SM_HospitalBed_01b
+  pose:
+    x: 4.0
+    y: 13.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_bedside_table_1
+  type: SM_BedSideTable_01b
+  pose:
+    x: 4.9
+    y: 14.4
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_iv_stand_1
+  type: IV_Stand
+  pose:
+    x: 2.8
+    y: 14.5
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_vital_signal_1
+  type: Vital_Signal_Station
+  pose:
+    x: 4.9
+    y: 13.4
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_privacy_curtain_1
+  type: Privacy_Curtain_Rail
+  pose:
+    x: 4.0
+    y: 15.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_armchair_1
+  type: SM_Chair_04a
+  pose:
+    x: 2.2
+    y: 13.5
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_biohazard_container_1
+  type: Biohazard_Container
+  pose:
+    x: 4.9
+    y: 12.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_bed_2
+  type: SM_HospitalBed_01b
+  pose:
+    x: 4.0
+    y: 19.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_bedside_table_2
+  type: SM_BedSideTable_01b
+  pose:
+    x: 4.9
+    y: 20.4
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_iv_stand_2
+  type: IV_Stand
+  pose:
+    x: 2.8
+    y: 20.5
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_vital_signal_2
+  type: Vital_Signal_Station
+  pose:
+    x: 4.9
+    y: 19.4
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_privacy_curtain_2
+  type: Privacy_Curtain_Rail
+  pose:
+    x: 4.0
+    y: 21.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_armchair_2
+  type: SM_Chair_04a
+  pose:
+    x: 2.2
+    y: 19.5
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_biohazard_container_2
+  type: Biohazard_Container
+  pose:
+    x: 4.9
+    y: 18.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_SM_MedicalCabinet_01a_1
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 0.8
+    y: 24.0
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_SM_MedicalCabinet_01a_2
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 0.8
+    y: 1.2
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_supply_cart_1
+  type: SM_SupplyCart_03a
+  pose:
+    x: 2.3
+    y: 12.0
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_supply_cart_2
+  type: SM_SupplyCart_03a
+  pose:
+    x: 2.3
+    y: 18.0
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_gurney_1
+  type: SM_Gurney_01b
+  pose:
+    x: 6.5
+    y: 11.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_wheelchair_1
+  type: SM_WheelChair_01a
+  pose:
+    x: 0.7
+    y: 18.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_wheelchair_2
+  type: SM_WheelChair_01a
+  pose:
+    x: 0.7
+    y: 17.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: ward_trashcan_1
+  type: SM_TrashCan
+  pose:
+    x: 7.7
+    y: 10.3
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_desk_1
+  type: SM_ReceptionDesk_01a
+  pose:
+    x: 4.0
+    y: 28.0
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_chair_1
+  type: SM_Chair_01a
+  pose:
+    x: 5.1
+    y: 26.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_shelf_1
+  type: Pharmacy_Shelf
+  pose:
+    x: 0.25
+    y: 26.55
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_shelf_2
+  type: Pharmacy_Shelf
+  pose:
+    x: 0.25
+    y: 28.5
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_shelf_3
+  type: Pharmacy_Shelf
+  pose:
+    x: 3.4
+    y: 25.4
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_shelf_4
+  type: Pharmacy_Shelf
+  pose:
+    x: 1.4
+    y: 25.4
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_refrigerated_unit_1
+  type: Refrigerated_Medicine_Unit
+  pose:
+    x: 3.2
+    y: 29.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_SM_MedicalCabinet_01a_1
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 0.8
+    y: 29.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_SM_MedicalCabinet_01a_2
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 1.7
+    y: 29.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_med_shelf_1
+  type: SM_MedShelf_01d
+  pose:
+    x: 4.3
+    y: 29.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_med_shelf_2
+  type: SM_MedShelf_01d
+  pose:
+    x: 5.25
+    y: 29.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_supply_cart_1
+  type: SM_SupplyCart_01e
+  pose:
+    x: 1.3
+    y: 28.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_supply_cart_2
+  type: SM_SupplyCart_03a
+  pose:
+    x: 7.5
+    y: 25.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_biohazard_container_1
+  type: Biohazard_Container
+  pose:
+    x: 7.3
+    y: 29.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: pharmacy_trashcan_1
+  type: SM_TrashCan
+  pose:
+    x: 7.7
+    y: 29.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_bed_1
+  type: SM_HospitalBed_02d
+  pose:
+    x: 13.1
+    y: 1.7
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_bed_2
+  type: SM_HospitalBed_02d
+  pose:
+    x: 13.1
+    y: 3.4
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_desk_1
+  type: SM_Desk_04a
+  pose:
+    x: 17.3
+    y: 3.3
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_desk_chair_1
+  type: SM_Chair_01a
+  pose:
+    x: 17.9
+    y: 3.1
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_computer_1
+  type: SM_Computer_02a
+  pose:
+    x: 17.2
+    y: 3.3
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_desk_2
+  type: SM_Desk_04a
+  pose:
+    x: 17.3
+    y: 5.2
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_desk_chair_2
+  type: SM_Chair_01a
+  pose:
+    x: 17.9
+    y: 5.0
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_computer_2
+  type: SM_Computer_02a
+  pose:
+    x: 17.2
+    y: 5.2
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_chair_1
+  type: SM_Chair_02a
+  pose:
+    x: 12.4
+    y: 6.0
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_chair_2
+  type: SM_Chair_02a
+  pose:
+    x: 12.4
+    y: 8.4
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_chair_3
+  type: SM_Chair_02a
+  pose:
+    x: 18.1
+    y: 8.4
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_sidetable_1
+  type: SM_SideTable_02a
+  pose:
+    x: 13.4
+    y: 6.0
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_sidetable_2
+  type: SM_SideTable_02a
+  pose:
+    x: 13.4
+    y: 8.4
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_sidetable_3
+  type: SM_SideTable_02a
+  pose:
+    x: 17.1
+    y: 8.4
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_cabinet_1
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 18.4
+    y: 0.6
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_cabinet_2
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 17.5
+    y: 0.6
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_cabinet_3
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 16.6
+    y: 0.6
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: nurse_resting_cabinet_4
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 15.7
+    y: 0.6
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_sofa_3
+  type: Waiting_Room_Sofa
+  pose:
+    x: 20.3
+    y: 8.5
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_sofa_4
+  type: Waiting_Room_Sofa
+  pose:
+    x: 23.4
+    y: 8.5
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_chair_8
+  type: SM_Chair_02a
+  pose:
+    x: 20.3
+    y: 6.0
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_chair_9
+  type: SM_Chair_02a
+  pose:
+    x: 20.3
+    y: 5.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_chair_10
+  type: SM_Chair_02a
+  pose:
+    x: 23.2
+    y: 6.0
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_chair_11
+  type: SM_Chair_02a
+  pose:
+    x: 23.2
+    y: 5.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_bench_3
+  type: Waiting_Room_Bench
+  pose:
+    x: 20.1
+    y: 3.5
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_bench_4
+  type: Waiting_Room_Bench
+  pose:
+    x: 23.5
+    y: 3.5
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_side_table_1
+  type: SM_SideTable_02a
+  pose:
+    x: 19.6
+    y: 4.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_side_table_2
+  type: SM_SideTable_02a
+  pose:
+    x: 20.6
+    y: 4.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_side_table_3
+  type: SM_SideTable_02a
+  pose:
+    x: 23.0
+    y: 4.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_side_table_4
+  type: SM_SideTable_02a
+  pose:
+    x: 24.0
+    y: 4.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_trashcan_2
+  type: SM_TrashCan
+  pose:
+    x: 24.6
+    y: 0.3
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_mop_set_1
+  type: SM_MopSet_01a
+  pose:
+    x: 24.7
+    y: 0.7
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: waiting_mop_set_2
+  type: SM_MopSet_01b
+  pose:
+    x: 24.7
+    y: 0.7
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_operating_table_1
+  type: Operating_Table
+  pose:
+    x: 15.0
+    y: 19.0
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_surgical_table_1
+  type: Surgical_Table
+  pose:
+    x: 15.0
+    y: 15.5
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_anesthesia_machine_1
+  type: Anesthesia_Machine
+  pose:
+    x: 14.2
+    y: 19.0
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_instrument_table_1
+  type: Instrument_Table
+  pose:
+    x: 15.8
+    y: 17.7
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_surgical_tray_1
+  type: SM_UtilitiesTray_01e
+  pose:
+    x: 15.8
+    y: 17.7
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_vital_monitor_1
+  type: Vital_Signal_Station
+  pose:
+    x: 15.8
+    y: 19.0
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_defibrillator_1
+  type: Defibrillator
+  pose:
+    x: 15.8
+    y: 17.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_ventilator_1
+  type: Ventilator
+  pose:
+    x: 14.2
+    y: 15.35
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_SM_MedicalCabinet_01a_1
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 12.7
+    y: 20.7
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_supply_cabinet_1
+  type: SM_SupplyCabinet_01c
+  pose:
+    x: 17.05
+    y: 21.0
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_biohazard_container_1
+  type: Biohazard_Container
+  pose:
+    x: 17.7
+    y: 13.7
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: or_trashcan_1
+  type: SM_TrashCan
+  pose:
+    x: 17.7
+    y: 13.3
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_bench_1
+  type: Lab_Bench
+  pose:
+    x: 15.0
+    y: 26.65
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_bench_2
+  type: Lab_Bench
+  pose:
+    x: 15.0
+    y: 28.65
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_microscope_1
+  type: Microscope_Station
+  pose:
+    x: 14.4
+    y: 26.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_microscope_2
+  type: Microscope_Station
+  pose:
+    x: 14.4
+    y: 28.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_stool_1
+  type: Lab_Stool
+  pose:
+    x: 14.5
+    y: 25.9
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_stool_2
+  type: Lab_Stool
+  pose:
+    x: 14.5
+    y: 27.9
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_stool_3
+  type: Lab_Stool
+  pose:
+    x: 15.5
+    y: 25.9
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_SM_MedicalCabinet_01a_1
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 12.7
+    y: 29.2
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_refrigerated_unit_1
+  type: Refrigerated_Medicine_Unit
+  pose:
+    x: 17.5
+    y: 29.65
+    theta: -1.5731853071795865
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_shelf_1
+  type: SM_Shelf_06f
+  pose:
+    x: 12.5
+    y: 28.5
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_shelf_2
+  type: SM_Shelf_06f
+  pose:
+    x: 17.5
+    y: 28.5
+    theta: -1.5731853071795865
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_shelf_set_1
+  type: SM_ShelfSet_01a
+  pose:
+    x: 12.5
+    y: 24.0
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_shelf_set_2
+  type: SM_ShelfSet_01a
+  pose:
+    x: 17.5
+    y: 24.0
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_biohazard_container_1
+  type: Biohazard_Container
+  pose:
+    x: 16.0
+    y: 26.5
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_biohazard_container_2
+  type: Biohazard_Container
+  pose:
+    x: 16.0
+    y: 28.5
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_autoclave_1
+  type: Autoclave
+  pose:
+    x: 17.5
+    y: 27.5
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_trashcan_1
+  type: SM_TrashCan
+  pose:
+    x: 16.0
+    y: 26.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: lab_trashcan_2
+  type: SM_TrashCan
+  pose:
+    x: 16.0
+    y: 28.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_washbasin_1
+  type: SM_Washbasin
+  pose:
+    x: 4.6
+    y: 34.2
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_washbasin_2
+  type: SM_Washbasin
+  pose:
+    x: 5.6
+    y: 34.2
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_washbasin_3
+  type: SM_Washbasin
+  pose:
+    x: 6.6
+    y: 34.2
+    theta: -1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_washbasin_4
+  type: SM_Washbasin
+  pose:
+    x: 4.6
+    y: 30.2
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_washbasin_5
+  type: SM_Washbasin
+  pose:
+    x: 5.6
+    y: 30.2
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_washbasin_6
+  type: SM_Washbasin
+  pose:
+    x: 6.6
+    y: 30.2
+    theta: 1.5707899999999997
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_toilet_1
+  type: SM_Toilet
+  pose:
+    x: 0.5
+    y: 30.85
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_toilet_paper_1
+  type: SM_ToiletPaper
+  pose:
+    x: 0.5
+    y: 31.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_toilet_2
+  type: SM_Toilet
+  pose:
+    x: 0.5
+    y: 32.15
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_toilet_paper_2
+  type: SM_ToiletPaper
+  pose:
+    x: 0.5
+    y: 32.7
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_toilet_3
+  type: SM_Toilet
+  pose:
+    x: 0.5
+    y: 33.5
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_pharmacy_toilet_paper_3
+  type: SM_ToiletPaper
+  pose:
+    x: 0.5
+    y: 34.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_washbasin_1
+  type: SM_Washbasin
+  pose:
+    x: 21.5
+    y: 13.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_washbasin_2
+  type: SM_Washbasin
+  pose:
+    x: 21.5
+    y: 15.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_washbasin_3
+  type: SM_Washbasin
+  pose:
+    x: 21.5
+    y: 16.4
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_toilet_1
+  type: SM_Toilet
+  pose:
+    x: 18.08
+    y: 13.75
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_toilet_paper_1
+  type: SM_ToiletPaper
+  pose:
+    x: 18.1
+    y: 13.75
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_toilet_2
+  type: SM_Toilet
+  pose:
+    x: 18.08
+    y: 15.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_toilet_paper_2
+  type: SM_ToiletPaper
+  pose:
+    x: 18.1
+    y: 15.1
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_toilet_3
+  type: SM_Toilet
+  pose:
+    x: 18.08
+    y: 16.42
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: wc_waiting_toilet_paper_3
+  type: SM_ToiletPaper
+  pose:
+    x: 18.1
+    y: 16.42
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: doctors_resting_room_bed_1
+  type: SM_HospitalBed_02d
+  pose:
+    x: 17.5
+    y: 31.4
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: doctors_resting_room_desk_1
+  type: SM_Desk_04a
+  pose:
+    x: 15.0
+    y: 31.0
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: doctors_resting_room_desk_chair_1
+  type: SM_Chair_01a
+  pose:
+    x: 14.6
+    y: 30.5
+    theta: 3.14159
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: doctors_resting_room_sidetable_1
+  type: SM_SideTable_02a
+  pose:
+    x: 15.0
+    y: 33.0
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: doctors_resting_room_cabinet_1
+  type: SM_MedicalCabinet_01a
+  pose:
+    x: 17.1
+    y: 33.6
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: doctors_resting_room_computer_1
+  type: SM_Computer_02a
+  pose:
+    x: 15.0
+    y: 31.2
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null
+- object_id: doctors_resting_room_chair_1
+  type: SM_Chair_02a
+  pose:
+    x: 15.0
+    y: 33.8
+    theta: 0.0
+  capacity: 1
+  satisfies: {}
+  formation: null
+  interaction_radius: null

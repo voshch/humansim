@@ -27,6 +27,7 @@ setup(
         "py_trees",
         "pyastar2d",
         "pydantic",
+        "tqdm",
     ],
     extras_require={
         "test": ["pytest>=7", "pytest-xdist", "hypothesis>=6", "arena_humansim[socialgail,nsp]"],
@@ -43,8 +44,7 @@ setup(
             "arena_humansim_node = arena_humansim.core.agent_manager:main",
             "benchmark = arena_humansim.utils.benchmark:main",
             "arena_humansim_render = arena_humansim.utils.renderer:main",
-            'run_ablations = arena_humansim.scripts.run_ablations:main',
-            'evaluate_ablations = arena_humansim.scripts.evaluate_ablations:main',
+            "evaluate = arena_humansim.utils.evaluation.cli.__main__:main",
         ],
     },
 )

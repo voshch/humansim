@@ -184,6 +184,7 @@ class AgentManager(Node):
         self.declare_parameter("perception", "default")
         self.declare_parameter("global_planner", "astar")
         self.declare_parameter("local_planner", "sfm")
+        self.declare_parameter("force_local_planner", False)
         self.declare_parameter("animation", "noop")
         self.declare_parameter("collision", "wall_projection")
         self.declare_parameter("occlusion", "bitmap")
@@ -228,6 +229,7 @@ class AgentManager(Node):
             self._ticks_limit = max(1, int(round(time_limit / self._dt)))
         self._rtf = float(self.get_parameter("rtf").value)
         self._subsystem_overrun_policy = str(self.get_parameter("subsystem_overrun_policy").value)
+        self._force_local_planner = bool(self.get_parameter("force_local_planner").value)
         _pm = self.get_parameter("publish_markers").value
         if isinstance(_pm, bool):
             self._publish_markers = 2 if _pm else 0
@@ -1659,7 +1661,9 @@ class AgentManager(Node):
             kind = int(agent_msg.kind)
             policy_name = agent_msg.policy
             policy_params = agent_msg.policy_params
-            if policy_name:
+            if self._force_local_planner:
+                policy_idx = self._default_policy_idx
+            elif policy_name:
                 policy_idx = self._resolve_policy_idx(policy_name)
             else:
                 policy_idx = self._default_policy_idx if kind == 0 else -1
