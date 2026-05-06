@@ -1,0 +1,92 @@
+# robot_t_junction.yaml
+# t_junction.yaml + one robot moving east through the horizontal corridor.
+
+name: robot_t_junction
+description: >-
+  T-junction corridor with three converging human flows and one robot moving
+  east through the horizontal corridor.
+
+simulation:
+  seed: 23
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 5000
+  execution_mode: master
+
+agents:
+  - agent_id: 0
+    spawn_pose: {x: -12.0, y:  0.4, theta: 0.0}
+    goal_sequence: [{x: 12.0, y:  0.4}]
+    waypoint_mode: reverse
+    desired_velocity: 1.2
+
+  - agent_id: 1
+    spawn_pose: {x: -12.0, y:  0.0, theta: 0.0}
+    goal_sequence: [{x: 12.0, y:  0.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.3
+
+  - agent_id: 2
+    spawn_pose: {x: -11.0, y: -0.4, theta: 0.0}
+    goal_sequence: [{x: 12.0, y: -0.4}]
+    waypoint_mode: reverse
+    desired_velocity: 1.15
+
+  - agent_id: 3
+    spawn_pose: {x: 12.0, y:  0.4, theta: 3.14159}
+    goal_sequence: [{x: -12.0, y:  0.4}]
+    waypoint_mode: reverse
+    desired_velocity: 1.2
+
+  - agent_id: 4
+    spawn_pose: {x: 12.0, y: -0.4, theta: 3.14159}
+    goal_sequence: [{x: -12.0, y: -0.4}]
+    waypoint_mode: reverse
+    desired_velocity: 1.25
+
+  - agent_id: 5
+    spawn_pose: {x: 11.0, y:  0.0, theta: 3.14159}
+    goal_sequence: [{x: -12.0, y:  0.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.1
+
+  - agent_id: 6
+    spawn_pose: {x: -0.4, y: -10.0, theta: 1.5708}
+    goal_sequence:
+      - {x: -0.4, y: 0.0}
+      - {x: -12.0, y: 0.0}
+    waypoint_mode: reverse
+    desired_velocity: 1.2
+
+  - agent_id: 7
+    spawn_pose: {x:  0.0, y:  -9.0, theta: 1.5708}
+    goal_sequence:
+      - {x: 0.0, y: 0.0}
+      - {x: 12.0, y: 0.0}
+    waypoint_mode: reverse
+    desired_velocity: 1.25
+
+  - agent_id: 8
+    spawn_pose: {x:  0.4, y: -10.0, theta: 1.5708}
+    goal_sequence:
+      - {x: 0.4, y: 0.0}
+      - {x: 12.0, y: 0.4}
+    waypoint_mode: reverse
+    desired_velocity: 1.15
+
+  - agent_id: 100
+    kind: 1
+    policy: straight
+    agent_type: robot
+    spawn_pose: {x: -13.0, y: 0.8, theta: 0.0}
+    goal_sequence: [{x: 13.0, y: 0.8}]
+
+walls:
+  - {name: h_north,    start: {x: -13.0, y:  1.2}, end: {x:  13.0, y:  1.2}}
+  - {name: h_south_w,  start: {x: -13.0, y: -1.2}, end: {x:  -1.2, y: -1.2}}
+  - {name: h_south_e,  start: {x:   1.2, y: -1.2}, end: {x:  13.0, y: -1.2}}
+  - {name: stub_west,  start: {x:  -1.2, y: -1.2}, end: {x:  -1.2, y: -11.0}}
+  - {name: stub_east,  start: {x:   1.2, y: -1.2}, end: {x:   1.2, y: -11.0}}
+  - {name: stub_south, start: {x:  -1.2, y: -11.0}, end: {x:  1.2, y: -11.0}}
+
+interaction_scripts: []

@@ -20,7 +20,7 @@ def main() -> None:
     print(f"Recordings: {run_dir}")
 
     planners = ["sfm", "hsfm", "orca", "straight", "nsp", "socialgail"]
-    trials = [("simple_crossing", p, 42) for p in planners]
+    trials = [("simple_crossing", p, "", 42) for p in planners]
     run_sweep(trials=trials, sim_duration=60, output_dir=run_dir)
 
     print()
@@ -31,7 +31,7 @@ def main() -> None:
 
     print()
     print("=== Pre-flight analysis ===")
-    run_analysis(recordings_dir=run_dir, out_dir=run_dir, n_bootstrap=100)
+    run_analysis(recordings_dirs=run_dir, out_dir=run_dir, n_bootstrap=100)
 
     print()
     print("=== Per-driver kinematics ===")

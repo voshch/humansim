@@ -1,0 +1,11 @@
+This subdirectory (arena_humansim/local_planner/robot/drlvo/) is licensed under the
+GNU General Public License v3.0 (GPL-3.0). It is derived from the DRL-VO project
+by TempleRAIL (https://github.com/TempleRAIL/drl_vo_nav), specifically the
+observation construction in drl_vo/src/cnn_data_pub.py and the inference logic in
+drl_vo/src/drl_vo_inference.py, plus the bundled SB3 PPO checkpoint
+drl_vo/src/model/drl_vo.zip.
+
+The rest of arena_humansim is distributed under its own license. This subdirectory
+is included here under license isolation pending release-time cleanup; downstream
+packagers should treat it as a separately-licensed component. The full text of the
+GNU General Public License v3.0 is available at https://www.gnu.org/licenses/gpl-3.0.html.

@@ -17,9 +17,26 @@ from arena_humansim.core.agents.types import (
     _as_paramdist,
 )
 from arena_humansim.core.interaction_kinds import HandleKind, InteractionType
-from arena_humansim.utils.types import AnchorKind, FormationSpec, Pose2D
+from arena_humansim.utils.types import AnchorKind, FormationSpec, Pose2D, WaypointMode
 
 converter = cattrs.Converter()
+
+
+def _structure_waypoint_mode(val: object, _: type) -> WaypointMode:
+    if isinstance(val, WaypointMode):
+        return val
+    if isinstance(val, str):
+        try:
+            return WaypointMode[val.upper()]
+        except KeyError:
+            valid = ", ".join(m.name.lower() for m in WaypointMode)
+            raise ValueError(f"unknown waypoint_mode {val!r}; valid: {valid}") from None
+    if isinstance(val, int):
+        return WaypointMode(val)
+    raise ValueError(f"waypoint_mode must be a string or int, got {type(val).__name__}")
+
+
+converter.register_structure_hook(WaypointMode, _structure_waypoint_mode)
 
 
 def _structure_need_dist(val: object, _: type) -> NeedDist:

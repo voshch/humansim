@@ -1,0 +1,104 @@
+# robot_bottleneck.yaml
+# bottleneck.yaml + one robot funneling through the doorway eastward.
+
+name: robot_bottleneck
+description: >-
+  Two-room scenario with a 1.2m doorway. Twelve humans cross bidirectionally
+  while one robot traverses east through the doorway.
+
+simulation:
+  seed: 11
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 6000
+  execution_mode: master
+
+agents:
+  - agent_id: 0
+    spawn_pose: {x: -8.0, y:  2.5, theta: 0.0}
+    goal_sequence: [{x: 8.0, y:  2.5}]
+    waypoint_mode: reverse
+    desired_velocity: 1.2
+
+  - agent_id: 1
+    spawn_pose: {x: -8.0, y:  1.0, theta: 0.0}
+    goal_sequence: [{x: 8.0, y:  1.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.25
+
+  - agent_id: 2
+    spawn_pose: {x: -8.0, y:  0.0, theta: 0.0}
+    goal_sequence: [{x: 8.0, y:  0.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.3
+
+  - agent_id: 3
+    spawn_pose: {x: -9.0, y: -1.0, theta: 0.0}
+    goal_sequence: [{x: 8.0, y: -1.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.15
+
+  - agent_id: 4
+    spawn_pose: {x: -9.0, y: -2.5, theta: 0.0}
+    goal_sequence: [{x: 8.0, y: -2.5}]
+    waypoint_mode: reverse
+    desired_velocity: 1.2
+
+  - agent_id: 5
+    spawn_pose: {x: -7.0, y:  3.5, theta: 0.0}
+    goal_sequence: [{x: 8.0, y:  3.5}]
+    waypoint_mode: reverse
+    desired_velocity: 1.1
+
+  - agent_id: 6
+    spawn_pose: {x: 8.0, y:  2.5, theta: 3.14159}
+    goal_sequence: [{x: -8.0, y:  2.5}]
+    waypoint_mode: reverse
+    desired_velocity: 1.2
+
+  - agent_id: 7
+    spawn_pose: {x: 8.0, y:  1.0, theta: 3.14159}
+    goal_sequence: [{x: -8.0, y:  1.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.3
+
+  - agent_id: 8
+    spawn_pose: {x: 8.0, y:  0.0, theta: 3.14159}
+    goal_sequence: [{x: -8.0, y:  0.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.25
+
+  - agent_id: 9
+    spawn_pose: {x: 9.0, y: -1.0, theta: 3.14159}
+    goal_sequence: [{x: -8.0, y: -1.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.15
+
+  - agent_id: 10
+    spawn_pose: {x: 9.0, y: -2.5, theta: 3.14159}
+    goal_sequence: [{x: -8.0, y: -2.5}]
+    waypoint_mode: reverse
+    desired_velocity: 1.2
+
+  - agent_id: 11
+    spawn_pose: {x: 7.0, y: -3.5, theta: 3.14159}
+    goal_sequence: [{x: -8.0, y: -3.5}]
+    waypoint_mode: reverse
+    desired_velocity: 1.1
+
+  - agent_id: 100
+    kind: 1
+    policy: straight
+    agent_type: robot
+    spawn_pose: {x: -9.5, y: 0.3, theta: 0.0}
+    goal_sequence: [{x: 9.5, y: 0.3}]
+
+walls:
+  - {name: north,      start: {x: -10.0, y:  5.0}, end: {x: 10.0, y:  5.0}}
+  - {name: south,      start: {x: -10.0, y: -5.0}, end: {x: 10.0, y: -5.0}}
+  - {name: west,       start: {x: -10.0, y: -5.0}, end: {x: -10.0, y:  5.0}}
+  - {name: east,       start: {x:  10.0, y: -5.0}, end: {x:  10.0, y:  5.0}}
+  - {name: divider_n,  start: {x:   0.0, y:  0.6}, end: {x:   0.0, y:  5.0}}
+  - {name: divider_s,  start: {x:   0.0, y: -0.6}, end: {x:   0.0, y: -5.0}}
+
+interaction_scripts: []

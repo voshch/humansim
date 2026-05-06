@@ -63,7 +63,7 @@ from arena_humansim.core.despawn_monitor import DespawnMonitor
 from arena_humansim.core.interaction_kinds import InteractionType
 from arena_humansim.core.interaction_manager import InteractionManager
 from arena_humansim.core.logger import SimulationLogger
-from arena_humansim.core.pool import AgentPool, PoolAware
+from arena_humansim.core.pool import KIND_ROBOT, AgentPool, PoolAware
 from arena_humansim.core.recorder import BagRecorder, default_record_dir
 from arena_humansim.core.replay import ReplayManager, ReplayResult
 from arena_humansim.core.robot_services import RobotServiceAdvertiser
@@ -185,6 +185,8 @@ class AgentManager(Node):
         self.declare_parameter("global_planner", "astar")
         self.declare_parameter("local_planner", "sfm")
         self.declare_parameter("force_local_planner", False)
+        self.declare_parameter("robot_policy", "")
+        self.declare_parameter("robot_shutdown", "")
         self.declare_parameter("animation", "noop")
         self.declare_parameter("collision", "wall_projection")
         self.declare_parameter("occlusion", "bitmap")
@@ -230,6 +232,9 @@ class AgentManager(Node):
         self._rtf = float(self.get_parameter("rtf").value)
         self._subsystem_overrun_policy = str(self.get_parameter("subsystem_overrun_policy").value)
         self._force_local_planner = bool(self.get_parameter("force_local_planner").value)
+        self._robot_policy_override = str(self.get_parameter("robot_policy").value)
+        self._robot_shutdown_override = str(self.get_parameter("robot_shutdown").value).strip().lower()
+        self._robot_shutdown = False  # resolved against scenario.simulation.robot_shutdown after load
         _pm = self.get_parameter("publish_markers").value
         if isinstance(_pm, bool):
             self._publish_markers = 2 if _pm else 0
@@ -243,6 +248,7 @@ class AgentManager(Node):
             "perception": self.get_parameter("perception").value,
             "global_planner": self.get_parameter("global_planner").value,
             "local_planner": self.get_parameter("local_planner").value,
+            "robot_policy": self._robot_policy_override or "(none)",
             "animation": self.get_parameter("animation").value,
             "collision": self.get_parameter("collision").value,
             "occlusion": self.get_parameter("occlusion").value,
@@ -564,16 +570,42 @@ class AgentManager(Node):
         raise FileNotFoundError(f"scenario not found: {name_or_path}")
 
     def _load_scenario_file(self, name_or_path: str) -> None:
-        from arena_humansim.utils.scenario import load_scenario
+        from arena_humansim.utils.scenario import dump_resolved_scenario, load_scenario
 
         path = self._resolve_scenario_path(name_or_path)
         scenario = load_scenario(str(path))
         self._logger.info(f"Loading scenario '{scenario.name}' from {path}")
 
+        if self._recorder is not None:
+            try:
+                snapshot_path = self._recorder.record_dir / "scenario.yaml"
+                dump_resolved_scenario(path, snapshot_path)
+                self._logger.info(f"Snapshotted resolved scenario to {snapshot_path}")
+            except Exception as exc:
+                self._logger.warning(f"Failed to snapshot scenario: {exc}")
+
         self._init_world_knowledge(scenario)
 
         if self._ticks_limit == 0 and scenario.simulation.max_ticks > 0:
             self._ticks_limit = int(scenario.simulation.max_ticks)
+
+        if self._robot_shutdown_override in ("true", "1"):
+            self._robot_shutdown = True
+        elif self._robot_shutdown_override in ("false", "0"):
+            self._robot_shutdown = False
+        elif self._robot_shutdown_override == "":
+            self._robot_shutdown = bool(scenario.simulation.robot_shutdown)
+        else:
+            raise ValueError(f"robot_shutdown must be 'true', 'false', or empty; got {self._robot_shutdown_override!r}")
+        if self._robot_shutdown:
+            robots = [a for a in scenario.agents if int(a.kind) == int(AgentKind.ROBOT)]
+            if not robots:
+                self._logger.warning("robot_shutdown=true but scenario has no robot agents; the run will not auto-terminate")
+            else:
+                non_once = [a for a in robots if a.waypoint_mode != WaypointMode.ONCE]
+                if non_once:
+                    ids = ", ".join(str(a.agent_id) for a in non_once)
+                    self._logger.warning(f"robot_shutdown=true but robot agents [{ids}] use non-ONCE waypoint mode; they will never satisfy the goal-reached condition")
 
         self._interaction_manager.set_context(
             formation_scale=float(scenario.simulation.formation_scale),
@@ -626,12 +658,18 @@ class AgentManager(Node):
             msg.radius = float(a.agent_radius)
             msg.agent_type = a.agent_type
             msg.kind = int(a.kind)
-            msg.policy = a.policy
+            if int(a.kind) == int(AgentKind.ROBOT) and self._robot_policy_override:
+                msg.policy = self._robot_policy_override
+            else:
+                msg.policy = a.policy
             msg.policy_params = a.policy_params
 
             wps = WaypointsMsg()
-            wps.mode = WaypointsMsg.MODE_ONCE
-            for gp in a.goal_sequence:
+            wps.mode = int(a.waypoint_mode)
+            seq = list(a.goal_sequence)
+            if a.waypoint_mode != WaypointMode.ONCE and len(seq) < 2:
+                seq = [*seq, a.spawn_pose]
+            for gp in seq:
                 w = WaypointMsg()
                 w.pose = Pose2DMsg(x=gp.x, y=gp.y, theta=gp.theta)
                 w.radius = 0.0
@@ -1087,9 +1125,7 @@ class AgentManager(Node):
                     accum_vel[own_mask] = pool.vel[:n][own_mask]
                 else:
                     group = [agents[i] for i in range(n) if int(pool.policy_idx[i]) == int(pidx)]
-                    vel_dict: dict[int, tuple[float, float]] = {}
-                    for sub_planner, sub_group in _group_by(group, key=lambda a: a.local_planner):
-                        vel_dict.update(sub_planner.compute(sub_group, self._cached_intermediate_goals, dt=self._dt))
+                    vel_dict = planner.compute(group, self._cached_intermediate_goals, dt=self._dt)
                     for i in range(n):
                         if not own_mask[i]:
                             continue
@@ -1539,6 +1575,27 @@ class AgentManager(Node):
         self._logger.warn(f"sim cannot keep up: tick took {elapsed * 1000:.1f}ms (budget {self._dt * 1000:.1f}ms), {self._overrun_count} overrun(s) since last report, {self._pool.n} agents" + (f" [{breakdown}]" if breakdown else ""))
         self._overrun_count = 0
 
+    def _robots_done(self) -> bool:
+        pool = self._pool
+        n = pool.n
+        if n == 0:
+            return False
+        is_robot = pool.kind[:n] == KIND_ROBOT
+        if not bool(np.any(is_robot)):
+            return False
+        ready = is_robot & pool.has_terminal[:n] & pool.latched[:n]
+        if not bool(np.array_equal(ready, is_robot)):
+            return False
+        for i in np.flatnonzero(is_robot):
+            agent = self._agents.get(int(pool.agent_ids[i]))
+            if agent is None:
+                return False
+            mv = agent.movement
+            if isinstance(mv, WaypointMovement):
+                if mv.mode != WaypointMode.ONCE or mv.index != len(mv.waypoints) - 1:
+                    return False
+        return True
+
     def _master_timer_callback(self):
         if self._tick_count == 0:
             self._publish_world_geometry()
@@ -1555,6 +1612,12 @@ class AgentManager(Node):
             if self._timer is not None:
                 self._timer.cancel()
             self._logger.info(f"reached ticks={self._ticks_limit}, shutting down")
+            rclpy.try_shutdown()
+            return
+        if self._robot_shutdown and self._robots_done():
+            if self._timer is not None:
+                self._timer.cancel()
+            self._logger.info(f"all robots reached their goal at tick={self._tick_count}, shutting down")
             rclpy.try_shutdown()
 
     def _subsystem_timer_callback(self):

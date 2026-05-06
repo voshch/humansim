@@ -7,7 +7,7 @@ def calculate_kinematic_metrics(agent_df: pd.DataFrame) -> pd.Series:
     v = agent_df[["vx", "vy"]].values
     v_next = np.roll(v, -1, axis=0)
     v_prev = np.roll(v, 1, axis=0)
-    jerk_vec = (v_next - 2 * v + v_prev) / (dt ** 2)
+    jerk_vec = (v_next - 2 * v + v_prev) / (dt**2)
     jerk_vec = jerk_vec[1:-1]
     jerk_mag = np.linalg.norm(jerk_vec, axis=1)
     mean_jerk = np.nanmean(jerk_mag)
@@ -16,7 +16,7 @@ def calculate_kinematic_metrics(agent_df: pd.DataFrame) -> pd.Series:
     ax = np.gradient(vx, dt)
     ay = np.gradient(vy, dt)
     numerator = np.abs(vx * ay - vy * ax)
-    denominator = (vx ** 2 + vy ** 2) ** 1.5
+    denominator = (vx**2 + vy**2) ** 1.5
     curvature = np.where(denominator > 1e-5, numerator / denominator, 0)
     mean_curvature = np.nanmean(curvature)
     return pd.Series({"mean_jerk": mean_jerk, "mean_curvature": mean_curvature})
@@ -32,7 +32,7 @@ def calculate_run_collisions(run_df: pd.DataFrame) -> int:
         radii = frame["radius"].values
         dx = coords[:, 0:1] - coords[:, 0]
         dy = coords[:, 1:2] - coords[:, 1]
-        distances = np.sqrt(dx ** 2 + dy ** 2)
+        distances = np.sqrt(dx**2 + dy**2)
         thresholds = radii[:, None] + radii
         collision_mask = distances < thresholds
         np.fill_diagonal(collision_mask, False)

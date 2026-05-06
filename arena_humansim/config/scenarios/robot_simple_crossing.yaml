@@ -1,0 +1,83 @@
+# robot_simple_crossing.yaml
+# Eight humans converge on the origin from a star pattern (4 cardinal + 4
+# diagonal). Robot traverses west-to-east through the crossing zone.
+
+name: robot_simple_crossing
+description: >-
+  Eight pedestrians approach the origin from cardinal and diagonal directions
+  in a star pattern, while one robot traverses west-to-east through the
+  crossing zone.
+
+simulation:
+  seed: 42
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 2000
+  execution_mode: master
+
+agents:
+  # Cardinal: E -> W
+  - agent_id: 0
+    spawn_pose: {x: 10.0, y: 0.0, theta: 3.14159}
+    goal_sequence: [{x: -10.0, y: 0.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.2
+
+  # Cardinal: W -> E
+  - agent_id: 1
+    spawn_pose: {x: -10.0, y: 0.0, theta: 0.0}
+    goal_sequence: [{x: 10.0, y: 0.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.2
+
+  # Cardinal: N -> S
+  - agent_id: 2
+    spawn_pose: {x: 0.0, y: 10.0, theta: -1.5708}
+    goal_sequence: [{x: 0.0, y: -10.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.1
+
+  # Cardinal: S -> N
+  - agent_id: 3
+    spawn_pose: {x: 0.0, y: -10.0, theta: 1.5708}
+    goal_sequence: [{x: 0.0, y: 10.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.1
+
+  # Diagonal: NE -> SW
+  - agent_id: 4
+    spawn_pose: {x: 7.0, y: 7.0, theta: -2.3562}
+    goal_sequence: [{x: -7.0, y: -7.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.15
+
+  # Diagonal: NW -> SE
+  - agent_id: 5
+    spawn_pose: {x: -7.0, y: 7.0, theta: -0.7854}
+    goal_sequence: [{x: 7.0, y: -7.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.15
+
+  # Diagonal: SE -> NW
+  - agent_id: 6
+    spawn_pose: {x: 7.0, y: -7.0, theta: 2.3562}
+    goal_sequence: [{x: -7.0, y: 7.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.25
+
+  # Diagonal: SW -> NE
+  - agent_id: 7
+    spawn_pose: {x: -7.0, y: -7.0, theta: 0.7854}
+    goal_sequence: [{x: 7.0, y: 7.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.25
+
+  # Robot: W -> E
+  - agent_id: 100
+    kind: 1
+    policy: straight
+    agent_type: robot
+    spawn_pose: {x: -12.0, y: 1.5, theta: 0.0}
+    goal_sequence: [{x: 12.0, y: 1.5}]
+
+interaction_scripts: []

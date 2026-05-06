@@ -1,0 +1,63 @@
+# robot_flow_coverage.yaml
+# flow_coverage.yaml + one robot crossing the source-sink flow.
+
+name: robot_flow_coverage
+description: >-
+  Source-sink flow scenario with one robot moving east across the flow lanes.
+
+simulation:
+  seed: 7
+  dt: 0.1
+  bt_tick_interval: 5
+  max_ticks: 100
+  execution_mode: master
+
+flow:
+  sources:
+    - pose: {x: -5.0, y: 0.0, theta: 0.0}
+      shape:
+        type: circle
+        radius: 0.5
+      rate_profile:
+        - {t: 0.0, rate: 2.0}
+        - {t: 10.0, rate: 1.0}
+      max_concurrent: 10
+      max_total: 20
+      agent_template:
+        desired_velocity_min: 1.0
+        desired_velocity_max: 1.4
+        agent_radius: 0.3
+        agent_type: adult
+        sink_affinity:
+          - {sink_idx: 0, weight: 1.0}
+
+    - pose: {x: 0.0, y: 5.0, theta: 0.0}
+      shape:
+        type: polygon
+      rate_profile:
+        - {t: 0.0, rate: 0.5}
+      max_concurrent: 5
+      max_total: 10
+      agent_template:
+        desired_velocity_min: 0.8
+        desired_velocity_max: 1.2
+        agent_radius: 0.35
+        agent_type: adult
+
+  sinks:
+    - pose: {x: 5.0, y: 0.0, theta: 0.0}
+      shape:
+        type: circle
+        radius: 0.8
+      absorption_radius: 0.8
+      capacity: -1
+
+agents:
+  - agent_id: 100
+    kind: 1
+    policy: straight
+    agent_type: robot
+    spawn_pose: {x: -7.0, y: 1.0, theta: 0.0}
+    goal_sequence: [{x: 7.0, y: 1.0}]
+
+interaction_scripts: []

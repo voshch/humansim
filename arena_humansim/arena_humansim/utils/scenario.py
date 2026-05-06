@@ -13,7 +13,7 @@ from ..core.agents.loader import _load_default_agent_types_raw, _structure_raw, 
 from ..core.agents.types import GoToStepDef
 from ..core.interaction_kinds import InteractionType, is_object_bound_name
 from .scenario_loader import converter
-from .types import Pose2D
+from .types import Pose2D, WaypointMode
 
 
 class ExecutionMode(enum.StrEnum):
@@ -29,6 +29,7 @@ class SimulationParams:
     max_ticks: int = 0  # 0 = run indefinitely
     execution_mode: str = "master"
     formation_scale: float = 1.0  # global multiplier on formation spacing/radii
+    robot_shutdown: bool = False  # end the run once every robot has latched on its final waypoint
 
 
 @attrs.define
@@ -52,6 +53,7 @@ class AgentConfig:
     agent_type: str = "adult"
     spawn_pose: Pose2D = attrs.Factory(Pose2D)
     goal_sequence: list[Pose2D] = attrs.Factory(list)
+    waypoint_mode: WaypointMode = WaypointMode.ONCE
     desired_velocity: float = 1.3
     agent_radius: float = 0.35
     interaction_preferences: dict[str, Any] = attrs.Factory(dict)
@@ -337,6 +339,73 @@ def load_scenario(
         var_overrides=var_overrides,
         scenario_dir=scenario_path.parent,
     )
+
+
+def _resolve_agent_types_raw(
+    raw: dict[str, Any],
+    scenario_dir: Path | None,
+    var_overrides: dict[str, int | float | bool | str] | None,
+) -> dict[str, dict[str, Any]]:
+    """Run the same agent-type resolution as _structure_manual but stop at the merged-dict stage. The result is a plain-dict map of fully-resolved agent types (extends + vars applied) suitable for serialization."""
+    defaults_raw = _load_default_agent_types_raw()
+    scenario_local_raw = load_agent_types_raw_from_dir(scenario_dir) if scenario_dir is not None else {}
+    file_types_raw: dict[str, tuple[dict[str, Any], Path]] = {**defaults_raw, **scenario_local_raw}
+
+    raw_agent_types = raw.get("agent_types", {}) or {}
+    if raw_agent_types:
+        all_var_defs: dict[str, VarDef] = {}
+        for atype_fields in raw_agent_types.values():
+            if atype_fields and isinstance(atype_fields, dict):
+                raw_vars = atype_fields.get("vars")
+                if raw_vars and isinstance(raw_vars, dict):
+                    for vname, vdef_raw in raw_vars.items():
+                        if vname not in all_var_defs:
+                            all_var_defs[vname] = converter.structure(vdef_raw, VarDef)
+        if all_var_defs:
+            resolved_raw = {}
+            for atype_name, atype_fields in raw_agent_types.items():
+                if atype_fields and isinstance(atype_fields, dict):
+                    resolved_raw[atype_name] = resolve_vars(atype_fields, all_var_defs, var_overrides)
+                else:
+                    resolved_raw[atype_name] = atype_fields
+            raw_agent_types = resolved_raw
+
+    inline_raw: dict[str, dict[str, Any]] = {}
+    for name, fields in raw_agent_types.items():
+        d = dict(fields) if fields else {}
+        d["name"] = name
+        inline_raw[name] = d
+
+    file_raw: dict[str, dict[str, Any]] = {name: r for name, (r, _) in file_types_raw.items()}
+    merged_raw: dict[str, dict[str, Any]] = {**file_raw, **inline_raw}
+
+    has_extends = any(r.get("extends") is not None for r in merged_raw.values())
+    if has_extends:
+        defaults_dicts = {name: r for name, (r, _) in defaults_raw.items()}
+        merged_raw = resolve_extends(merged_raw, defaults_dicts)
+    return merged_raw
+
+
+def dump_resolved_scenario(
+    scenario_path: str | Path,
+    out_path: str | Path,
+    var_overrides: dict[str, int | float | bool | str] | None = None,
+) -> None:
+    """Write a self-contained, fully-resolved scenario YAML to out_path. extends and var substitutions are baked in so reloading does not depend on the global agent_types/ library or the original scenario_dir."""
+    scenario_path = Path(scenario_path)
+    out_path = Path(out_path)
+
+    with open(scenario_path) as fh:
+        raw = yaml.safe_load(fh)
+    if raw is None:
+        raw = {}
+
+    merged = _resolve_agent_types_raw(raw, scenario_path.parent, var_overrides)
+    out: dict[str, Any] = dict(raw)
+    out["agent_types"] = {name: merged[name] for name in sorted(merged)}
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(yaml.safe_dump(out, sort_keys=False, default_flow_style=False))
 
 
 def _structure_manual(

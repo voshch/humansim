@@ -1,0 +1,79 @@
+# robot_bt_coverage.yaml
+# bt_coverage.yaml + one robot crossing the bench area.
+
+name: robot_bt_coverage
+description: >-
+  Three BT-driven walkers exercise object-interaction and autonomous selection
+  paths while one robot crosses the bench area.
+
+simulation:
+  seed: 42
+  dt: 0.05
+  bt_tick_interval: 5
+  execution_mode: master
+
+world_objects:
+  - object_id: bench_a
+    type: bench
+    pose: {x: 3.0, y: 0.0, theta: 0.0}
+    capacity: 2
+    satisfies: {rest: 40.0}
+
+agent_types:
+  bt_walker:
+    extends: adult
+    mode: behavior_tree
+    needs:
+      rest:
+        initial: {mean: 60.0, std: 0.0, clip_low: 0.0, clip_high: 100.0}
+        decay_rate: {mean: 1.0, std: 0.0, clip_low: 0.0, clip_high: 5.0}
+    utility_weights:
+      rest: 1.0
+    actions:
+      rest_at_bench:
+        target: bench
+        duration: {mean: 0.5, std: 0.0, clip_low: 0.1, clip_high: 2.0}
+        satisfies: {rest: 30.0}
+    initial_sequence: stroll
+    sequences:
+      stroll:
+        steps:
+          walk_out: {kind: go_to, target: bench}
+          pause:
+            duration: {mean: 0.3, std: 0.0, clip_low: 0.1, clip_high: 1.0}
+          wander:
+            autonomous: true
+            duration: {mean: 0.5, std: 0.0, clip_low: 0.1, clip_high: 2.0}
+            allowed_actions: [rest_at_bench]
+        then: stroll
+
+agents:
+  - agent_id: 0
+    agent_type: bt_walker
+    spawn_pose: {x: -2.0, y: 0.0, theta: 0.0}
+    goal_sequence:
+      - {x: 3.0, y: 0.0}
+    desired_velocity: 1.0
+
+  - agent_id: 1
+    agent_type: bt_walker
+    spawn_pose: {x: -2.0, y: 1.5, theta: 0.0}
+    goal_sequence:
+      - {x: 3.0, y: 1.5}
+    desired_velocity: 1.0
+
+  - agent_id: 2
+    agent_type: bt_walker
+    spawn_pose: {x: -2.0, y: -1.5, theta: 0.0}
+    goal_sequence:
+      - {x: 3.0, y: -1.5}
+    desired_velocity: 1.0
+
+  - agent_id: 100
+    kind: 1
+    policy: straight
+    agent_type: robot
+    spawn_pose: {x: -3.0, y: 3.0, theta: 0.0}
+    goal_sequence: [{x: 4.0, y: 3.0}]
+
+interaction_scripts: []

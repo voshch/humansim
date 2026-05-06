@@ -1,0 +1,88 @@
+# robot_corridor.yaml
+# corridor.yaml + one robot moving eastbound through the corridor.
+
+name: robot_corridor
+description: >-
+  Bidirectional pedestrian corridor with one robot moving east through the
+  bidirectional human flow.
+
+simulation:
+  seed: 7
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 4000
+  execution_mode: master
+
+agents:
+  - agent_id: 0
+    spawn_pose: {x: -15.0, y: -0.6, theta: 0.0}
+    goal_sequence: [{x: 15.0, y: -0.6}]
+    waypoint_mode: reverse
+    desired_velocity: 1.2
+
+  - agent_id: 1
+    spawn_pose: {x: -14.0, y: -0.3, theta: 0.0}
+    goal_sequence: [{x: 15.0, y: -0.3}]
+    waypoint_mode: reverse
+    desired_velocity: 1.1
+
+  - agent_id: 2
+    spawn_pose: {x: -13.0, y: 0.0, theta: 0.0}
+    goal_sequence: [{x: 15.0, y: 0.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.3
+
+  - agent_id: 3
+    spawn_pose: {x: -12.0, y: 0.3, theta: 0.0}
+    goal_sequence: [{x: 15.0, y: 0.3}]
+    waypoint_mode: reverse
+    desired_velocity: 1.2
+
+  - agent_id: 4
+    spawn_pose: {x: -11.0, y: 0.6, theta: 0.0}
+    goal_sequence: [{x: 15.0, y: 0.6}]
+    waypoint_mode: reverse
+    desired_velocity: 1.25
+
+  - agent_id: 5
+    spawn_pose: {x: 15.0, y: 0.6, theta: 3.14159}
+    goal_sequence: [{x: -15.0, y: 0.6}]
+    waypoint_mode: reverse
+    desired_velocity: 1.2
+
+  - agent_id: 6
+    spawn_pose: {x: 14.0, y: 0.3, theta: 3.14159}
+    goal_sequence: [{x: -15.0, y: 0.3}]
+    waypoint_mode: reverse
+    desired_velocity: 1.15
+
+  - agent_id: 7
+    spawn_pose: {x: 13.0, y: 0.0, theta: 3.14159}
+    goal_sequence: [{x: -15.0, y: 0.0}]
+    waypoint_mode: reverse
+    desired_velocity: 1.3
+
+  - agent_id: 8
+    spawn_pose: {x: 12.0, y: -0.3, theta: 3.14159}
+    goal_sequence: [{x: -15.0, y: -0.3}]
+    waypoint_mode: reverse
+    desired_velocity: 1.2
+
+  - agent_id: 9
+    spawn_pose: {x: 11.0, y: -0.6, theta: 3.14159}
+    goal_sequence: [{x: -15.0, y: -0.6}]
+    waypoint_mode: reverse
+    desired_velocity: 1.1
+
+  - agent_id: 100
+    kind: 1
+    policy: straight
+    agent_type: robot
+    spawn_pose: {x: -16.0, y: 0.0, theta: 0.0}
+    goal_sequence: [{x: 16.0, y: 0.0}]
+
+walls:
+  - {name: north, start: {x: -16.0, y:  1.2}, end: {x: 16.0, y:  1.2}}
+  - {name: south, start: {x: -16.0, y: -1.2}, end: {x: 16.0, y: -1.2}}
+
+interaction_scripts: []

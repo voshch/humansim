@@ -7,6 +7,8 @@ VERBS = {
     "monitor": "arena_humansim.utils.evaluation.cli.monitor",
     "benchmark": "arena_humansim.utils.evaluation.cli.benchmark",
     "test": "arena_humansim.utils.evaluation.cli.test",
+    "backfill_snapshots": "arena_humansim.utils.evaluation.cli.backfill_snapshots",
+    "export": "arena_humansim.utils.evaluation.cli.export",
 }
 
 

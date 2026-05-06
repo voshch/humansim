@@ -1,0 +1,96 @@
+# robot_l_corridor.yaml
+# l_corridor.yaml + one robot navigating the L-turn from west to north exit.
+
+name: robot_l_corridor
+description: >-
+  L-shaped corridor with eight humans and one robot navigating the right-angle
+  turn from the west entry to the north exit.
+
+simulation:
+  seed: 19
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 6000
+  execution_mode: master
+
+agents:
+  - agent_id: 0
+    spawn_pose: {x: -8.0, y:  0.4, theta: 0.0}
+    goal_sequence:
+      - {x: 4.0, y:  0.0}
+      - {x: 4.0, y: 10.0}
+    waypoint_mode: reverse
+    desired_velocity: 1.2
+
+  - agent_id: 1
+    spawn_pose: {x: -8.0, y: -0.4, theta: 0.0}
+    goal_sequence:
+      - {x: 4.0, y:  0.0}
+      - {x: 4.0, y: 10.0}
+    waypoint_mode: reverse
+    desired_velocity: 1.25
+
+  - agent_id: 2
+    spawn_pose: {x: -7.0, y:  0.0, theta: 0.0}
+    goal_sequence:
+      - {x: 4.0, y:  0.0}
+      - {x: 4.0, y: 10.0}
+    waypoint_mode: reverse
+    desired_velocity: 1.15
+
+  - agent_id: 3
+    spawn_pose: {x: -9.0, y:  0.8, theta: 0.0}
+    goal_sequence:
+      - {x: 4.0, y:  0.0}
+      - {x: 4.0, y: 10.0}
+    waypoint_mode: reverse
+    desired_velocity: 1.3
+
+  - agent_id: 4
+    spawn_pose: {x: 4.0, y: 10.0, theta: -1.5708}
+    goal_sequence:
+      - {x: 4.0, y:  0.0}
+      - {x: -8.0, y:  0.0}
+    waypoint_mode: reverse
+    desired_velocity: 1.2
+
+  - agent_id: 5
+    spawn_pose: {x: 3.5, y:  9.0, theta: -1.5708}
+    goal_sequence:
+      - {x: 4.0, y:  0.0}
+      - {x: -8.0, y:  0.0}
+    waypoint_mode: reverse
+    desired_velocity: 1.1
+
+  - agent_id: 6
+    spawn_pose: {x: 4.5, y:  9.0, theta: -1.5708}
+    goal_sequence:
+      - {x: 4.0, y:  0.0}
+      - {x: -8.0, y:  0.0}
+    waypoint_mode: reverse
+    desired_velocity: 1.25
+
+  - agent_id: 7
+    spawn_pose: {x: 4.0, y:  8.0, theta: -1.5708}
+    goal_sequence:
+      - {x: 4.0, y:  0.0}
+      - {x: -8.0, y:  0.0}
+    waypoint_mode: reverse
+    desired_velocity: 1.15
+
+  - agent_id: 100
+    kind: 1
+    policy: straight
+    agent_type: robot
+    spawn_pose: {x: -9.5, y: 0.0, theta: 0.0}
+    goal_sequence:
+      - {x: 4.0, y: 0.0}
+      - {x: 4.0, y: 10.5}
+
+walls:
+  - {name: outer_h,    start: {x: -10.0, y:  1.2}, end: {x:  2.8, y:  1.2}}
+  - {name: outer_v,    start: {x:   2.8, y:  1.2}, end: {x:  2.8, y: 11.0}}
+  - {name: inner_h,    start: {x: -10.0, y: -1.2}, end: {x:  5.2, y: -1.2}}
+  - {name: inner_v,    start: {x:   5.2, y: -1.2}, end: {x:  5.2, y: 11.0}}
+
+interaction_scripts: []

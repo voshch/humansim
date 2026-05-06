@@ -39,7 +39,8 @@ def _as_paramdist(val: object) -> "ParamDist | None":
     if isinstance(val, ParamDist):
         return val
     if isinstance(val, (int, float)):
-        return ParamDist(mean=float(val))
+        v = float(val)
+        return ParamDist(mean=v, std=0.0, clip_low=v, clip_high=v)
     if isinstance(val, dict):
         return ParamDist(**val)
     return val  # type: ignore[return-value]

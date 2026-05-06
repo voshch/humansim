@@ -33,6 +33,8 @@ setup(
         "test": ["pytest>=7", "pytest-xdist", "hypothesis>=6", "arena_humansim[socialgail,nsp]"],
         "socialgail": ["torch>=2.2", "torch-geometric>=2.5"],
         "nsp": ["torch>=2.2"],
+        "cadrl": ["torch>=2.2", "tensorflow>=2.12"],
+        "export": ["pyarrow>=14"],
     },
     zip_safe=True,
     maintainer="voshch",

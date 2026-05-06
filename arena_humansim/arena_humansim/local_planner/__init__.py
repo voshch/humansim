@@ -92,9 +92,37 @@ def _load_nsp() -> type[LocalPlanner]:
     return NSPPlanner
 
 
+def _load_dsrnn() -> type[LocalPlanner]:
+    from .robot.dsrnn.planner import DSRNNPlanner
+
+    return DSRNNPlanner
+
+
+def _load_sarl() -> type[LocalPlanner]:
+    from .robot.sarl.planner import SARLPlanner
+
+    return SARLPlanner
+
+
+def _load_drlvo() -> type[LocalPlanner]:
+    from .robot.drlvo.planner import DRLVOPlanner
+
+    return DRLVOPlanner
+
+
+def _load_cadrl() -> type[LocalPlanner]:
+    from .robot.cadrl.planner import CADRLPlanner
+
+    return CADRLPlanner
+
+
 _registry.register("sfm")(_load_sfm)
 _registry.register("orca")(_load_orca)
 _registry.register("straight")(_load_straight)
 _registry.register("hsfm")(_load_hsfm)
 _registry.register("socialgail")(_load_socialgail)
 _registry.register("nsp")(_load_nsp)
+_registry.register("dsrnn")(_load_dsrnn)
+_registry.register("sarl")(_load_sarl)
+_registry.register("drlvo")(_load_drlvo)
+_registry.register("cadrl")(_load_cadrl)
