@@ -21,7 +21,10 @@ def planner_name(request: pytest.FixtureRequest) -> str:
 
 @pytest.fixture
 def planner(planner_name: str, walls_empty: Segments) -> LocalPlanner:
-    p = LocalPlanner.create(planner_name)
+    try:
+        p = LocalPlanner.create(planner_name)
+    except ImportError as e:
+        pytest.skip(f"{planner_name} unavailable: {e}")
     p.set_walls(walls_empty)
     return p
 

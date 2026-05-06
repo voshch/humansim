@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from arena_humansim.utils.evaluation.bag_cache import load_multi
 from arena_humansim.utils.evaluation.buckets import (
     DRIVER_CLASS,
     DRIVER_CLASS_FINE,
@@ -55,6 +54,8 @@ def infer_bucket(scenario_yaml: dict[str, Any]) -> str:
 
 
 def load_recordings(recordings_dirs: Path | list[Path]) -> pd.DataFrame:
+    from arena_humansim.utils.evaluation.bag_cache import load_multi
+
     if isinstance(recordings_dirs, Path):
         recordings_dirs = [recordings_dirs]
     seen: set[tuple[str, str, str, int]] = set()

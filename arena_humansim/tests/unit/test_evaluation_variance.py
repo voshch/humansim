@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pandas")
+
 import numpy as np
 import pandas as pd
-import pytest
 from arena_humansim.utils.evaluation.variance import (
     decompose_scalar_variance,
     headline_seed_ratio,
@@ -35,6 +38,7 @@ def _build_states(*, scenarios: list[str], planners: dict[str, tuple[float, floa
                             "scenario": scenario,
                             "seed": seed,
                             "planner": planner,
+                            "robot_policy": "",
                             "bucket": "nav" if scenario in ("simple_crossing", "corridor") else "bt",
                         }
                     )

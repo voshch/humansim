@@ -7,13 +7,21 @@ import pytest
 
 from arena_humansim.core.agents.base import BaseAgent
 from arena_humansim.local_planner import LocalPlanner, _registry
+from arena_humansim.local_planner.robot.base import RobotPolicy
 from arena_humansim.utils.types import Pose2D, Segments, WallAware
 
 from ._geometry import corridor_walls, single_agent, vertical_wall  # noqa: F401
 from tests.contracts._util import registry_ids
 
-# socialgail excluded: learned policy produces poor velocity outputs and fails these efficacy checks
-_IMPL_IDS = [k for k in registry_ids(_registry) if k != "socialgail"]
+
+def _is_robot_or_optional(name: str) -> bool:
+    try:
+        return issubclass(_registry.get(name), RobotPolicy)
+    except ImportError:
+        return True
+
+
+_IMPL_IDS = [k for k in registry_ids(_registry) if k != "socialgail" and not _is_robot_or_optional(k)]
 
 
 @pytest.fixture(params=_IMPL_IDS, ids=lambda k: f"impl={k}")
