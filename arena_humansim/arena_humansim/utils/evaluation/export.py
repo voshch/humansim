@@ -21,8 +21,8 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import pandas as pd
 
@@ -55,7 +55,7 @@ def write_hive_parquet(df: pd.DataFrame, out_dir: Path, partition_cols: Sequence
         if not isinstance(keys, tuple):
             keys = (keys,)
         path = out_dir
-        for col, val in zip(partition_cols, keys):
+        for col, val in zip(partition_cols, keys, strict=True):
             path = path / f"{col}={val}"
         path.mkdir(parents=True, exist_ok=True)
         body = grp.drop(columns=list(partition_cols))
@@ -192,10 +192,7 @@ def _build_croissant(
                 "@type": "cr:RecordSet",
                 "@id": rec_id,
                 "name": rec_id,
-                "field": [
-                    {**f, "source": {"fileObject": {"@id": f"{table_name}_file"}, "extract": {"column": f["name"]}}}
-                    for f in _fields_from_df(table_df, rec_id)
-                ],
+                "field": [{**f, "source": {"fileObject": {"@id": f"{table_name}_file"}, "extract": {"column": f["name"]}}} for f in _fields_from_df(table_df, rec_id)],
             }
         )
 
@@ -480,11 +477,7 @@ def run_export(
     print("Writing README + DATASHEET + Croissant...")
     _write_readme(out_dir / "README.md", dataset_name, df, robot_mode)
     _write_datasheet(out_dir / "DATASHEET.md", dataset_name, df)
-    agent_state_cols = [
-        (col, _DTYPE_TO_CR.get(str(df[col].dtype), "sc:Text"))
-        for col in df.columns
-        if col not in ("scenario", "planner")
-    ]
+    agent_state_cols = [(col, _DTYPE_TO_CR.get(str(df[col].dtype), "sc:Text")) for col in df.columns if col not in ("scenario", "planner")]
     croissant = _build_croissant(dataset_name, out_dir, agent_state_cols, metrics)
     (out_dir / "croissant.json").write_text(json.dumps(croissant, indent=2))
 

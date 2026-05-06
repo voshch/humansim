@@ -31,7 +31,7 @@ def main() -> None:
         found = latest_sweep_dir()
         if found is None:
             root = peds_root()
-            parser.error(f"--recordings_dir required when $ARENA_DATA_DIR is unset" if root is None else f"no sweep runs found under {root}")
+            parser.error("--recordings_dir required when $ARENA_DATA_DIR is unset" if root is None else f"no sweep runs found under {root}")
         sweep_dir, _, done, expected = found
         partial = "" if done >= expected else f" (partial: {done}/{expected} trials done)"
         print(f"Auto-resolved recordings_dir={sweep_dir}{partial}")

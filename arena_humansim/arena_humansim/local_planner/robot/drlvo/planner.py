@@ -112,7 +112,6 @@ class DRLVOPlanner(RobotPolicy):
 
         import gymnasium
         import numpy as np
-
         from stable_baselines3 import PPO
 
         from . import custom_cnn_full
