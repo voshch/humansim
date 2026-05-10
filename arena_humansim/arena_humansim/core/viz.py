@@ -22,20 +22,21 @@ if TYPE_CHECKING:
     from arena_humansim.utils.types import HighLevelCommand, InteractionState, Pose2D, Shape, SinkConfig, SourceConfig
 
 _FRAME = "map"
+_MISSING = object()
 
-_STATIC_NS = frozenset(
-    {
-        "sources",
-        "src_label",
-        "sinks",
-        "sink_label",
-        "walls",
-        "world_obj",
-        "world_obj_label",
-        "obstacles",
-        "obstacle_label",
-    }
-)
+_STATIC_NS_BUCKETS: dict[str, str] = {
+    "walls": "walls",
+    "sources": "objects",
+    "src_label": "objects",
+    "sinks": "objects",
+    "sink_label": "objects",
+    "world_obj": "objects",
+    "world_obj_label": "objects",
+    "obstacles": "objects",
+    "obstacle_label": "objects",
+}
+_STATIC_NS = frozenset(_STATIC_NS_BUCKETS)
+_STATIC_BUCKETS = tuple(sorted(set(_STATIC_NS_BUCKETS.values())))
 
 
 def rgba(r: float, g: float, b: float, a: float = 1.0) -> ColorRGBA:
@@ -197,17 +198,22 @@ class MarkerPublisher:
     def __init__(self, node: Node):
         self._node = node
         self._pub = node.create_publisher(MarkerArray, "viz", 100)
-        self._pub_static = node.create_publisher(
-            MarkerArray,
-            "viz_static",
-            QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL),
-        )
+        static_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self._pubs_static = {bucket: node.create_publisher(MarkerArray, f"viz_static/{bucket}", static_qos) for bucket in _STATIC_BUCKETS}
         self._scene: dict[tuple[str, int], Marker] = {}
         self._pool: dict[str, list[Marker]] = {}
         self._touched: set[tuple[str, int]] = set()
         self._touched_ns: set[str] = set()
         self._dirty: set[tuple[str, int]] = set()
         self._ns_count: dict[str, int] = {}
+        self._infra_sigs: dict[str, object] = {}
+
+    def infra_unchanged(self, bucket: str, sig: object) -> bool:
+        prev = self._infra_sigs.get(bucket, _MISSING)
+        if prev == sig:
+            return True
+        self._infra_sigs[bucket] = sig
+        return False
 
     def _stamp(self) -> Time:
         return self._node.get_clock().now().to_msg()
@@ -221,6 +227,9 @@ class MarkerPublisher:
                 pool.append(mk(ns, 0, mtype, None))
             self._ns_count[ns] = count
         return MarkerView(self, ns, mtype, dirty)
+
+    def touch_ns(self, ns: str) -> None:
+        self._touched_ns.add(ns)
 
     def get(self, ns: str, mid: int, mtype: int, dirty: bool = True) -> tuple[Marker, bool]:
         key = (ns, mid)
@@ -246,9 +255,9 @@ class MarkerPublisher:
         stamp = self._stamp()
         stale = [(ns, mid) for ns, mid in self._scene if ns in self._touched_ns and (ns, mid) not in self._touched]
 
-        static_changed = False
+        changed_buckets: set[str] = set()
         dyn_deletes: list[Marker] = []
-        static_deletes: list[Marker] = []
+        static_deletes_by_bucket: dict[str, list[Marker]] = {b: [] for b in _STATIC_BUCKETS}
         for ns, mid in stale:
             del self._scene[(ns, mid)]
             self._dirty.discard((ns, mid))
@@ -258,38 +267,39 @@ class MarkerPublisher:
             m.ns = ns
             m.id = mid
             m.action = Marker.DELETE
-            if ns in _STATIC_NS:
-                static_deletes.append(m)
-                static_changed = True
+            bucket = _STATIC_NS_BUCKETS.get(ns)
+            if bucket is not None:
+                static_deletes_by_bucket[bucket].append(m)
+                changed_buckets.add(bucket)
             else:
                 dyn_deletes.append(m)
 
         dyn_adds: list[Marker] = []
         for key in self._dirty:
-            if key[0] in _STATIC_NS:
-                static_changed = True
+            bucket = _STATIC_NS_BUCKETS.get(key[0])
+            if bucket is not None:
+                changed_buckets.add(bucket)
                 continue
             m = self._scene[key]
             m.header.stamp = stamp
             dyn_adds.append(m)
 
         if dyn_deletes or dyn_adds:
-            # DELETEs first - a split into two messages on a depth-N queue could drop the DELETEs
+            # DELETEs first, a split into two messages on a depth-N queue could drop the DELETEs
             # under load, leaving stale markers in RViz indefinitely.
             ma = MarkerArray()
             ma.markers = dyn_deletes + dyn_adds
             self._pub.publish(ma)
 
-        if static_changed:
-            # Republish full scene so the TRANSIENT_LOCAL retained message stays complete.
-            static_adds: list[Marker] = []
+        for bucket in changed_buckets:
+            adds: list[Marker] = []
             for (ns, _mid), m in self._scene.items():
-                if ns in _STATIC_NS:
+                if _STATIC_NS_BUCKETS.get(ns) == bucket:
                     m.header.stamp = stamp
-                    static_adds.append(m)
+                    adds.append(m)
             ma = MarkerArray()
-            ma.markers = static_deletes + static_adds
-            self._pub_static.publish(ma)
+            ma.markers = static_deletes_by_bucket[bucket] + adds
+            self._pubs_static[bucket].publish(ma)
 
         self._touched.clear()
         self._touched_ns.clear()
@@ -301,7 +311,8 @@ class MarkerPublisher:
         ma = MarkerArray()
         ma.markers = [m]
         self._pub.publish(ma)
-        self._pub_static.publish(ma)
+        for pub in self._pubs_static.values():
+            pub.publish(ma)
         self._scene.clear()
         self._pool.clear()
         self._ns_count.clear()
@@ -439,103 +450,125 @@ def publish_infrastructure(
     world_objects: dict[str, WorldObject],
     obstacles: dict[str, ObstacleData] | None = None,
 ) -> None:
+    obstacles = obstacles or {}
+
+    walls_sig = tuple(walls.items())
+    walls_changed = not pub.infra_unchanged("walls", walls_sig)
+    objects_sig = (tuple(sources.keys()), tuple(sinks.keys()), tuple(world_objects.keys()), tuple(obstacles.keys()))
+    objects_changed = not pub.infra_unchanged("objects", objects_sig)
+
+    if not (walls_changed or objects_changed):
+        return
+
+    if walls_changed:
+        pub.touch_ns("walls")
+    if objects_changed:
+        for ns in ("sources", "src_label", "sinks", "sink_label", "world_obj", "world_obj_label", "obstacles", "obstacle_label"):
+            pub.touch_ns(ns)
+
+    if not objects_changed:
+        sources = {}
+        sinks = {}
+        world_objects = {}
+        obstacles = {}
+    if not walls_changed:
+        walls = {}
+
     for i, (name, src) in enumerate(sources.items()):
         from arena_humansim.utils.types import ShapeType
 
         if src.shape.type == ShapeType.CIRCLE and src.shape.radius > 0:
-            m, new = pub.get("sources", i, Marker.CYLINDER, dirty=False)
-            if new:
-                m.pose.position.x, m.pose.position.y = src.pose.x, src.pose.y
-                m.pose.position.z = 0.01 + 0.01 / 2.0
-                m.scale.x = m.scale.y = src.shape.radius * 2.0
-                m.scale.z = 0.01
-                m.color = _C_SRC
-        elif src.shape.vertices:
-            m, new = pub.get("sources", i, Marker.TRIANGLE_LIST, dirty=False)
-            if new:
-                cx, cy, th = src.pose.x, src.pose.y, src.pose.theta
-                cos_t, sin_t = math.cos(th), math.sin(th)
-                world = [(cx + cos_t * v.x - sin_t * v.y, cy + sin_t * v.x + cos_t * v.y) for v in src.shape.vertices]
-                m.scale.x = m.scale.y = m.scale.z = 1.0
-                m.color = _C_SRC
-                ox, oy = world[0]
-                for vi in range(1, len(world) - 1):
-                    m.points.append(Point(x=ox, y=oy, z=0.01))
-                    m.points.append(Point(x=world[vi][0], y=world[vi][1], z=0.01))
-                    m.points.append(Point(x=world[vi + 1][0], y=world[vi + 1][1], z=0.01))
-        else:
-            m, new = pub.get("sources", i, Marker.SPHERE, dirty=False)
-            if new:
-                m.pose.position.x, m.pose.position.y, m.pose.position.z = src.pose.x, src.pose.y, 0.0
-                m.scale.x = m.scale.y = m.scale.z = 0.15 * 2.0
-                m.color = _C_SRC
-        m, new = pub.get("src_label", i, Marker.TEXT_VIEW_FACING, dirty=False)
-        if new:
-            m.pose.position.x, m.pose.position.y, m.pose.position.z = src.pose.x, src.pose.y, 0.3
-            m.scale.z = 0.15
+            m, _ = pub.get("sources", i, Marker.CYLINDER)
+            m.pose.position.x, m.pose.position.y = src.pose.x, src.pose.y
+            m.pose.position.z = 0.01 + 0.01 / 2.0
+            m.scale.x = m.scale.y = src.shape.radius * 2.0
+            m.scale.z = 0.01
             m.color = _C_SRC
-            m.text = name
+            m.points = []
+        elif src.shape.vertices:
+            m, _ = pub.get("sources", i, Marker.TRIANGLE_LIST)
+            cx, cy, th = src.pose.x, src.pose.y, src.pose.theta
+            cos_t, sin_t = math.cos(th), math.sin(th)
+            world = [(cx + cos_t * v.x - sin_t * v.y, cy + sin_t * v.x + cos_t * v.y) for v in src.shape.vertices]
+            m.pose.position.x = m.pose.position.y = m.pose.position.z = 0.0
+            m.scale.x = m.scale.y = m.scale.z = 1.0
+            m.color = _C_SRC
+            m.points = []
+            ox, oy = world[0]
+            for vi in range(1, len(world) - 1):
+                m.points.append(Point(x=ox, y=oy, z=0.01))
+                m.points.append(Point(x=world[vi][0], y=world[vi][1], z=0.01))
+                m.points.append(Point(x=world[vi + 1][0], y=world[vi + 1][1], z=0.01))
+        else:
+            m, _ = pub.get("sources", i, Marker.SPHERE)
+            m.pose.position.x, m.pose.position.y, m.pose.position.z = src.pose.x, src.pose.y, 0.0
+            m.scale.x = m.scale.y = m.scale.z = 0.15 * 2.0
+            m.color = _C_SRC
+            m.points = []
+        m, _ = pub.get("src_label", i, Marker.TEXT_VIEW_FACING)
+        m.pose.position.x, m.pose.position.y, m.pose.position.z = src.pose.x, src.pose.y, 0.3
+        m.scale.z = 0.15
+        m.color = _C_SRC
+        m.text = name
 
     for i, (name, sink) in enumerate(sinks.items()):
         from arena_humansim.utils.types import ShapeType
 
         if sink.shape.type == ShapeType.CIRCLE and sink.shape.radius > 0:
-            m, new = pub.get("sinks", i, Marker.CYLINDER, dirty=False)
-            if new:
-                m.pose.position.x, m.pose.position.y = sink.pose.x, sink.pose.y
-                m.pose.position.z = 0.01 + 0.01 / 2.0
-                m.scale.x = m.scale.y = sink.shape.radius * 2.0
-                m.scale.z = 0.01
-                m.color = _C_SINK
-        elif sink.shape.vertices:
-            m, new = pub.get("sinks", i, Marker.TRIANGLE_LIST, dirty=False)
-            if new:
-                cx, cy, th = sink.pose.x, sink.pose.y, sink.pose.theta
-                cos_t, sin_t = math.cos(th), math.sin(th)
-                world = [(cx + cos_t * v.x - sin_t * v.y, cy + sin_t * v.x + cos_t * v.y) for v in sink.shape.vertices]
-                m.scale.x = m.scale.y = m.scale.z = 1.0
-                m.color = _C_SINK
-                ox, oy = world[0]
-                for vi in range(1, len(world) - 1):
-                    m.points.append(Point(x=ox, y=oy, z=0.01))
-                    m.points.append(Point(x=world[vi][0], y=world[vi][1], z=0.01))
-                    m.points.append(Point(x=world[vi + 1][0], y=world[vi + 1][1], z=0.01))
-        else:
-            m, new = pub.get("sinks", i, Marker.SPHERE, dirty=False)
-            if new:
-                m.pose.position.x, m.pose.position.y, m.pose.position.z = sink.pose.x, sink.pose.y, 0.0
-                m.scale.x = m.scale.y = m.scale.z = 0.15 * 2.0
-                m.color = _C_SINK
-        m, new = pub.get("sink_label", i, Marker.TEXT_VIEW_FACING, dirty=False)
-        if new:
-            m.pose.position.x, m.pose.position.y, m.pose.position.z = sink.pose.x, sink.pose.y, 0.3
-            m.scale.z = 0.15
+            m, _ = pub.get("sinks", i, Marker.CYLINDER)
+            m.pose.position.x, m.pose.position.y = sink.pose.x, sink.pose.y
+            m.pose.position.z = 0.01 + 0.01 / 2.0
+            m.scale.x = m.scale.y = sink.shape.radius * 2.0
+            m.scale.z = 0.01
             m.color = _C_SINK
-            m.text = name
+            m.points = []
+        elif sink.shape.vertices:
+            m, _ = pub.get("sinks", i, Marker.TRIANGLE_LIST)
+            cx, cy, th = sink.pose.x, sink.pose.y, sink.pose.theta
+            cos_t, sin_t = math.cos(th), math.sin(th)
+            world = [(cx + cos_t * v.x - sin_t * v.y, cy + sin_t * v.x + cos_t * v.y) for v in sink.shape.vertices]
+            m.pose.position.x = m.pose.position.y = m.pose.position.z = 0.0
+            m.scale.x = m.scale.y = m.scale.z = 1.0
+            m.color = _C_SINK
+            m.points = []
+            ox, oy = world[0]
+            for vi in range(1, len(world) - 1):
+                m.points.append(Point(x=ox, y=oy, z=0.01))
+                m.points.append(Point(x=world[vi][0], y=world[vi][1], z=0.01))
+                m.points.append(Point(x=world[vi + 1][0], y=world[vi + 1][1], z=0.01))
+        else:
+            m, _ = pub.get("sinks", i, Marker.SPHERE)
+            m.pose.position.x, m.pose.position.y, m.pose.position.z = sink.pose.x, sink.pose.y, 0.0
+            m.scale.x = m.scale.y = m.scale.z = 0.15 * 2.0
+            m.color = _C_SINK
+            m.points = []
+        m, _ = pub.get("sink_label", i, Marker.TEXT_VIEW_FACING)
+        m.pose.position.x, m.pose.position.y, m.pose.position.z = sink.pose.x, sink.pose.y, 0.3
+        m.scale.z = 0.15
+        m.color = _C_SINK
+        m.text = name
 
     if walls:
-        m, new = pub.get("walls", 0, Marker.LINE_LIST, dirty=False)
-        if new:
-            m.scale.x = 0.05
-            m.color = _C_WALL
-            for (x1, y1), (x2, y2) in walls.values():
-                m.points.append(Point(x=x1, y=y1, z=0.05))
-                m.points.append(Point(x=x2, y=y2, z=0.05))
+        m, _ = pub.get("walls", 0, Marker.LINE_LIST)
+        m.scale.x = 0.05
+        m.color = _C_WALL
+        m.points = []
+        for (x1, y1), (x2, y2) in walls.values():
+            m.points.append(Point(x=x1, y=y1, z=0.05))
+            m.points.append(Point(x=x2, y=y2, z=0.05))
 
     for i, (oid, obj) in enumerate(world_objects.items()):
-        m, new = pub.get("world_obj", i, Marker.CUBE, dirty=False)
-        if new:
-            m.pose.position.x, m.pose.position.y = obj.pose.x, obj.pose.y
-            m.pose.position.z = 0.15
-            m.scale.x = m.scale.y = m.scale.z = 0.3
-            m.color = _C_WOBJ
-        m, new = pub.get("world_obj_label", i, Marker.TEXT_VIEW_FACING, dirty=False)
-        if new:
-            m.pose.position.x, m.pose.position.y = obj.pose.x, obj.pose.y
-            m.pose.position.z = 0.4
-            m.scale.z = 0.12
-            m.color = _C_WOBJ
-            m.text = f"{obj.type}\n{oid}"
+        m, _ = pub.get("world_obj", i, Marker.CUBE)
+        m.pose.position.x, m.pose.position.y = obj.pose.x, obj.pose.y
+        m.pose.position.z = 0.15
+        m.scale.x = m.scale.y = m.scale.z = 0.3
+        m.color = _C_WOBJ
+        m, _ = pub.get("world_obj_label", i, Marker.TEXT_VIEW_FACING)
+        m.pose.position.x, m.pose.position.y = obj.pose.x, obj.pose.y
+        m.pose.position.z = 0.4
+        m.scale.z = 0.12
+        m.color = _C_WOBJ
+        m.text = f"{obj.type}\n{oid}"
 
     if obstacles:
         for i, (name, obs) in enumerate(obstacles.items()):
@@ -550,23 +583,21 @@ def publish_infrastructure(
             sin_t = math.sin(obs.pose.theta)
             wx = obs.pose.x + cos_t * cx_local - sin_t * cy_local
             wy = obs.pose.y + sin_t * cx_local + cos_t * cy_local
-            m, new = pub.get("obstacles", i, Marker.CUBE, dirty=False)
-            if new:
-                m.pose.position.x, m.pose.position.y, m.pose.position.z = wx, wy, cz
-                m.scale.x, m.scale.y, m.scale.z = sx, sy, sz
-                m.pose.orientation.z = math.sin(obs.pose.theta / 2.0)
-                m.pose.orientation.w = math.cos(obs.pose.theta / 2.0)
-                m.color = _C_OBST
+            m, _ = pub.get("obstacles", i, Marker.CUBE)
+            m.pose.position.x, m.pose.position.y, m.pose.position.z = wx, wy, cz
+            m.scale.x, m.scale.y, m.scale.z = sx, sy, sz
+            m.pose.orientation.z = math.sin(obs.pose.theta / 2.0)
+            m.pose.orientation.w = math.cos(obs.pose.theta / 2.0)
+            m.color = _C_OBST
             label = obs.obstacle_type or name
             if obs.interaction_types:
                 label += f"\n[{', '.join(obs.interaction_types)}]"
-            m, new = pub.get("obstacle_label", i, Marker.TEXT_VIEW_FACING, dirty=False)
-            if new:
-                m.pose.position.x, m.pose.position.y = wx, wy
-                m.pose.position.z = cz + sz / 2.0 + 0.15
-                m.scale.z = 0.15
-                m.color = _C_OBST_LBL
-                m.text = label
+            m, _ = pub.get("obstacle_label", i, Marker.TEXT_VIEW_FACING)
+            m.pose.position.x, m.pose.position.y = wx, wy
+            m.pose.position.z = cz + sz / 2.0 + 0.15
+            m.scale.z = 0.15
+            m.color = _C_OBST_LBL
+            m.text = label
 
 
 def publish_perception(pub: MarkerPublisher, agents: Iterable[BaseAgent]) -> None:

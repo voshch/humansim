@@ -60,6 +60,37 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /arena_humansim/viz
       Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Viz Static Walls
+      Namespaces:
+        walls: true
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /arena_humansim/viz_static/walls
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Viz Static Objects
+      Namespaces:
+        sources: true
+        src_label: true
+        sinks: true
+        sink_label: true
+        world_obj: true
+        world_obj_label: true
+        obstacles: true
+        obstacle_label: true
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /arena_humansim/viz_static/objects
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
