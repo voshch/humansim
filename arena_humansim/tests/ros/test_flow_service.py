@@ -106,7 +106,7 @@ def test_set_flow_installs_sources(system: RosTestSystem) -> None:
 
 def test_source_spawns_agents_on_tick(system: RosTestSystem) -> None:
     system.call(ResetSimulation, "reset", make_reset_request())
-    system.call(RemoveAgents, "remove_agents", make_remove_request([-1]))
+    system.call(RemoveAgents, "remove_agents", make_remove_request([]))
 
     req = _set_flow_request(
         sources=[_source("src_spawner", 0.0, 0.0, rate=20.0, shape_radius=0.1, sink_affinities=[("sink_spawner", 1.0)])],
@@ -125,7 +125,7 @@ def test_source_spawns_agents_on_tick(system: RosTestSystem) -> None:
 
 def test_sink_removes_agents_on_tick(system: RosTestSystem) -> None:
     system.call(ResetSimulation, "reset", make_reset_request())
-    system.call(RemoveAgents, "remove_agents", make_remove_request([-1]))
+    system.call(RemoveAgents, "remove_agents", make_remove_request([]))
 
     req = _set_flow_request(
         sources=[_source("src_sinking", 0.0, 0.0, rate=30.0, shape_radius=0.1, sink_affinities=[("sink_near", 1.0)])],

@@ -1,13 +1,13 @@
 # Agent types
 
-Each `.yaml` file defines one agent type. Types are *distributions*, not fixed parameter sets — the loader samples a concrete instance per agent at spawn from the `{mean, std, clip_low, clip_high}` triples.
+Each `.yaml` file defines one agent type. Types are *distributions*, not fixed parameter sets - the loader samples a concrete instance per agent at spawn from the `{mean, std, clip_low, clip_high}` triples.
 
 ## Fields
 
 Physical:
 
 - `desired_velocity`, `max_velocity` (m/s)
-- `max_acceleration`, `max_deceleration` (m/s²)
+- `max_acceleration`, `max_deceleration` (m/s^2)
 - `agent_radius` (m)
 - `min_turning_radius` (m)
 - `pivot_angular_velocity` (rad/s)
@@ -15,14 +15,14 @@ Physical:
 Perception (`perception:`):
 
 - `vision_range` (m)
-- `vision_fov` (degrees, full angle — 360 = omnidirectional)
+- `vision_fov` (degrees, full angle - 360 = omnidirectional)
 
 Local planner (`local_planner_params:`):
 
-- `relaxation_time` — SFM time constant for reaching `desired_velocity`
-- `repulsion_strength`, `repulsion_range` — SFM neighbor repulsion term
+- `relaxation_time` - SFM time constant for reaching `desired_velocity`
+- `repulsion_strength`, `repulsion_range` - SFM neighbor repulsion term
 
-Every scalar field is a distribution dict: `{mean, std, clip_low, clip_high}`. Omit `std` (defaults to 0) for a fixed value. `clip_*` bounds are applied after sampling; pick them to keep unphysical samples out (e.g. `desired_velocity.clip_low: 0.5` — nobody walks at 5 cm/s).
+Every scalar field is a distribution dict: `{mean, std, clip_low, clip_high}`. Omit `std` (defaults to 0) for a fixed value. `clip_*` bounds are applied after sampling; pick them to keep unphysical samples out (e.g. `desired_velocity.clip_low: 0.5` - nobody walks at 5 cm/s).
 
 ## Inheritance
 
@@ -55,7 +55,7 @@ needs:
 
 ### `utility_weights`
 
-Per-need weights used by `AutonomousNode` when a step has `autonomous: true`. Higher weight ⇒ need drives action selection more aggressively.
+Per-need weights used by `AutonomousNode` when a step has `autonomous: true`. Higher weight => need drives action selection more aggressively.
 
 ### `actions`
 
@@ -63,7 +63,7 @@ Candidate actions the autonomous selector can pick from. Fields:
 
 | Field | Meaning |
 |---|---|
-| `when` | `{need: {below\|above: X}}` — preconditions gating the action. |
+| `when` | `{need: {below\|above: X}}` - preconditions gating the action. |
 | `interaction` | One of `TALK_TO`, `GROUP_CONVERSATION`, `SIT_ON`, `LIE_ON`, `USE`, `QUEUE_USE`, `WAVE_AT`, `BLOCK`, `SERVICE`. Omit for nav-only. |
 | `target` | Object id / object type / service tag / agent id, per the interaction's handle kind. |
 | `duration` | Distribution (seconds). |
@@ -73,7 +73,7 @@ Candidate actions the autonomous selector can pick from. Fields:
 ```yaml
 actions:
   rest_at_bench:
-    target: bench                # object type — resolves to nearest visible
+    target: bench                # object type - resolves to nearest visible
     interaction: SIT_ON
     duration: {mean: 5.0, clip_low: 1.0, clip_high: 15.0}
     satisfies: {rest: 30.0}
@@ -105,7 +105,7 @@ sequences:
     then: chat
 ```
 
-`transitions` evaluate every tick — they can cut a step short. `then` only fires on the last step succeeding. `on_failure: <seq_name>` routes to another sequence when the current one FAILs (unset ⇒ propagate failure to the root). `interruptible: false` disables `transitions` for the sequence.
+`transitions` evaluate every tick - they can cut a step short. `then` only fires on the last step succeeding. `on_failure: <seq_name>` routes to another sequence when the current one FAILs (unset => propagate failure to the root). `interruptible: false` disables `transitions` for the sequence.
 
 ### `steps`
 
@@ -118,31 +118,31 @@ Each step is either a `StepDef` (interaction, pure-wait, cancel) or a `GoToStepD
 | `interaction` | `TALK_TO` / `GROUP_CONVERSATION` / `WAVE_AT` / `SIT_ON` / `LIE_ON` / `USE` / `QUEUE_USE` / `BLOCK` / `SERVICE`. Omit for a pure-wait step. |
 | `target` | Interpreted per the interaction's handle kind: object id/type for `OBJECT`; service tag (str) for `SERVICE`; agent id (int) for `BLOCK`; omit for symmetric types. |
 | `offer` | SERVICE provider side. `true` makes this step create-and-wait rather than find-and-join. Required when a SERVICE interaction has no existing provider. |
-| `cancel` | `true` ⇒ emit STOP with `reason=CANCELED` on the agent's current interaction. Mutually exclusive with `interaction:`. |
-| `queueable` | Provider-side override (SERVICE with `offer: true`) — admit seekers into a FIFO queue when full. |
+| `cancel` | `true` => emit STOP with `reason=CANCELED` on the agent's current interaction. Mutually exclusive with `interaction:`. |
+| `queueable` | Provider-side override (SERVICE with `offer: true`) - admit seekers into a FIFO queue when full. |
 | `min_participants` / `max_participants` | Provider-side overrides on the contract. Count the provider itself. |
 | `formation_spec` | Provider-side formation override (`{type, anchor_kind, params}`). |
-| `duration` | Distribution (seconds). With `interaction:` → contract-level timeout (outcome `COMPLETED`). On a pure-wait step → `HoldNode` duration (NAVIGATE-to-self). |
+| `duration` | Distribution (seconds). With `interaction:` -> contract-level timeout (outcome `COMPLETED`). On a pure-wait step -> `HoldNode` duration (NAVIGATE-to-self). |
 | `patience` | Distribution (seconds). Covers nav + seek + wait-for-ACTIVE + hold. |
 | `satisfies` | `{need: amount}` applied on SUCCESS. |
-| `autonomous` | `true` ⇒ `AutonomousNode` scores `actions` and runs the winner. |
+| `autonomous` | `true` => `AutonomousNode` scores `actions` and runs the winner. |
 | `allowed_actions` / `blocked_actions` | Filter the autonomous candidate pool. |
 | `until` | Event-bus event name that exits the autonomous step on fire (e.g. `"agent_ready"`). |
 | `until_need` | Need-condition predicate that exits the autonomous step (e.g. `{rest: {above: 80}}`). |
 | `interruptible` | Per-step override of the sequence flag. |
 | `interaction_radius` | Per-step override of the radius cascade; see [../scenarios/README.md](../scenarios/README.md). |
-| `on_failure` | `"abort"` (default) / `"skip"` — on step FAILURE. |
+| `on_failure` | `"abort"` (default) / `"skip"` - on step FAILURE. |
 
 `GoToStepDef` (`kind: go_to`) takes exactly one of:
 
-- `target_pose: {x, y, theta}` — scripted waypoint.
-- `target: <str>` — object id/type; the compiler emits `Resolve → GoTo`.
+- `target_pose: {x, y, theta}` - scripted waypoint.
+- `target: <str>` - object id/type; the compiler emits `Resolve -> GoTo`.
 
 Plus `duration:` (optional hold on arrival), `patience:`, `satisfies:`, `on_failure:`, `interruptible:`.
 
 ### Pure-wait step
 
-Omit `interaction:` and `cancel:`; keep `duration:`. Produces `ClearOutcome → Hold` — `HoldNode` re-emits NAVIGATE-to-self with zero velocity each tick, so the agent parks in place without tearing down any live interaction.
+Omit `interaction:` and `cancel:`; keep `duration:`. Produces `ClearOutcome -> Hold` - `HoldNode` re-emits NAVIGATE-to-self with zero velocity each tick, so the agent parks in place without tearing down any live interaction.
 
 ### Cancel step
 
@@ -174,7 +174,7 @@ Per-agent trees are built in [../../arena_humansim/core/behavior/compiler.py](..
 ## Adding a type
 
 1. Drop a yaml file here (or under a scenario's `agent_types/` to keep it local).
-2. Either `extends` an existing type or declare every field explicitly — there's no implicit default.
+2. Either `extends` an existing type or declare every field explicitly - there's no implicit default.
 3. Reference it by file name (stem, without `.yaml`) from scenarios.
 
 ## Where this gets sampled
@@ -183,5 +183,5 @@ Per-agent trees are built in [../../arena_humansim/core/behavior/compiler.py](..
 
 ## Included types
 
-- `adult` — nominal pedestrian (desired 1.1 m/s, 5 m vision, 180° FOV).
-- `elder` — slower, narrower FOV, longer SFM relaxation. Demonstrates how heterogeneity drops out of a handful of distribution tweaks.
+- `adult` - nominal pedestrian (desired 1.1 m/s, 5 m vision, 180deg FOV).
+- `elder` - slower, narrower FOV, longer SFM relaxation. Demonstrates how heterogeneity drops out of a handful of distribution tweaks.

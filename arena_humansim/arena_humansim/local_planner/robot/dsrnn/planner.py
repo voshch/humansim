@@ -88,7 +88,7 @@ class DSRNNPlanner(RobotPolicy):
         default = policy_cache_dir("dsrnn") / _CHECKPOINT_FILENAME
         if path != default:
             raise FileNotFoundError(f"DS-RNN checkpoint not found at {path}")
-        self._logger.info(f"Fetching DS-RNN checkpoint from {_CHECKPOINT_URL} → {path}")
+        self._logger.info(f"Fetching DS-RNN checkpoint from {_CHECKPOINT_URL} -> {path}")
         fetch_to_disk(_CHECKPOINT_URL, path)
 
     def _ensure_model(self) -> None:

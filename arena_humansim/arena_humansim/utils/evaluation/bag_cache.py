@@ -23,6 +23,7 @@ import pickle
 from pathlib import Path
 
 import pandas as pd
+from tqdm import tqdm
 
 from arena_humansim.utils.bag_io import extract_agent_states
 
@@ -72,7 +73,7 @@ def load_sweep(sweep_dir: Path) -> dict[str, pd.DataFrame]:
             if set(cached.keys()) == {d.name for d in trial_dirs}:
                 return cached
     sweep: dict[str, pd.DataFrame] = {}
-    for trial_dir in trial_dirs:
+    for trial_dir in tqdm(trial_dirs, unit="trial", desc=f"extract {sweep_dir.name}"):
         sweep[trial_dir.name] = load_trial(trial_dir)
     cache.write_bytes(pickle.dumps(sweep))
     return sweep

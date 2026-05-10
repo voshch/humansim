@@ -81,7 +81,7 @@ def test_seek_joins_existing_matching_interaction() -> None:
     # Agent 1 creates a FORMING interaction (min_participants=2 so stays FORMING alone).
     iid = _seed_forming(mgr, 1, InteractionType.GROUP_CONVERSATION)
 
-    # Agent 2 seeks — _scan_symmetric finds agent 1's interaction because 2 sees 1.
+    # Agent 2 seeks - _scan_symmetric finds agent 1's interaction because 2 sees 1.
     spec = SeekSpec(interaction_type=InteractionType.GROUP_CONVERSATION)
     returned_iid = mgr.seek(2, spec)
 
@@ -110,7 +110,7 @@ def test_seek_enforces_at_most_one_participant_membership() -> None:
     group_iid = _seed_active(mgr, [1, 2], InteractionType.GROUP_CONVERSATION)
     assert 1 in mgr.interactions[group_iid].participants
 
-    # Seek a different interaction type — SIT_ON with no world_knowledge means can_create
+    # Seek a different interaction type - SIT_ON with no world_knowledge means can_create
     # returns False, so seek returns None; but the GROUP_CONVERSATION membership is stopped first.
     sit_spec = SeekSpec(interaction_type=InteractionType.SIT_ON, target="chair")
     result = mgr.seek(1, sit_spec)

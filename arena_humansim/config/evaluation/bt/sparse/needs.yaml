@@ -1,0 +1,73 @@
+# Needs decay drives autonomous selection between competing actions.
+
+name: bt_sparse_needs
+description: >-
+  Five agents with thirst and rest needs that decay over time. Autonomous
+  steps pick between drinking at the fountain and resting on the bench based
+  on utility scoring. Tests need-driven action selection and the autonomous
+  node's utility evaluator.
+
+simulation:
+  seed: 97
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 6000
+  execution_mode: master
+
+world_objects:
+  - object_id: fountain
+    type: fountain
+    pose: {x: -4.0, y: 0.0, theta: 0.0}
+    capacity: 2
+    satisfies: {thirst: 60.0}
+    formation: {type: line, params: {base_step: 0.8, front_offset: 0.8}}
+  - object_id: bench
+    type: bench
+    pose: {x: 4.0, y: 0.0, theta: 3.14159}
+    capacity: 2
+    satisfies: {rest: 60.0}
+
+agent_types:
+  citizen:
+    extends: adult
+    mode: behavior_tree
+    desired_velocity: {mean: 1.0, std: 0.15, clip_low: 0.6, clip_high: 1.4}
+    needs:
+      thirst:
+        initial: {mean: 40.0, std: 10.0, clip_low: 10.0, clip_high: 80.0}
+        decay_rate: {mean: 2.0, std: 0.4, clip_low: 0.8, clip_high: 4.0}
+      rest:
+        initial: {mean: 50.0, std: 10.0, clip_low: 20.0, clip_high: 90.0}
+        decay_rate: {mean: 1.5, std: 0.3, clip_low: 0.5, clip_high: 3.0}
+    utility_weights:
+      thirst: 1.0
+      rest: 1.0
+    actions:
+      drink:
+        target: fountain
+        duration: {mean: 5.0, std: 1.0, clip_low: 2.0, clip_high: 10.0}
+        satisfies: {thirst: 60.0}
+        interaction: USE
+      rest_at_bench:
+        target: bench
+        duration: {mean: 8.0, std: 2.0, clip_low: 4.0, clip_high: 20.0}
+        satisfies: {rest: 60.0}
+        interaction: SIT_ON
+    initial_sequence: live
+    sequences:
+      live:
+        steps:
+          decide:
+            autonomous: true
+            duration: {mean: 1.0, std: 0.5, clip_low: 0.5, clip_high: 3.0}
+            allowed_actions: [drink, rest_at_bench]
+        then: live
+
+agents:
+  - {agent_id: 1, agent_type: citizen, spawn_pose: {x: -6.0, y:  3.0, theta: 0.0}}
+  - {agent_id: 2, agent_type: citizen, spawn_pose: {x: -6.0, y: -3.0, theta: 0.0}}
+  - {agent_id: 3, agent_type: citizen, spawn_pose: {x:  0.0, y:  4.0, theta: -1.5708}}
+  - {agent_id: 4, agent_type: citizen, spawn_pose: {x:  6.0, y:  3.0, theta: 3.14159}}
+  - {agent_id: 5, agent_type: citizen, spawn_pose: {x:  6.0, y: -3.0, theta: 3.14159}}
+
+interaction_scripts: []

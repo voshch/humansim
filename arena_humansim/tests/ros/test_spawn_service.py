@@ -15,7 +15,7 @@ pytestmark = pytest.mark.ros
 
 @pytest.fixture(scope="module")
 def system(ros_system: RosTestSystem) -> RosTestSystem:
-    ros_system.call(RemoveAgents, "remove_agents", make_remove_request([-1]))
+    ros_system.call(RemoveAgents, "remove_agents", make_remove_request([]))
     return ros_system
 
 
@@ -36,7 +36,7 @@ def test_spawn_agents_round_trip(system: RosTestSystem) -> None:
 
 
 def test_spawned_ids_appear_in_agent_states_topic(system: RosTestSystem) -> None:
-    system.call(RemoveAgents, "remove_agents", make_remove_request([-1]))
+    system.call(RemoveAgents, "remove_agents", make_remove_request([]))
     specs = [{"x": float(i), "y": 0.0} for i in range(3)]
     resp = system.call(SpawnAgents, "spawn_agents", make_spawn_request(specs))
     expected = set(resp.spawned_ids)
@@ -46,11 +46,11 @@ def test_spawned_ids_appear_in_agent_states_topic(system: RosTestSystem) -> None
     msg = system.wait_for_agent_states(timeout=5.0)
 
     published_ids = {a.agent_id for a in msg.agents}
-    assert expected.issubset(published_ids), f"expected {expected} ⊆ {published_ids}"
+    assert expected.issubset(published_ids), f"expected {expected} subset of {published_ids}"
 
 
 def test_spawn_accepts_explicit_agent_id(system: RosTestSystem) -> None:
-    system.call(RemoveAgents, "remove_agents", make_remove_request([-1]))
+    system.call(RemoveAgents, "remove_agents", make_remove_request([]))
     specs = [{"agent_id": 42, "x": 0.0, "y": 0.0}]
     resp = system.call(SpawnAgents, "spawn_agents", make_spawn_request(specs))
     assert resp.success is True
@@ -64,7 +64,7 @@ def test_spawn_robot_kind_and_policy(system: RosTestSystem) -> None:
     from geometry_msgs.msg import Pose2D as Pose2DMsg
     from geometry_msgs.msg import Vector3
 
-    system.call(RemoveAgents, "remove_agents", make_remove_request([-1]))
+    system.call(RemoveAgents, "remove_agents", make_remove_request([]))
 
     msg = AgentStateMsg()
     msg.agent_id = 0

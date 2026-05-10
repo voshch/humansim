@@ -35,7 +35,7 @@ _DEFAULT_DEFAULT_RADIUS = 0.3
 _DEFAULT_MAX_HUMANS = 0
 # CrowdNav circle-crossing training had goal distances ~4m. Beyond ~8m the value
 # net is OOD and argmax becomes noisy; clamp the planner-facing goal to a carrot
-# along the agent→goal line.
+# along the agent->goal line.
 _DEFAULT_MAX_LOOKAHEAD = 4.0
 
 
@@ -132,7 +132,7 @@ class SARLPlanner(RobotPolicy):
         default = policy_cache_dir("sarl") / _CHECKPOINT_FILENAME
         if path != default:
             raise FileNotFoundError(f"SARL checkpoint not found at {path}")
-        self._logger.info(f"Fetching SARL checkpoint from {_CHECKPOINT_URL} → {path}")
+        self._logger.info(f"Fetching SARL checkpoint from {_CHECKPOINT_URL} -> {path}")
         fetch_to_disk(_CHECKPOINT_URL, path)
 
     def _ensure_model(self) -> None:
@@ -244,7 +244,7 @@ class SARLPlanner(RobotPolicy):
         actions: np.ndarray,
         human_states: list[tuple[float, float, float, float, float]],
     ) -> tuple[float, float]:
-        # SARL fans out 5×16+1 candidate actions per tick; the only difference between
+        # SARL fans out 5x16+1 candidate actions per tick; the only difference between
         # candidates is the next-self row, so all 81 value-net forwards collapse into a
         # single (n_actions, n_humans, 13) batch.
         torch = self._torch

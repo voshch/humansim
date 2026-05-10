@@ -101,12 +101,12 @@ class CADRLPlanner(RobotPolicy):
                 dest = tf_dir / fname
                 url = f"{_CKPT_BASE}/{fname}"
                 if not dest.exists():
-                    self._logger.info(f"Fetching CADRL checkpoint file {url} → {dest}")
+                    self._logger.info(f"Fetching CADRL checkpoint file {url} -> {dest}")
                     fetch_to_disk(url, dest)
             from .tf_to_torch import convert_and_save
 
             prefix = str(tf_dir / _CKPT_NAME)
-            self._logger.info(f"Converting TF1 checkpoint at {prefix} → {pt_path}")
+            self._logger.info(f"Converting TF1 checkpoint at {prefix} -> {pt_path}")
             tmp_pt = pt_path.with_suffix(pt_path.suffix + f".convert.{os.getpid()}")
             try:
                 convert_and_save(prefix, tmp_pt, num_actions=_NUM_ACTIONS, max_other_agents=self._max_other_agents)

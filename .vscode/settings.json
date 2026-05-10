@@ -6,5 +6,6 @@
       "source.fixAll.ruff": "explicit",
       "source.organizeImports.ruff": "explicit"
     }
-  }
+  },
+  "cmake.sourceDirectory": "/home/arena/arena_ws/src/deps/arena_humansim/arena_humansim_msgs"
 }

@@ -10,26 +10,7 @@ from pathlib import Path
 FINAL_RTF_RE = re.compile(r"sim=([0-9.]+)s, wall=([0-9.]+)s, compute=([0-9.]+)s")
 
 
-def _scenario_has_robot(scenario_name: str) -> bool | None:
-    """True if scenario yaml declares any kind=1 agent. None if the yaml can't be located/parsed."""
-    try:
-        from ament_index_python.packages import get_package_share_directory
-
-        share = Path(get_package_share_directory("arena_humansim"))
-    except Exception:
-        return None
-    p = Path(scenario_name)
-    candidate = p if p.is_file() else share / "config" / "scenarios" / (p.name if p.suffix else f"{p.name}.yaml")
-    if not candidate.is_file():
-        return None
-    try:
-        import yaml
-
-        data = yaml.safe_load(candidate.read_text())
-    except Exception:
-        return None
-    agents = data.get("agents", []) if isinstance(data, dict) else []
-    return any(isinstance(a, dict) and a.get("kind") == 1 for a in agents)
+from arena_humansim.utils.scenario_discovery import scenario_has_robot as _scenario_has_robot
 
 
 def _write_progress(progress_file: Path | None, current: int, total: int) -> None:
@@ -77,9 +58,12 @@ def run_sweep(
     num_workers: int = 1,
     progress_file: Path | None = None,
     robot_shutdown: str = "",
+    force_waypoint_mode: str = "",
 ) -> None:
     if robot_shutdown not in ("", "true", "false"):
         raise ValueError(f"robot_shutdown must be '', 'true', or 'false'; got {robot_shutdown!r}")
+    if force_waypoint_mode not in ("", "once", "repeat", "reverse", "random"):
+        raise ValueError(f"force_waypoint_mode must be '' or one of (once, repeat, reverse, random); got {force_waypoint_mode!r}")
     output_dir.mkdir(parents=True, exist_ok=True)
     if progress_file is not None:
         progress_file.parent.mkdir(parents=True, exist_ok=True)
@@ -92,7 +76,7 @@ def run_sweep(
         for scenario in sorted(robot_scenarios):
             has_robot = _scenario_has_robot(scenario)
             if has_robot is False:
-                print(f"WARNING: scenario {scenario!r} has no kind=1 agent — robot_policy override will be a no-op and every robot metric will be NaN.")
+                print(f"WARNING: scenario {scenario!r} has no kind=1 agent - robot_policy override will be a no-op and every robot metric will be NaN.")
             elif has_robot is None:
                 print(f"WARNING: could not locate scenario yaml for {scenario!r}; cannot verify robot presence.")
 
@@ -148,6 +132,8 @@ def run_sweep(
             cmd.append(f"robot_policy:={robot_policy}")
         if robot_shutdown:
             cmd.append(f"robot_shutdown:={robot_shutdown}")
+        if force_waypoint_mode:
+            cmd.append(f"force_waypoint_mode:={force_waypoint_mode}")
 
         print(f"Simulation started at max speed (ROS_DOMAIN_ID={domain_id}). Waiting for {sim_duration} sim-seconds to elapse...")
         total_wall, _sim_s, wall_s, compute_s, rc = _run_and_tee(cmd, trial_env)
@@ -162,7 +148,7 @@ def run_sweep(
             overhead_pct = 100.0 * overhead_s / total_wall if total_wall > 0 else 0.0
             print(f"  total={total_wall:.1f}s  tick_loop={wall_s:.1f}s  launch+teardown={overhead_s:.1f}s ({overhead_pct:.1f}%)")
             with overhead_csv.open("a") as f:
-                f.write(f"{scenario},{planner},{robot_policy},{seed},{total_wall:.3f},{wall_s:.3f},{compute_s if compute_s is not None else ''},{overhead_s:.3f},{overhead_pct:.2f}\n")
+                f.write(f"{_scenario_id(scenario)},{planner},{robot_policy},{seed},{total_wall:.3f},{wall_s:.3f},{compute_s if compute_s is not None else ''},{overhead_s:.3f},{overhead_pct:.2f}\n")
         else:
             print(f"  total={total_wall:.1f}s  (final-rtf line not found; overhead unknown)")
 
@@ -198,10 +184,17 @@ def run_sweep(
     print(f"Per-trial launch overhead: {overhead_csv}")
 
 
+def _scenario_id(scenario: str) -> str:
+    """Trial-safe scenario id: flatten path separators so trial-dir names don't contain slashes.
+    Matches the YAML `name:` field for scenarios under config/evaluation/<bucket>/<density>/<modality>.yaml."""
+    return scenario.replace("/", "_").replace("\\", "_").removesuffix(".yaml")
+
+
 def _trial_dir_name(scenario: str, planner: str, robot_policy: str, seed: int) -> str:
+    sid = _scenario_id(scenario)
     if robot_policy:
-        return f"{scenario}__{planner}__{robot_policy}__{seed}"
-    return f"{scenario}__{planner}__{seed}"
+        return f"{sid}__{planner}__{robot_policy}__{seed}"
+    return f"{sid}__{planner}__{seed}"
 
 
 def _parse_trial_file(path: Path) -> list[tuple[str, str, str, int]]:
@@ -232,6 +225,7 @@ def main() -> None:
     parser.add_argument("--num_workers", type=int, default=1, help="Total cooperating workers; this worker owns trials with index % num_workers == worker_id.")
     parser.add_argument("--progress_file", type=str, default=None)
     parser.add_argument("--robot_shutdown", choices=("", "true", "false"), default="", help="end each trial when every robot reaches its goal; empty leaves the scenario value (default false).")
+    parser.add_argument("--force_waypoint_mode", choices=("", "once", "repeat", "reverse", "random"), default="", help="override scenario waypoint_mode for every kind=human agent (robots untouched). Empty = scenario value.")
     args = parser.parse_args()
 
     trials = _parse_trial_file(Path(args.trial_file))
@@ -244,6 +238,7 @@ def main() -> None:
         num_workers=args.num_workers,
         progress_file=Path(args.progress_file).resolve() if args.progress_file else None,
         robot_shutdown=args.robot_shutdown,
+        force_waypoint_mode=args.force_waypoint_mode,
     )
 
 

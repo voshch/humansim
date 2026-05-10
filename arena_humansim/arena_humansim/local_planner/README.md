@@ -6,11 +6,11 @@ Velocity commands for the next tick, given each agent's global subgoal and neigh
 
 | Name | Class | Notes |
 |---|---|---|
-| `sfm` | `SFMPlanner` | Social Force Model. `supports_pool=True` — vectorized NumPy path. Per-kind gain scales for human↔robot. Default. |
+| `sfm` | `SFMPlanner` | Social Force Model. `supports_pool=True` - vectorized NumPy path. Per-kind gain scales for human<->robot. Default. |
 | `hsfm` | `HSFMPlanner` | Headed Social Force Model (Farina/Pallottino/Bicchi 2017). Subclasses `sfm`; decomposes total force in the body frame, attenuates lateral force, and drives heading via PD toward the goal-attraction direction. `supports_pool=True`, `provides_heading=True`. |
 | `orca` | `ORCAPlanner` | Reciprocal velocity obstacles. Per-agent `solve`, no pool path. |
 | `straight` | `StraightToGoalPlanner` | Ignores neighbors, drives toward the subgoal at `desired_velocity`. `supports_pool=True`. For debugging and robot policies that don't want avoidance. |
-| `socialgail` | `SocialGAILPlanner` | Learned crowd-sim policy from [William-island/SocialGAIL](https://github.com/William-island/SocialGAIL) (ICRA 2024, MIT). Pretrained HGNN actor; weights fetched on first use to `~/.cache/arena_humansim/socialgail/best.pt`. Requires `pip install torch torch-geometric`. `supports_pool=True`; re-infers every 8 sim ticks (0.4s decision interval, matching training). No wall handling — relies on `wall_projection`. |
+| `socialgail` | `SocialGAILPlanner` | Learned crowd-sim policy from [William-island/SocialGAIL](https://github.com/William-island/SocialGAIL) (ICRA 2024, MIT). Pretrained HGNN actor; weights fetched on first use to `~/.cache/arena_humansim/socialgail/best.pt`. Requires `pip install torch torch-geometric`. `supports_pool=True`; re-infers every 8 sim ticks (0.4s decision interval, matching training). No wall handling - relies on `wall_projection`. |
 
 ## Contract
 
@@ -18,7 +18,7 @@ Velocity commands for the next tick, given each agent's global subgoal and neigh
 class LocalPlanner(WallAware, Loggable, ABC):
     supports_pool: bool = False       # opt into compute_pool fast-path
     needs_global_subgoal: bool = True # set False to skip global planning
-    provides_heading: bool = False    # set True to own pool.theta — agent_manager skips its heading update
+    provides_heading: bool = False    # set True to own pool.theta - agent_manager skips its heading update
 
     PARAM_DEFAULTS: ClassVar[dict[str, ParamDist]] = {}
 
@@ -70,5 +70,5 @@ Per-agent local-planner params live under `local_planner_params:` in each agent 
 | Planner | Keys |
 |---|---|
 | `sfm` (and family) | `relaxation_time`, `repulsion_strength`, `repulsion_range`, `anisotropy` |
-| `hsfm` | the SFM keys plus `lateral_gain` (body-frame perp force gain, ≤1 attenuates), `lateral_damping` (perp velocity damping), `angular_gain` (heading P-gain), `angular_damping` (angular velocity damping) |
+| `hsfm` | the SFM keys plus `lateral_gain` (body-frame perp force gain, <=1 attenuates), `lateral_damping` (perp velocity damping), `angular_gain` (heading P-gain), `angular_damping` (angular velocity damping) |
 | `orca` / `straight` / `socialgail` / `nsp` | none |

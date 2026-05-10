@@ -670,9 +670,9 @@ def test_late_arriver_with_own_forming_migrates_to_existing_active_group() -> No
     result = mgr.seek(1, SeekSpec(interaction_type=InteractionType.GROUP_CONVERSATION))
     assert result == active_iid, f"agent 1 should have migrated into ACTIVE iid={active_iid}, got {result}"
     assert 1 in mgr.interactions[active_iid].participants
-    # Own FORMING emptied — its outcome marks it ENDED for pruning.
+    # Own FORMING emptied - its outcome marks it ENDED for pruning.
     assert own_iid not in mgr.interactions or mgr.interactions[own_iid].outcome in _ENDED
-    # BT must not have received INTERRUPTED — migration is silent.
+    # BT must not have received INTERRUPTED - migration is silent.
     assert agents[1].movement.last_outcome is None
 
 
@@ -692,7 +692,7 @@ def test_symmetric_forming_survives_idle_updates_for_late_peer() -> None:
 
     for _ in range(20):
         mgr.update({}, dt=0.05)
-    assert len(mgr.interactions) == 1, "lone 1p FORMING was torn down between seeks — late peer can never pair"
+    assert len(mgr.interactions) == 1, "lone 1p FORMING was torn down between seeks - late peer can never pair"
     assert mgr.interactions[iid].outcome == InteractionOutcome.FORMING
 
     mgr.seek(2, SeekSpec(interaction_type=InteractionType.GROUP_CONVERSATION))

@@ -3,7 +3,7 @@
 Layout written under <out_dir>:
 
     data/
-      agent_states/scenario=<s>/planner=<p>/part-00000.parquet   # long-format trajectories
+      agent_states/bucket=<b>/density=<d>/scenario=<s>/planner=<p>/part-<robot>-<seed>.parquet  # long-format trajectories, one shard per trial
       metrics/kinematics_per_trial.parquet                        # per-trial scalars
       metrics/robot_metrics.parquet                               # robots mode only
       metrics/failures.parquet                                    # robots mode only
@@ -12,7 +12,7 @@ Layout written under <out_dir>:
     README.md                                                     # dataset card stub
     croissant.json                                                # Croissant 1.0 metadata
 
-The README and croissant.json are skeletons — fill in citation, license, URL,
+The README and croissant.json are skeletons - fill in citation, license, URL,
 and any task-specific recordSet fields before pushing to HuggingFace.
 """
 
@@ -20,22 +20,32 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
-from collections.abc import Sequence
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
+import yaml
+from tqdm import tqdm
 
 from arena_humansim.utils.evaluation.analyze import (
-    kinematics_per_trial,
-    load_recordings,
+    _enumerate_unique_trials,
+    _kinematics_row,
+    infer_bucket,
+    parse_trial_dir,
 )
-from arena_humansim.utils.evaluation.robots import load_robots_recordings
-from arena_humansim.utils.evaluation.robots_failures import classify_run
+from arena_humansim.utils.evaluation.bag_cache import load_trial
+from arena_humansim.utils.evaluation.buckets import SCENARIO_BUCKET
+from arena_humansim.utils.evaluation.robots import _load_snapshot, compute_robot_metrics
+from arena_humansim.utils.evaluation.robots_failures import classify_trial
+from arena_humansim.utils.scenario_discovery import parse_scenario_id
 
 CROISSANT_VERSION = "1.0"
 PARQUET_ROW_GROUP = 100_000
 PARQUET_COMPRESSION = "zstd"
+PARTITION_COLS = ("bucket", "density", "scenario", "planner")
 
 
 def _write_parquet(df: pd.DataFrame, path: Path) -> None:
@@ -48,20 +58,11 @@ def _write_parquet(df: pd.DataFrame, path: Path) -> None:
     )
 
 
-def write_hive_parquet(df: pd.DataFrame, out_dir: Path, partition_cols: Sequence[str]) -> int:
-    """Write df as Hive-partitioned parquet. Returns number of part files written."""
-    n = 0
-    for keys, grp in df.groupby(list(partition_cols)):
-        if not isinstance(keys, tuple):
-            keys = (keys,)
-        path = out_dir
-        for col, val in zip(partition_cols, keys, strict=True):
-            path = path / f"{col}={val}"
-        path.mkdir(parents=True, exist_ok=True)
-        body = grp.drop(columns=list(partition_cols))
-        _write_parquet(body, path / "part-00000.parquet")
-        n += 1
-    return n
+def _shard_path(out_dir: Path, meta: dict) -> Path:
+    path = out_dir
+    for col in PARTITION_COLS:
+        path = path / f"{col}={meta[col]}"
+    return path
 
 
 def _copy_scenario_snapshots(recordings_dirs: list[Path], out_dir: Path) -> list[str]:
@@ -236,21 +237,24 @@ def _build_croissant(
 
 _FIELD_DOCS: dict[str, tuple[str, str]] = {
     "time": ("s", "sim time, monotonic per trial"),
-    "agent_id": ("—", "unique within trial; `100` reserved for the robot in robots-mode trials"),
+    "agent_id": ("-", "unique within trial; humans use positive ids (auto-assigned from 1), robots use negative ids"),
     "x": ("m", "world-frame x position"),
     "y": ("m", "world-frame y position"),
     "vx": ("m/s", "world-frame x velocity"),
     "vy": ("m/s", "world-frame y velocity"),
     "radius": ("m", "agent collision radius"),
-    "scenario": ("—", "scenario name (Hive partition column)"),
-    "planner": ("—", "pedestrian motion model (Hive partition column)"),
-    "robot_policy": ("—", "robot policy name; empty string in divergence-mode trials"),
-    "seed": ("—", "RNG seed for the trial"),
-    "bucket": ("—", "scenario family: nav / bt / het"),
-    "source_dir": ("—", "originating sweep dir name (provenance)"),
-    "jerk": ("m/s³", "mean per-agent jerk over the trial"),
+    "scenario": ("-", "canonical scenario id (Hive partition column)"),
+    "planner": ("-", "pedestrian motion model (Hive partition column)"),
+    "robot_policy": ("-", "robot policy name; empty string in divergence-mode trials"),
+    "seed": ("-", "RNG seed for the trial"),
+    "bucket": ("-", "scenario family: nav / bt / het (Hive partition column)"),
+    "density": ("-", "pedestrian density regime: sparse / dense (Hive partition column)"),
+    "modality": ("-", "scenario modality within (bucket, density), e.g. corridor, group_conversation"),
+    "is_robot_scenario": ("bool", "true if scenario id is a robot variant of a pure-ped sibling"),
+    "source_dir": ("-", "originating sweep dir name (provenance)"),
+    "jerk": ("m/s^3", "mean per-agent jerk over the trial"),
     "curvature": ("1/m", "mean per-agent path curvature over the trial"),
-    "collisions": ("count", "agent–agent collision events in the trial"),
+    "collisions": ("count", "agent-agent collision events in the trial"),
     "success": ("0/1", "robot reached its goal within tolerance"),
     "time_to_goal_s": ("s", "robot wall-time to first goal arrival; NaN if no arrival"),
     "ttg_ratio": ("ratio", "time-to-goal divided by straight-line nominal time"),
@@ -259,24 +263,30 @@ _FIELD_DOCS: dict[str, tuple[str, str]] = {
     "personal_space_violations": ("count", "frames in which a human entered the robot's personal-space disk"),
     "psv_per_sec": ("1/s", "personal_space_violations normalized by trial duration"),
     "frozen_at_end": ("0/1", "robot mean speed in last freeze-window seconds is below threshold"),
-    "final_goal_dist": ("m", "robot–goal distance at trial end"),
-    "cause": ("—", "failure-cause label (success / collision / timeout_no_progress / ...)"),
-    "ped_planner": ("—", "pedestrian planner used; alias of `planner` in metrics tables"),
+    "final_goal_dist": ("m", "robot-goal distance at trial end"),
+    "cause": ("-", "failure-cause label (success / collision / timeout_no_progress / ...)"),
+    "ped_planner": ("-", "pedestrian planner used; alias of `planner` in metrics tables"),
 }
 
 
 def _field_table(columns: list[str]) -> str:
     rows = ["| field | dtype | unit | description |", "|---|---|---|---|"]
     for col in columns:
-        unit, desc = _FIELD_DOCS.get(col, ("—", "TODO"))
+        unit, desc = _FIELD_DOCS.get(col, ("-", "TODO"))
         rows.append(f"| `{col}` | TODO | {unit} | {desc} |")
     return "\n".join(rows)
 
 
-def _write_readme(path: Path, dataset_name: str, df: pd.DataFrame, robot_mode: bool) -> None:
-    n_trials = df.groupby(["scenario", "planner", "robot_policy", "seed"]).ngroups
-    scenarios = sorted(df["scenario"].unique())
-    planners = sorted(df["planner"].unique())
+def _write_readme(
+    path: Path,
+    dataset_name: str,
+    *,
+    n_trials: int,
+    scenarios: list[str],
+    planners: list[str],
+    full_columns: list[str],
+    robot_mode: bool,
+) -> None:
     body = f"""---
 license: TODO
 pretty_name: {dataset_name}
@@ -310,19 +320,19 @@ Pedestrian and robot trajectories from the arena_humansim simulator.
 
 ## Layout
 
-- `data/agent_states/scenario=<s>/planner=<p>/*.parquet` — long-format trajectories, ~{PARQUET_ROW_GROUP:_} rows per row-group, zstd compressed. Partition values for `scenario` and `planner` are encoded in the path.
-- `data/metrics/kinematics_per_trial.parquet` — per-trial scalar metrics (jerk, curvature, collisions).
-- `data/metrics/robot_metrics.parquet` — per-trial robot KPIs (success, time-to-goal, path efficiency, personal-space violations). Robots-mode only.
-- `data/metrics/failures.parquet` — per-trial failure cause classification. Robots-mode only.
-- `configs/scenarios/*.yaml` — scenario YAML snapshots used at sweep time.
-- `croissant.json` — Croissant {CROISSANT_VERSION} machine-readable schema.
-- `DATASHEET.md` — Datasheet for Datasets (Gebru et al.) covering motivation, composition, collection, uses, distribution, maintenance.
+- `data/agent_states/bucket=<b>/density=<d>/scenario=<s>/planner=<p>/*.parquet` - long-format trajectories, ~{PARQUET_ROW_GROUP:_} rows per row-group, zstd compressed. Partition values for `bucket`, `density`, `scenario` and `planner` are encoded in the path; mirrors the `config/evaluation/<bucket>/<density>/<modality>.yaml` input tree.
+- `data/metrics/kinematics_per_trial.parquet` - per-trial scalar metrics (jerk, curvature, collisions).
+- `data/metrics/robot_metrics.parquet` - per-trial robot KPIs (success, time-to-goal, path efficiency, personal-space violations). Robots-mode only.
+- `data/metrics/failures.parquet` - per-trial failure cause classification. Robots-mode only.
+- `configs/scenarios/*.yaml` - scenario YAML snapshots used at sweep time.
+- `croissant.json` - Croissant {CROISSANT_VERSION} machine-readable schema.
+- `DATASHEET.md` - Datasheet for Datasets (Gebru et al.) covering motivation, composition, collection, uses, distribution, maintenance.
 
 ## Schema
 
 ### `agent_states` (long-format trajectories)
 
-{_field_table([c for c in df.columns])}
+{_field_table(full_columns)}
 
 ### `kinematics_per_trial`
 
@@ -333,9 +343,13 @@ Pedestrian and robot trajectories from the arena_humansim simulator.
 ```python
 from datasets import load_dataset
 
-# trajectories — stream a single (scenario, planner) partition
+# trajectories - stream a single (bucket, density, scenario, planner) partition
 ds = load_dataset("TODO/repo_id", "agent_states", split="train", streaming=True,
-                  data_files="data/agent_states/scenario=corridor/planner=sfm/*.parquet")
+                  data_files="data/agent_states/bucket=nav/density=sparse/scenario=nav_sparse_corridor/planner=sfm/*.parquet")
+
+# or all of one bucket (partition pushdown)
+ds_nav = load_dataset("TODO/repo_id", "agent_states", split="train", streaming=True,
+                      data_files="data/agent_states/bucket=nav/**/*.parquet")
 
 # per-trial scalar metrics
 import pandas as pd
@@ -349,7 +363,7 @@ TODO bibtex
 
 ## License
 
-TODO — fill in `LICENSE` file at repo root and the `license` field above.
+TODO - fill in `LICENSE` file at repo root and the `license` field above.
 """
     path.write_text(body)
 
@@ -372,12 +386,12 @@ Following the Datasheet for Datasets template (Gebru et al., 2018).
 ## Composition
 
 - **What do the instances represent?** Per-step state of every simulated agent (pedestrian or robot) in a sweep of `arena_humansim` simulator trials.
-- **How many instances are there in total?** {n_trials} trials × variable agent count × variable trial length = {n_rows} agent-state rows.
-- **Does the dataset contain all possible instances or is it a sample?** A sample of the parameter sweep grid: {n_scenarios} scenarios × {n_planners} pedestrian planners × N seeds (and M robot policies in robots-mode trials).
+- **How many instances are there in total?** {n_trials} trials x variable agent count x variable trial length = {n_rows} agent-state rows.
+- **Does the dataset contain all possible instances or is it a sample?** A sample of the parameter sweep grid: {n_scenarios} scenarios x {n_planners} pedestrian planners x N seeds (and M robot policies in robots-mode trials).
 - **What data does each instance consist of?** See README.md schema tables.
 - **Is there a label or target?** No supervised labels; per-trial scalar metrics (kinematics, robot KPIs, failure cause) serve as evaluation targets.
 - **Is any information missing?** `robot_policy` is the empty string in divergence-mode trials.
-- **Are relationships between instances made explicit?** Yes — `(scenario, planner, robot_policy, seed)` jointly key a trial.
+- **Are relationships between instances made explicit?** Yes - `(scenario, planner, robot_policy, seed)` jointly key a trial.
 - **Are there recommended data splits?** No fixed splits. Hold out by `seed` for trial-level CV; hold out by `scenario` for OOD generalization.
 - **Are there errors, sources of noise, or redundancies?** Trials with malformed/truncated rosbags are silently dropped during extraction (cached as empty).
 - **Is the dataset self-contained?** Yes; scenario YAMLs included under `configs/`.
@@ -388,7 +402,7 @@ Following the Datasheet for Datasets template (Gebru et al., 2018).
 - **How was the data acquired?** Generated by running `arena_humansim` (ROS 2 Jazzy, Python 3.12) with sweep configurations under `configs/scenarios/`. See the `arena_humansim` repository for the exact simulator version.
 - **What mechanisms or procedures were used to collect the data?** `evaluate sweep` ran each (scenario, planner, robot_policy, seed) combination; trajectories were recorded as rosbags and post-processed with `evaluate export`.
 - **Over what timeframe was the data collected?** TODO
-- **Were any ethical review processes conducted?** N/A — simulated data.
+- **Were any ethical review processes conducted?** N/A - simulated data.
 
 ## Preprocessing / cleaning / labeling
 
@@ -399,34 +413,122 @@ Following the Datasheet for Datasets template (Gebru et al., 2018).
 ## Uses
 
 - **What tasks could the dataset be used for?** Pedestrian-aware motion planning evaluation; robot navigation in crowds; trajectory prediction; planner ablations; sim-to-real transfer baselines.
-- **Are there tasks for which the dataset should NOT be used?** Anything assuming real-human behavioral fidelity — these are model-driven simulants (SFM, HSFM, ORCA, NSP, SocialGAIL) with known biases.
+- **Are there tasks for which the dataset should NOT be used?** Anything assuming real-human behavioral fidelity - these are model-driven simulants (SFM, HSFM, ORCA, NSP, SocialGAIL) with known biases.
 - **Is there a repository linking to papers / systems that use this dataset?** TODO
 
 ## Distribution
 
 - **How will the dataset be distributed?** HuggingFace Datasets; mirrored on Zenodo for DOI.
 - **License?** TODO (recommend CC-BY-4.0).
-- **Subject to copyright / IP restrictions?** Generated by an open-source simulator under MIT — no upstream restrictions.
+- **Subject to copyright / IP restrictions?** Generated by an open-source simulator under MIT - no upstream restrictions.
 
 ## Maintenance
 
 - **Who is supporting / hosting / maintaining?** TODO
 - **How can the dataset owner be contacted?** TODO (HF discussions tab + GitHub issues)
 - **Will the dataset be updated?** Versioned via `version` in `croissant.json`; changes documented in `CHANGELOG.md`.
-- **Are older versions available?** Yes — via HF dataset revision history and Zenodo DOI versioning.
+- **Are older versions available?** Yes - via HF dataset revision history and Zenodo DOI versioning.
 """
 
 
-def _write_datasheet(path: Path, dataset_name: str, df: pd.DataFrame) -> None:
+def _write_datasheet(
+    path: Path,
+    dataset_name: str,
+    *,
+    n_trials: int,
+    n_rows: int,
+    n_scenarios: int,
+    n_planners: int,
+) -> None:
     path.write_text(
         _DATASHEET_TEMPLATE.format(
             dataset_name=dataset_name,
-            n_trials=df.groupby(["scenario", "planner", "robot_policy", "seed"]).ngroups,
-            n_rows=len(df),
-            n_scenarios=df["scenario"].nunique(),
-            n_planners=df["planner"].nunique(),
+            n_trials=n_trials,
+            n_rows=n_rows,
+            n_scenarios=n_scenarios,
+            n_planners=n_planners,
         )
     )
+
+
+def _process_trial(recordings_dir: Path, trial_name: str, states_dir: Path, do_robots: bool) -> dict[str, Any] | None:
+    """Worker entry point: load + annotate + write one trial's parquet shard, return per-trial scalars.
+    Returns None for empty bags. Safe to pickle for ProcessPoolExecutor."""
+    trial_dir = recordings_dir / trial_name
+    scenario, planner, robot_policy, seed = parse_trial_dir(trial_name)
+
+    df = load_trial(trial_dir)
+    if df.empty:
+        return None
+
+    snapshot = trial_dir / "scenario.yaml"
+    if snapshot.exists():
+        try:
+            bucket = infer_bucket(yaml.safe_load(snapshot.read_text()) or {})
+        except Exception:
+            bucket = "unknown"
+    else:
+        bucket = "unknown"
+    _, density, modality, is_robot_scenario = parse_scenario_id(scenario)
+
+    df = df.copy()
+    df["scenario"] = scenario
+    df["seed"] = seed
+    df["planner"] = planner
+    df["robot_policy"] = robot_policy
+    df["bucket"] = bucket
+    df["density"] = density
+    df["modality"] = modality
+    df["is_robot_scenario"] = is_robot_scenario
+    df["source_dir"] = recordings_dir.name
+
+    meta = {
+        "scenario": scenario,
+        "planner": planner,
+        "robot_policy": robot_policy,
+        "seed": seed,
+        "bucket": bucket,
+        "density": density,
+        "modality": modality,
+        "is_robot_scenario": is_robot_scenario,
+        "source_dir": recordings_dir.name,
+    }
+
+    path = _shard_path(states_dir, meta)
+    path.mkdir(parents=True, exist_ok=True)
+    body = df.drop(columns=list(PARTITION_COLS))
+    rp = robot_policy or "none"
+    _write_parquet(body, path / f"part-{rp}-{int(seed):05d}.parquet")
+
+    result: dict[str, Any] = {
+        "meta": meta,
+        "n_rows": len(body),
+        "full_columns": list(df.columns),
+        "full_dtypes": {c: str(df[c].dtype) for c in df.columns},
+        "kin_row": _kinematics_row(df, meta),
+    }
+    if do_robots and robot_policy:
+        canonical, goal = _load_snapshot(trial_dir)
+        robot_bucket = SCENARIO_BUCKET.get(canonical or scenario, "unknown")
+        result["rm_row"] = {
+            "scenario": scenario,
+            "bucket": robot_bucket,
+            "ped_planner": planner,
+            "robot_policy": robot_policy,
+            "seed": seed,
+            "source_dir": recordings_dir.name,
+            **compute_robot_metrics(df, goal),
+        }
+        result["fl_row"] = {
+            "scenario": scenario,
+            "bucket": robot_bucket,
+            "ped_planner": planner,
+            "robot_policy": robot_policy,
+            "seed": seed,
+            "source_dir": recordings_dir.name,
+            "cause": classify_trial(df, goal),
+        }
+    return result
 
 
 def run_export(
@@ -434,40 +536,90 @@ def run_export(
     out_dir: Path,
     dataset_name: str,
     mode: str = "auto",
+    workers: int | None = None,
 ) -> dict:
+    if workers is None:
+        workers = os.cpu_count() or 1
     if isinstance(recordings_dirs, Path):
         recordings_dirs = [recordings_dirs]
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Loading bags from {len(recordings_dirs)} dir(s)...")
-    df = load_recordings(recordings_dirs)
-    print(f"  {len(df)} rows | {df['scenario'].nunique()} scenarios x {df['planner'].nunique()} planners x {df['seed'].nunique()} seeds")
-
     states_dir = out_dir / "data" / "agent_states"
-    n_parts = write_hive_parquet(df, states_dir, partition_cols=["scenario", "planner"])
-    print(f"  wrote {n_parts} parquet shards under {states_dir}")
-
     metrics_dir = out_dir / "data" / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
-    metrics: dict[str, pd.DataFrame] = {}
 
-    print("Per-trial kinematics...")
-    kin = kinematics_per_trial(df)
+    kin_rows: list[dict] = []
+    rm_rows: list[dict] = []
+    fl_rows: list[dict] = []
+    scenarios_seen: set[str] = set()
+    planners_seen: set[str] = set()
+    n_trials = 0
+    n_parts = 0
+    n_rows_total = 0
+    has_robot_policy = False
+    full_columns: list[str] = []
+    full_dtypes: dict[str, str] = {}
+
+    force_robots = mode == "robots"
+    do_robots = force_robots or mode == "auto"
+
+    tasks = _enumerate_unique_trials(recordings_dirs)
+    total_trials = len(tasks)
+    print(f"Streaming {total_trials} trials from {len(recordings_dirs)} dir(s) with {workers} worker(s)...")
+    bar = tqdm(total=total_trials, unit="trial")
+
+    def _consume(result: dict | None) -> None:
+        nonlocal n_trials, n_parts, n_rows_total, has_robot_policy, full_columns, full_dtypes
+        bar.update(1)
+        if result is None:
+            return
+        meta = result["meta"]
+        if not full_columns:
+            full_columns = result["full_columns"]
+            full_dtypes = result["full_dtypes"]
+        kin_rows.append(result["kin_row"])
+        if "rm_row" in result:
+            rm_rows.append(result["rm_row"])
+            has_robot_policy = True
+        if "fl_row" in result:
+            fl_rows.append(result["fl_row"])
+        scenarios_seen.add(meta["scenario"])
+        planners_seen.add(meta["planner"])
+        n_trials += 1
+        n_parts += 1
+        n_rows_total += result["n_rows"]
+        bar.set_description_str(f"{meta['scenario']}/{meta['planner']}")
+
+    if workers <= 1:
+        for recordings_dir, trial_name in tasks:
+            _consume(_process_trial(recordings_dir, trial_name, states_dir, do_robots))
+    else:
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            futures = [ex.submit(_process_trial, rd, tn, states_dir, do_robots) for rd, tn in tasks]
+            for fut in as_completed(futures):
+                _consume(fut.result())
+
+    bar.close()
+
+    if n_trials == 0:
+        raise RuntimeError(f"no usable trials under {[str(d) for d in recordings_dirs]}")
+
+    print(f"  streamed {n_trials} trials | {n_rows_total} rows | wrote {n_parts} parquet shards under {states_dir}")
+
+    metrics: dict[str, pd.DataFrame] = {}
+    kin = pd.DataFrame(kin_rows)
     _write_parquet(kin, metrics_dir / "kinematics_per_trial.parquet")
     metrics["kinematics_per_trial"] = kin
 
-    robot_mode = mode == "robots" or (mode == "auto" and (df["robot_policy"] != "").any())
-    if robot_mode:
-        print("Robot per-trial metrics...")
-        rm = load_robots_recordings(recordings_dirs)
-        if not rm.empty:
-            _write_parquet(rm, metrics_dir / "robot_metrics.parquet")
-            metrics["robot_metrics"] = rm
-        print("Robot failure classification...")
-        fl = classify_run(recordings_dirs)
-        if not fl.empty:
-            _write_parquet(fl, metrics_dir / "failures.parquet")
-            metrics["failures"] = fl
+    robot_mode = force_robots or (mode == "auto" and has_robot_policy)
+    if robot_mode and rm_rows:
+        rm = pd.DataFrame(rm_rows)
+        _write_parquet(rm, metrics_dir / "robot_metrics.parquet")
+        metrics["robot_metrics"] = rm
+    if robot_mode and fl_rows:
+        fl = pd.DataFrame(fl_rows)
+        _write_parquet(fl, metrics_dir / "failures.parquet")
+        metrics["failures"] = fl
 
     print("Copying scenario YAML snapshots...")
     scenario_dir = out_dir / "configs" / "scenarios"
@@ -475,16 +627,33 @@ def run_export(
     print(f"  copied {len(scenarios)} scenario snapshot(s) to {scenario_dir}")
 
     print("Writing README + DATASHEET + Croissant...")
-    _write_readme(out_dir / "README.md", dataset_name, df, robot_mode)
-    _write_datasheet(out_dir / "DATASHEET.md", dataset_name, df)
-    agent_state_cols = [(col, _DTYPE_TO_CR.get(str(df[col].dtype), "sc:Text")) for col in df.columns if col not in ("scenario", "planner")]
+    scenarios_sorted = sorted(scenarios_seen)
+    planners_sorted = sorted(planners_seen)
+    _write_readme(
+        out_dir / "README.md",
+        dataset_name,
+        n_trials=n_trials,
+        scenarios=scenarios_sorted,
+        planners=planners_sorted,
+        full_columns=full_columns,
+        robot_mode=robot_mode,
+    )
+    _write_datasheet(
+        out_dir / "DATASHEET.md",
+        dataset_name,
+        n_trials=n_trials,
+        n_rows=n_rows_total,
+        n_scenarios=len(scenarios_sorted),
+        n_planners=len(planners_sorted),
+    )
+    agent_state_cols = [(c, _DTYPE_TO_CR.get(full_dtypes[c], "sc:Text")) for c in full_columns if c not in PARTITION_COLS]
     croissant = _build_croissant(dataset_name, out_dir, agent_state_cols, metrics)
     (out_dir / "croissant.json").write_text(json.dumps(croissant, indent=2))
 
-    print(f"Done → {out_dir}")
+    print(f"Done -> {out_dir}")
     return {
         "out_dir": out_dir,
-        "n_trials": int(df.groupby(["scenario", "planner", "robot_policy", "seed"]).ngroups),
+        "n_trials": n_trials,
         "n_parquet_shards": n_parts,
         "metrics_tables": list(metrics.keys()),
         "scenarios": scenarios,

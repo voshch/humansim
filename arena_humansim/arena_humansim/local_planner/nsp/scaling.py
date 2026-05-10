@@ -1,4 +1,4 @@
-"""Meters↔pixels conversion and per-tick batch assembly for the NSP planner.
+"""Meters<->pixels conversion and per-tick batch assembly for the NSP planner.
 
 NSP was trained on Stanford Drone (pixel space, dt=0.4s). We treat the sim's metric world
 as a virtual SDD scene by applying a fixed meters_per_pixel scale.

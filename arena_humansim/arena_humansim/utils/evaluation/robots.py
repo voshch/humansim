@@ -5,17 +5,18 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from arena_humansim.utils.evaluation.bag_cache import load_multi
 from arena_humansim.utils.evaluation.buckets import SCENARIO_BUCKET
 
-ROBOT_AGENT_ID = 100
+ROBOT_AGENT_ID = -1
 
 
 def assert_run_mode(run_dir: Path, expected_mode: str, *, require_cop: bool = False) -> dict[str, object]:
     manifest_path = run_dir / "run_args.json"
     if not manifest_path.is_file():
-        raise RuntimeError(f"{run_dir}: no run_args.json — not a benchmark sweep dir")
+        raise RuntimeError(f"{run_dir}: no run_args.json - not a benchmark sweep dir")
     manifest = json.loads(manifest_path.read_text())
     actual_mode = manifest.get("mode")
     if actual_mode != expected_mode:
@@ -46,27 +47,54 @@ def parse_robots_trial_dir(name: str) -> tuple[str, str, str, int] | None:
         return None
 
 
-def _load_robot_goal(scenario_name: str) -> tuple[float, float] | None:
-    try:
-        from ament_index_python.packages import get_package_share_directory
-
-        share = Path(get_package_share_directory("arena_humansim"))
-    except Exception:
-        return None
-    yaml_path = share / "config" / "scenarios" / f"{scenario_name}.yaml"
-    if not yaml_path.is_file():
-        return None
+def _name_and_goal(yaml_path: Path) -> tuple[str | None, tuple[float, float] | None]:
     try:
         from arena_humansim.utils.scenario import load_scenario
 
         scen = load_scenario(str(yaml_path))
     except Exception:
-        return None
+        return None, None
+    name = scen.name or None
     for a in scen.agents:
         if int(a.kind) == 1 and int(a.agent_id) == ROBOT_AGENT_ID and a.goal_sequence:
             last = a.goal_sequence[-1]
-            return float(last.x), float(last.y)
-    return None
+            return name, (float(last.x), float(last.y))
+    return name, None
+
+
+_eval_goal_index: dict[str, tuple[float, float] | None] | None = None
+
+
+def _eval_goal_for(canonical: str) -> tuple[float, float] | None:
+    """Lazy index of {scenario name: robot goal} from the eval tree, used when a snapshot
+    lacks a goal (older recordings predate goal_sequence on het scenarios)."""
+    global _eval_goal_index
+    if _eval_goal_index is None:
+        from arena_humansim.utils.scenario_discovery import scenario_roots
+
+        _eval_goal_index = {}
+        for root in scenario_roots():
+            if root.name != "evaluation":
+                continue
+            for path in root.glob("**/*.yaml"):
+                name, goal = _name_and_goal(path)
+                if name is not None:
+                    _eval_goal_index[name] = goal
+    return _eval_goal_index.get(canonical)
+
+
+def _load_snapshot(trial_dir: Path) -> tuple[str | None, tuple[float, float] | None]:
+    """Read the per-trial scenario.yaml snapshot, returning (canonical name, robot goal).
+    Falls back to the matching eval-tree source yaml if the snapshot lacks a goal — older
+    snapshots predate the het scenarios using `goal_sequence`. Returns (None, None) when
+    no snapshot or canonical match is found."""
+    snap = trial_dir / "scenario.yaml"
+    if not snap.is_file():
+        return None, None
+    name, goal = _name_and_goal(snap)
+    if goal is None and name is not None:
+        goal = _eval_goal_for(name)
+    return name, goal
 
 
 def _trajectory_arc_length(xy: np.ndarray) -> float:
@@ -172,30 +200,31 @@ def load_robots_recordings(recordings_dirs: Path | list[Path]) -> pd.DataFrame:
     if isinstance(recordings_dirs, Path):
         recordings_dirs = [recordings_dirs]
     rows: list[dict[str, object]] = []
-    goal_cache: dict[str, tuple[float, float] | None] = {}
     seen: set[tuple[str, str, str, int]] = set()
     nested = load_multi(recordings_dirs)
+    total_trials = sum(len(nested.get(d.name, {})) for d in recordings_dirs)
+    bar = tqdm(total=total_trials, unit="trial", desc="robots")
     for recordings_dir in recordings_dirs:
         for trial_name, df in nested.get(recordings_dir.name, {}).items():
+            bar.update(1)
             parsed = parse_robots_trial_dir(trial_name)
             if parsed is None:
                 continue
             scenario, planner, robot_policy, seed = parsed
             key = (scenario, planner, robot_policy, seed)
             if key in seen:
-                print(f"skipping {recordings_dir.name}/{trial_name} (duplicate of trial already loaded from earlier sweep)")
+                bar.write(f"skipping {recordings_dir.name}/{trial_name} (duplicate of trial already loaded from earlier sweep)")
                 continue
             if df.empty:
                 continue
             seen.add(key)
-            if scenario not in goal_cache:
-                goal_cache[scenario] = _load_robot_goal(scenario)
-            goal = goal_cache[scenario]
+            canonical, goal = _load_snapshot(recordings_dir / trial_name)
+            bucket_key = canonical or scenario
             metrics = compute_robot_metrics(df, goal)
             rows.append(
                 {
                     "scenario": scenario,
-                    "bucket": SCENARIO_BUCKET.get(scenario, "unknown"),
+                    "bucket": SCENARIO_BUCKET.get(bucket_key, "unknown"),
                     "ped_planner": planner,
                     "robot_policy": robot_policy,
                     "seed": seed,
@@ -203,6 +232,7 @@ def load_robots_recordings(recordings_dirs: Path | list[Path]) -> pd.DataFrame:
                     **metrics,
                 }
             )
+    bar.close()
 
     return pd.DataFrame(rows)
 
@@ -288,7 +318,7 @@ def run_robots_analysis(
     print(f"  wrote {by_policy_bucket_path}")
 
     print()
-    print("=== Robots (mean ± 95% bootstrap CI) by robot_policy × bucket ===")
+    print("=== Robots (mean +/- 95% bootstrap CI) by robot_policy x bucket ===")
     summary_cols = ["robot_policy", "bucket", "n_trials", "success_mean", "success_ci_lo", "success_ci_hi", "ttg_ratio_mean", "psv_per_sec_mean"]
     print(by_pb[summary_cols].to_string(index=False, float_format="{:.3f}".format))
 

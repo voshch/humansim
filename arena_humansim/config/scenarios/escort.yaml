@@ -149,7 +149,7 @@ agent_types:
         then: done
 
 agents:
-  # Escorts — one starts at each end so both regions see traffic from tick 0.
+  # Escorts - one starts at each end so both regions see traffic from tick 0.
   - agent_id: 1
     agent_type: escort
     spawn_pose: {x: -7.0, y: 0.0, theta: 0.0}
@@ -158,7 +158,7 @@ agents:
     agent_type: escort_east
     spawn_pose: {x: 7.0, y: 0.0, theta: 3.14159}
 
-  # Region A residents (west) — ride east.
+  # Region A residents (west) - ride east.
   - agent_id: 10
     agent_type: resident_west
     spawn_pose: {x: -8.5, y: -1.5, theta: 0.0}
@@ -171,7 +171,7 @@ agents:
     agent_type: resident_west
     spawn_pose: {x: -6.5, y: -0.5, theta: 0.0}
 
-  # Region B residents (east) — ride west.
+  # Region B residents (east) - ride west.
   - agent_id: 20
     agent_type: resident_east
     spawn_pose: {x: 8.5, y: 1.5, theta: 3.14159}

@@ -12,7 +12,7 @@ from . import MotionAnimation
 if TYPE_CHECKING:
     from arena_humansim.core.pool import AgentPool
 
-_GAZE_AMPLITUDE = 0.6  # radians (~35°)
+_GAZE_AMPLITUDE = 0.6  # radians (~35deg)
 _IDLE_SPEED_THRESHOLD = 0.05  # m/s
 
 

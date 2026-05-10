@@ -96,7 +96,7 @@ def _mk_seek(agent: BaseAgent, *, interaction: InteractionType, target: str | in
         (InteractionType.TALK_TO, None, False, True),
         (InteractionType.GROUP_CONVERSATION, None, False, True),
         (InteractionType.SERVICE, "water", True, True),
-        # SERVICE seeker: no offer, no existing provider — IM returns None, no interaction created.
+        # SERVICE seeker: no offer, no existing provider - IM returns None, no interaction created.
         (InteractionType.SERVICE, "water", False, False),
         (InteractionType.BLOCK, 99, False, True),
     ],
@@ -194,7 +194,7 @@ def test_seek_returns_success_once_bound_matching(rng_np: np.random.Generator) -
     iid = next(iter(mgr.interactions))
     mgr.accept(other_id, iid)
     assert mgr.is_bound(agent_id)
-    # Second tick: is_bound_matching → SUCCESS without re-seeking.
+    # Second tick: is_bound_matching -> SUCCESS without re-seeking.
     node.tick_once()
     assert node.status == py_trees.common.Status.SUCCESS
     assert len(mgr.interactions) == 1
@@ -247,7 +247,7 @@ def test_seek_when_bound_preserves_formation_navigate(agent_factory: Callable[..
 
 
 def test_seek_reinitialised_after_loop_still_sees_bound(agent_factory: Callable[..., BaseAgent], rng_np: np.random.Generator) -> None:
-    # After a hail → then: default loop, the SeekNode is initialise()'d again. It must
+    # After a hail -> then: default loop, the SeekNode is initialise()'d again. It must
     # re-check is_bound and short-circuit to SUCCESS without emitting a fresh SEEK that
     # would clobber the formation NAVIGATE from the previous tick.
     agent = _with_bt(agent_factory(agent_id=11))

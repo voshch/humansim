@@ -4,37 +4,37 @@ Cross-node invariants enforced by the compiler live here. For the package layout
 
 ## One primitive for interactions: `SeekNode`
 
-There are no `ADVERTISE` / `accept` phases anymore — `AdvertiseInteractionNode` and `AcceptInteractionNode` are gone, and so is `InteractionType.FOLLOW` (collapsed into `SERVICE` with `offer: true` plus a line formation anchored on the provider).
+There are no `ADVERTISE` / `accept` phases anymore - `AdvertiseInteractionNode` and `AcceptInteractionNode` are gone, and so is `InteractionType.FOLLOW` (collapsed into `SERVICE` with `offer: true` plus a line formation anchored on the provider).
 
 Every interaction is driven by one BT node: `SeekNode`. It emits `SEEK`; the interaction manager (via `_handle_seek` and the per-`HandleKind` strategy in [../../core/interaction_kinds.py](../../core/interaction_kinds.py)) either joins a matching open interaction or, if creation is allowed for this `InteractionKind`, creates one. `CancelNode` tears an interaction down (STOP with `reason=CANCELED`).
 
 ### Symmetric seek migration (`HandleKind.NONE`)
 
-For symmetric types (peer-to-peer, no service tag or object anchor — e.g. `GROUP_CONVERSATION`, `TALK_TO`), a solo 1p FORMING owner does **not** short-circuit on its own interaction. `seek()` still runs the strategy's `find()` each tick so a better-populated peer can take over. If a peer's matching interaction is discovered, the agent is silently removed from its own FORMING via `_detach_quiet` and `accept`ed into the peer's — no `INTERRUPTED` is emitted on `BehaviorTreeMovement.last_outcome`, so `SeekNode` stays `RUNNING` through the handoff instead of failing. If the detached interaction ends up empty with no queue, it collapses to `INTERRUPTED` as bookkeeping but never reaches the BT. Asymmetric types (`TAG` / `AGENT` / `OBJECT`) short-circuit on the agent's own FORMING — that interaction is their offer or reservation, not a placeholder to swap out of.
+For symmetric types (peer-to-peer, no service tag or object anchor - e.g. `GROUP_CONVERSATION`, `TALK_TO`), a solo 1p FORMING owner does **not** short-circuit on its own interaction. `seek()` still runs the strategy's `find()` each tick so a better-populated peer can take over. If a peer's matching interaction is discovered, the agent is silently removed from its own FORMING via `_detach_quiet` and `accept`ed into the peer's - no `INTERRUPTED` is emitted on `BehaviorTreeMovement.last_outcome`, so `SeekNode` stays `RUNNING` through the handoff instead of failing. If the detached interaction ends up empty with no queue, it collapses to `INTERRUPTED` as bookkeeping but never reaches the BT. Asymmetric types (`TAG` / `AGENT` / `OBJECT`) short-circuit on the agent's own FORMING - that interaction is their offer or reservation, not a placeholder to swap out of.
 
 ## Compiler dispatch
 
 | Flags on the step | Compiled inner sequence |
 |---|---|
-| `cancel: true` | `ClearOutcome → Cancel` |
-| `interaction:` one of `USE` / `SIT_ON` / `LIE_ON` / `QUEUE_USE` with `target:` | `ClearOutcome → Resolve → GoTo → Seek → Satisfy?` |
-| `interaction:` (any other, or object-bound without `target:`) | `ClearOutcome → Seek → Satisfy?` |
-| `interaction: BLOCK` with `target: <int>` | `ClearOutcome → Block` (pursuit + SEEK on arrival) |
-| `kind: go_to, target_pose:` | unchanged — nav to pose |
-| `kind: go_to, target:` | `ClearOutcome → Resolve → GoTo` |
-| only `duration:` (pure wait) | `ClearOutcome → Hold` |
+| `cancel: true` | `ClearOutcome -> Cancel` |
+| `interaction:` one of `USE` / `SIT_ON` / `LIE_ON` / `QUEUE_USE` with `target:` | `ClearOutcome -> Resolve -> GoTo -> Seek -> Satisfy?` |
+| `interaction:` (any other, or object-bound without `target:`) | `ClearOutcome -> Seek -> Satisfy?` |
+| `interaction: BLOCK` with `target: <int>` | `ClearOutcome -> Block` (pursuit + SEEK on arrival) |
+| `kind: go_to, target_pose:` | unchanged - nav to pose |
+| `kind: go_to, target:` | `ClearOutcome -> Resolve -> GoTo` |
+| only `duration:` (pure wait) | `ClearOutcome -> Hold` |
 
-Every compiled step is wrapped in a `Parallel(SuccessOnOne)` with a `PatienceWatchdogNode` — step-level patience spans every phase below.
+Every compiled step is wrapped in a `Parallel(SuccessOnOne)` with a `PatienceWatchdogNode` - step-level patience spans every phase below.
 
 ## Patience phases
 
 For an interaction step, patience covers:
 
-1. **Nav to within `interaction_radius`** (object-bound steps only — the `Resolve → GoTo` prefix).
-2. **Seek emit** — `SeekNode` issues a SEEK command; IM either joins an existing interaction or creates a new one.
-3. **Wait for `ACTIVE`** — `SeekNode` stays `RUNNING` until `is_bound(aid)` is true (contract reached `min_participants`).
-4. **Hold** (optional) — if the step has `duration:` without an interaction, a `HoldNode` pins the agent at the current pose via NAVIGATE-to-self. With `interaction:` + `duration:`, the duration threads to the contract and IM tears the interaction down with outcome `COMPLETED`.
-5. **Cancel** — either BT-controlled via a follow-up `{cancel: true}` step, or contract-timed by IM.
+1. **Nav to within `interaction_radius`** (object-bound steps only - the `Resolve -> GoTo` prefix).
+2. **Seek emit** - `SeekNode` issues a SEEK command; IM either joins an existing interaction or creates a new one.
+3. **Wait for `ACTIVE`** - `SeekNode` stays `RUNNING` until `is_bound(aid)` is true (contract reached `min_participants`).
+4. **Hold** (optional) - if the step has `duration:` without an interaction, a `HoldNode` pins the agent at the current pose via NAVIGATE-to-self. With `interaction:` + `duration:`, the duration threads to the contract and IM tears the interaction down with outcome `COMPLETED`.
+5. **Cancel** - either BT-controlled via a follow-up `{cancel: true}` step, or contract-timed by IM.
 
 A step with `patience: {mean: 5.0}` and a target 20 m away may fail during phase 1 before ever emitting SEEK. Non-interaction steps are symmetric: patience caps nav + duration.
 

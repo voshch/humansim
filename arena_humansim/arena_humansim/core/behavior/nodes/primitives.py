@@ -41,7 +41,7 @@ class PatienceWatchdogNode(py_trees.behaviour.Behaviour):
         self._patience = _sample_param_dist(self._patience_source, self._rng) if self._patience_source is not None else None
 
     def update(self) -> py_trees.common.Status:
-        # Never returns SUCCESS — Parallel(SuccessOnOne) tracks the sibling Sequence instead.
+        # Never returns SUCCESS - Parallel(SuccessOnOne) tracks the sibling Sequence instead.
         if self._patience is None:
             return py_trees.common.Status.RUNNING
         if self._elapsed >= self._patience:

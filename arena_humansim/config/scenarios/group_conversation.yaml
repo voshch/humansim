@@ -14,7 +14,7 @@ simulation:
   execution_mode: master
 
 agents:
-  # Pair A — meeting at (2, 0)
+  # Pair A - meeting at (2, 0)
   - agent_id: 0
     spawn_pose: {x: -2.0, y: 0.0, theta: 0.0}
     goal_sequence:
@@ -27,7 +27,7 @@ agents:
       - {x: 2.5, y: 0.0}
     desired_velocity: 1.0
 
-  # Pair B — meeting at (-3, 5)
+  # Pair B - meeting at (-3, 5)
   - agent_id: 2
     spawn_pose: {x: -7.0, y: 5.0, theta: 0.0}
     goal_sequence:
@@ -40,7 +40,7 @@ agents:
       - {x: -2.5, y: 5.0}
     desired_velocity: 1.0
 
-  # Pair C — meeting at (0, -4)
+  # Pair C - meeting at (0, -4)
   - agent_id: 4
     spawn_pose: {x: -4.0, y: -4.0, theta: 0.0}
     goal_sequence:

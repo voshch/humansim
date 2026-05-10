@@ -1,0 +1,66 @@
+# Multi-sequence agent with then/on_failure transitions and pure-wait steps.
+
+name: bt_sparse_compound
+description: >-
+  Three agents cycling through nested sequences with then/on_failure
+  transitions, exercising the SequenceStateMachine, pure-wait steps, and
+  go_to + duration step combinations.
+
+simulation:
+  seed: 101
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 6000
+  execution_mode: master
+
+world_objects:
+  - object_id: bench
+    type: bench
+    pose: {x: 4.0, y: 0.0, theta: 0.0}
+    capacity: 2
+    satisfies: {rest: 60.0}
+
+agent_types:
+  cycler:
+    extends: adult
+    mode: behavior_tree
+    desired_velocity: {mean: 1.0, std: 0.15, clip_low: 0.6, clip_high: 1.4}
+    needs:
+      rest:
+        initial: {mean: 70.0, std: 10.0, clip_low: 40.0, clip_high: 100.0}
+        decay_rate: {mean: 1.0, std: 0.2, clip_low: 0.3, clip_high: 2.0}
+    utility_weights:
+      rest: 1.0
+    actions:
+      rest_at_bench:
+        target: bench
+        duration: {mean: 6.0, std: 1.5, clip_low: 3.0, clip_high: 15.0}
+        satisfies: {rest: 60.0}
+        interaction: SIT_ON
+    initial_sequence: stroll
+    sequences:
+      stroll:
+        steps:
+          walk_a: {kind: go_to, target_pose: {x: -4.0, y:  2.0}}
+          pause:  {duration: {mean: 1.0, std: 0.3, clip_low: 0.5, clip_high: 2.0}}
+          walk_b: {kind: go_to, target_pose: {x: -4.0, y: -2.0}}
+        then: stroll
+        transitions:
+          - when: {rest: {below: 30.0}}
+            goto: rest_cycle
+        on_failure: stroll
+      rest_cycle:
+        steps:
+          take_seat:
+            autonomous: true
+            duration: {mean: 0.5, std: 0.2, clip_low: 0.2, clip_high: 1.5}
+            allowed_actions: [rest_at_bench]
+        then: stroll
+        on_failure: stroll
+
+agents:
+  - {agent_id: 1, agent_type: cycler, spawn_pose: {x: -4.0, y:  2.0, theta: 0.0}}
+  - {agent_id: 2, agent_type: cycler, spawn_pose: {x: -4.0, y:  0.0, theta: 0.0}}
+  - {agent_id: 3, agent_type: cycler, spawn_pose: {x: -4.0, y: -2.0, theta: 0.0}}
+
+interaction_scripts: []

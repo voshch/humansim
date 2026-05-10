@@ -274,7 +274,7 @@ class MarkerPublisher:
             dyn_adds.append(m)
 
         if dyn_deletes or dyn_adds:
-            # DELETEs first — a split into two messages on a depth-N queue could drop the DELETEs
+            # DELETEs first - a split into two messages on a depth-N queue could drop the DELETEs
             # under load, leaving stale markers in RViz indefinitely.
             ma = MarkerArray()
             ma.markers = dyn_deletes + dyn_adds

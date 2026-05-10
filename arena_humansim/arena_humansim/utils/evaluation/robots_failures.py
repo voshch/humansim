@@ -10,7 +10,7 @@ from arena_humansim.utils.evaluation.buckets import SCENARIO_BUCKET
 from arena_humansim.utils.evaluation.robots import (
     GOAL_REACH_THRESHOLD_M,
     ROBOT_AGENT_ID,
-    _load_robot_goal,
+    _load_snapshot,
     parse_robots_trial_dir,
 )
 
@@ -104,7 +104,6 @@ def classify_run(recordings_dirs: Path | list[Path]) -> pd.DataFrame:
     if isinstance(recordings_dirs, Path):
         recordings_dirs = [recordings_dirs]
     rows: list[dict[str, object]] = []
-    goal_cache: dict[str, tuple[float, float] | None] = {}
     seen: set[tuple[str, str, str, int]] = set()
     nested = load_multi(recordings_dirs)
     for recordings_dir in recordings_dirs:
@@ -119,13 +118,13 @@ def classify_run(recordings_dirs: Path | list[Path]) -> pd.DataFrame:
             if df.empty:
                 continue
             seen.add(key)
-            if scenario not in goal_cache:
-                goal_cache[scenario] = _load_robot_goal(scenario)
-            cause = classify_trial(df, goal_cache[scenario])
+            canonical, goal = _load_snapshot(recordings_dir / trial_name)
+            bucket_key = canonical or scenario
+            cause = classify_trial(df, goal)
             rows.append(
                 {
                     "scenario": scenario,
-                    "bucket": SCENARIO_BUCKET.get(scenario, "unknown"),
+                    "bucket": SCENARIO_BUCKET.get(bucket_key, "unknown"),
                     "ped_planner": planner,
                     "robot_policy": robot_policy,
                     "seed": seed,
@@ -172,7 +171,7 @@ def run_failure_analysis(
     print(f"  wrote {by_pb_path}")
 
     print()
-    print("=== Failure cause fraction by robot_policy × bucket ===")
+    print("=== Failure cause fraction by robot_policy x bucket ===")
     pivot = by_pb.pivot_table(index=["robot_policy", "bucket"], columns="cause", values="fraction", fill_value=0.0)
     print(pivot.to_string(float_format="{:.3f}".format))
 

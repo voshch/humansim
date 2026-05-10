@@ -90,7 +90,7 @@ class BitmapOccluder(Occluder):
         if not np.any(nonzero):
             return result
 
-        # samples per ray: enough that step ≤ resolution/sqrt(2) for the longest ray;
+        # samples per ray: enough that step <= resolution/sqrt(2) for the longest ray;
         # all rays use the same count so every ray covers its full [0, 1] range
         step_size = _RESOLUTION / math.sqrt(2.0)
         max_samples = int(np.ceil(lengths[nonzero].max() / step_size))

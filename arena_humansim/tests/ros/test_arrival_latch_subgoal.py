@@ -33,7 +33,7 @@ def _terminal_distance(pool, idx: int) -> float:
 
 def test_no_latch_while_subgoal_near_and_terminal_far(system: RosTestSystem) -> None:
     system.call(ResetSimulation, "reset", make_reset_request())
-    system.call(RemoveAgents, "remove_agents", make_remove_request([-1]))
+    system.call(RemoveAgents, "remove_agents", make_remove_request([]))
     system.call(
         AddWalls,
         "add_walls",
@@ -70,7 +70,7 @@ def test_no_latch_while_subgoal_near_and_terminal_far(system: RosTestSystem) -> 
 
 def test_latch_engages_once_terminal_reached(system: RosTestSystem) -> None:
     system.call(ResetSimulation, "reset", make_reset_request())
-    system.call(RemoveAgents, "remove_agents", make_remove_request([-1]))
+    system.call(RemoveAgents, "remove_agents", make_remove_request([]))
     resp = system.call(
         SpawnAgents,
         "spawn_agents",

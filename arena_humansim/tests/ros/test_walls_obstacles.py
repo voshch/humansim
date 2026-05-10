@@ -91,7 +91,7 @@ def test_remove_walls_clears_state(system: RosTestSystem) -> None:
 
 def test_wall_changes_trajectory(system: RosTestSystem) -> None:
     system.call(ResetSimulation, "reset", make_reset_request())
-    system.call(RemoveAgents, "remove_agents", make_remove_request([-1]))
+    system.call(RemoveAgents, "remove_agents", make_remove_request([]))
     system.call(
         SpawnAgents,
         "spawn_agents",

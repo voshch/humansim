@@ -13,8 +13,8 @@ import torch
 
 from .model import GA3CCADRLNet
 
-# TF dense weight is (in, out); torch Linear is (out, in) → transpose.
-# TF LSTM kernel order is (i, j, f, o); torch LSTM is (i, f, g, o) → reorder.
+# TF dense weight is (in, out); torch Linear is (out, in) -> transpose.
+# TF LSTM kernel order is (i, j, f, o); torch LSTM is (i, f, g, o) -> reorder.
 _TF_LSTM_KERNEL = "rnn/lstm_cell/kernel"
 _TF_LSTM_BIAS = "rnn/lstm_cell/bias"
 _TF_DENSE_LAYERS = {

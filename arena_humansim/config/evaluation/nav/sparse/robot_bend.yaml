@@ -1,0 +1,62 @@
+# nav/sparse/bend + one robot traversing the full L from west to north.
+
+name: robot_nav_sparse_bend
+description: >-
+  Free-flow L-corridor with one robot entering from the west, rounding the
+  90deg turn, and exiting north.
+
+simulation:
+  seed: 19
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 5000
+  execution_mode: master
+  robot_shutdown: true
+
+flow:
+  sources:
+    - pose: {x: -8.0, y: 0.0, theta: 0.0}
+      shape: {type: circle, radius: 0.5}
+      rate_profile: [{t: 0.0, rate: 0.3}]
+      max_concurrent: 6
+      max_total: -1
+      agent_template:
+        desired_velocity_min: 1.0
+        desired_velocity_max: 1.3
+        agent_radius: 0.25
+        agent_type: adult
+        sink_affinity: [{sink_idx: 0, weight: 1.0}]
+
+    - pose: {x: 4.0, y: 9.0, theta: -1.5708}
+      shape: {type: circle, radius: 0.5}
+      rate_profile: [{t: 0.0, rate: 0.3}]
+      max_concurrent: 6
+      max_total: -1
+      agent_template:
+        desired_velocity_min: 1.0
+        desired_velocity_max: 1.3
+        agent_radius: 0.25
+        agent_type: adult
+        sink_affinity: [{sink_idx: 1, weight: 1.0}]
+
+  sinks:
+    - {pose: {x: 4.0, y: 10.0, theta: 0.0}, shape: {type: circle, radius: 0.8}, absorption_radius: 0.8, capacity: -1}
+    - {pose: {x: -9.0, y: 0.0, theta: 0.0}, shape: {type: circle, radius: 0.8}, absorption_radius: 0.8, capacity: -1}
+
+agents:
+  - agent_id: -1
+    kind: 1
+    policy: straight
+    agent_type: robot
+    spawn_pose: {x: -8.5, y: 0.0, theta: 0.0}
+    goal_sequence:
+      - {x: 4.0, y: 0.0}
+      - {x: 4.0, y: 10.0}
+
+walls:
+  - {name: south,   start: {x: -9.0, y: -1.2}, end: {x:  5.2, y: -1.2}}
+  - {name: east,    start: {x:  5.2, y: -1.2}, end: {x:  5.2, y: 10.5}}
+  - {name: north_h, start: {x: -9.0, y:  1.2}, end: {x:  2.8, y:  1.2}}
+  - {name: inner_v, start: {x:  2.8, y:  1.2}, end: {x:  2.8, y: 10.5}}
+
+interaction_scripts: []

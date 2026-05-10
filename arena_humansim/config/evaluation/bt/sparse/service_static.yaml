@@ -1,0 +1,63 @@
+# Single fixed-location SERVICE provider (no movement). Seekers join the
+# offer, ride out the contract, and return for another round.
+
+name: bt_sparse_service_static
+description: >-
+  One stationary service provider at a fixed pose offers a SERVICE; three
+  seekers join over time, exercising offer/seek matching and the
+  line-on-provider formation for a non-moving creator.
+
+simulation:
+  seed: 79
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 4000
+  execution_mode: master
+
+agent_types:
+  provider:
+    extends: adult
+    mode: behavior_tree
+    desired_velocity: {mean: 0.9, std: 0.0, clip_low: 0.7, clip_high: 1.1}
+    initial_sequence: serve
+    sequences:
+      serve:
+        steps:
+          offer_help:
+            interaction: SERVICE
+            target: helpdesk
+            offer: true
+            min_participants: 2
+            max_participants: 2
+            queueable: true
+            formation_spec: {type: line, anchor_kind: provider, params: {base_step: 0.8}}
+            patience: {mean: 90.0, std: 15.0, clip_low: 45.0, clip_high: 180.0}
+            duration: {mean: 12.0, std: 3.0, clip_low: 6.0, clip_high: 30.0}
+          drop:
+            cancel: true
+        then: serve
+        on_failure: serve
+
+  seeker:
+    extends: adult
+    mode: behavior_tree
+    desired_velocity: {mean: 0.9, std: 0.1, clip_low: 0.5, clip_high: 1.3}
+    initial_sequence: hail
+    sequences:
+      hail:
+        steps:
+          ask:
+            interaction: SERVICE
+            target: helpdesk
+            wait_for_outcome: true
+            patience: {mean: 90.0, std: 15.0, clip_low: 45.0, clip_high: 180.0}
+        then: hail
+        on_failure: hail
+
+agents:
+  - {agent_id: 1, agent_type: provider, spawn_pose: {x: 0.0, y: 0.0, theta: 0.0}}
+  - {agent_id: 10, agent_type: seeker, spawn_pose: {x: -5.0, y: -1.0, theta: 0.0}}
+  - {agent_id: 11, agent_type: seeker, spawn_pose: {x: -6.0, y:  1.0, theta: 0.0}}
+  - {agent_id: 12, agent_type: seeker, spawn_pose: {x: -4.5, y:  2.0, theta: 0.0}}
+
+interaction_scripts: []

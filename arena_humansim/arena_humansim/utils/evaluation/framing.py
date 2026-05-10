@@ -85,7 +85,7 @@ def render_framing(framing: dict) -> str:
     ]
 
     for key, template in ABSTRACT_TEMPLATES.items():
-        marker = " — RECOMMENDED" if key == rec else ""
+        marker = " - RECOMMENDED" if key == rec else ""
         lines.append(f"### {key}{marker}")
         lines.append("")
         try:

@@ -344,7 +344,7 @@ class AgentLifetime:
 
 @attrs.define
 class SpawnRequest:
-    """Lightweight spawn descriptor — AgentManager materializes into BaseAgent."""
+    """Lightweight spawn descriptor - AgentManager materializes into BaseAgent."""
 
     pose: Pose2D = attrs.Factory(Pose2D)
     desired_velocity: float = 1.3

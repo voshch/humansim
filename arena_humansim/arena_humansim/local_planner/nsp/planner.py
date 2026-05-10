@@ -2,7 +2,7 @@
 
 Loads SDD-pretrained `_wo` checkpoints, runs the goal+collision branches at the model's
 native 0.4 s cadence, and holds the predicted velocity between calls so the per-tick
-contract is satisfied at any sim dt. Walls are not fed to the model — they are handled
+contract is satisfied at any sim dt. Walls are not fed to the model - they are handled
 downstream by collision/wall_projection.
 """
 
@@ -116,7 +116,7 @@ class NSPPlanner(LocalPlanner):
             raise FileNotFoundError(f"NSP checkpoint not found at {path}")
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + ".tmp")
-        self._logger.info(f"Fetching NSP checkpoint from {_UPSTREAM_CHECKPOINT_URL} → {path}")
+        self._logger.info(f"Fetching NSP checkpoint from {_UPSTREAM_CHECKPOINT_URL} -> {path}")
         try:
             with urllib.request.urlopen(_UPSTREAM_CHECKPOINT_URL, timeout=_FETCH_TIMEOUT_SECONDS) as resp, open(tmp, "wb") as f:
                 while True:
@@ -338,10 +338,10 @@ class NSPPlanner(LocalPlanner):
         return out
 
     def _initial_speeds(self, goal_translated_px: np.ndarray, last_obs_px: np.ndarray, desired_vel_px: np.ndarray) -> np.ndarray:
-        # NSP's F0 = (initial_speeds·e − current_vel) / τ. Upstream training set initial_speeds to
-        # ||dest − last_obs|| / 4.8 because dest was always a far-future trajectory endpoint, so
+        # NSP's F0 = (initial_speeds*e - current_vel) / tau. Upstream training set initial_speeds to
+        # ||dest - last_obs|| / 4.8 because dest was always a far-future trajectory endpoint, so
         # this evaluated to roughly the agent's walking speed. In our deployment dest is whatever
-        # subgoal the global planner produced — often only meters away — so that formula collapses
+        # subgoal the global planner produced - often only meters away - so that formula collapses
         # F0 to an exponential decay that never lets the agent arrive. Use the agent's desired
         # walking speed instead, capped only when remaining distance would overshoot in one step.
         dist_px = np.linalg.norm(goal_translated_px - last_obs_px, axis=1)
@@ -357,13 +357,10 @@ class NSPPlanner(LocalPlanner):
             aid = int(agent_ids[i])
             buf = self._history._buf.get(aid)
             stored = list(buf) if buf is not None else []
+            pad = stored[-1] if stored else pos_px[i]
             for k in range(L):
-                # k=0 oldest, k=L-1 newest
                 age = L - 1 - k
-                if age < len(stored):
-                    out[i, k, :] = stored[age]
-                else:
-                    out[i, k, :] = pos_px[i]
+                out[i, k, :] = stored[age] if age < len(stored) else pad
         return out
 
     def _forward(

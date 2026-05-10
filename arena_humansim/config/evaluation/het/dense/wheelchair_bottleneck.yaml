@@ -1,0 +1,88 @@
+# Doorway bottleneck with mixed-mobility flow (slower elders proxy wheelchairs).
+
+name: het_dense_wheelchair_bottleneck
+description: >-
+  Two-room funnel through a 1.2m doorway with mixed mobility. Each side emits
+  fast adults and slower elders (wheelchair proxy). Tests how mobility
+  asymmetry shapes queue dynamics at the door. Robot crosses through.
+
+simulation:
+  seed: 137
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 8000
+  execution_mode: master
+  robot_shutdown: true
+
+flow:
+  sources:
+    - pose: {x: -8.0, y: 0.0, theta: 0.0}
+      shape: {type: circle, radius: 0.8}
+      rate_profile: [{t: 0.0, rate: 0.7}]
+      max_concurrent: 15
+      max_total: -1
+      agent_template:
+        desired_velocity_min: 1.1
+        desired_velocity_max: 1.4
+        agent_radius: 0.25
+        agent_type: adult
+        sink_affinity: [{sink_idx: 0, weight: 1.0}]
+
+    - pose: {x: -8.0, y: 0.0, theta: 0.0}
+      shape: {type: circle, radius: 0.8}
+      rate_profile: [{t: 0.0, rate: 0.3}]
+      max_concurrent: 8
+      max_total: -1
+      agent_template:
+        desired_velocity_min: 0.5
+        desired_velocity_max: 0.8
+        agent_radius: 0.30
+        agent_type: elder
+        sink_affinity: [{sink_idx: 0, weight: 1.0}]
+
+    - pose: {x: 8.0, y: 0.0, theta: 3.14159}
+      shape: {type: circle, radius: 0.8}
+      rate_profile: [{t: 0.0, rate: 0.7}]
+      max_concurrent: 15
+      max_total: -1
+      agent_template:
+        desired_velocity_min: 1.1
+        desired_velocity_max: 1.4
+        agent_radius: 0.25
+        agent_type: adult
+        sink_affinity: [{sink_idx: 1, weight: 1.0}]
+
+    - pose: {x: 8.0, y: 0.0, theta: 3.14159}
+      shape: {type: circle, radius: 0.8}
+      rate_profile: [{t: 0.0, rate: 0.3}]
+      max_concurrent: 8
+      max_total: -1
+      agent_template:
+        desired_velocity_min: 0.5
+        desired_velocity_max: 0.8
+        agent_radius: 0.30
+        agent_type: elder
+        sink_affinity: [{sink_idx: 1, weight: 1.0}]
+
+  sinks:
+    - {pose: {x:  9.0, y: 0.0, theta: 0.0}, shape: {type: circle, radius: 1.0}, absorption_radius: 1.0, capacity: -1}
+    - {pose: {x: -9.0, y: 0.0, theta: 0.0}, shape: {type: circle, radius: 1.0}, absorption_radius: 1.0, capacity: -1}
+
+walls:
+  - {name: north,     start: {x: -10.0, y:  5.0}, end: {x: 10.0, y:  5.0}}
+  - {name: south,     start: {x: -10.0, y: -5.0}, end: {x: 10.0, y: -5.0}}
+  - {name: west,      start: {x: -10.0, y: -5.0}, end: {x: -10.0, y:  5.0}}
+  - {name: east,      start: {x:  10.0, y: -5.0}, end: {x:  10.0, y:  5.0}}
+  - {name: divider_n, start: {x:   0.0, y:  0.6}, end: {x:   0.0, y:  5.0}}
+  - {name: divider_s, start: {x:   0.0, y: -0.6}, end: {x:   0.0, y: -5.0}}
+
+agents:
+  - agent_id: -1
+    kind: 1
+    agent_type: robot
+    policy: straight
+    spawn_pose: {x: -9.5, y: 0.0, theta: 0.0}
+    goal_sequence:
+      - {x: 9.5, y: 0.0}
+
+interaction_scripts: []

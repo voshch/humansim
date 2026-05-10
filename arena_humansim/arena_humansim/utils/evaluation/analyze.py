@@ -1,15 +1,19 @@
 import itertools
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 import yaml
+from tqdm import tqdm
 
 from arena_humansim.utils.evaluation.buckets import (
-    DRIVER_CLASS,
     DRIVER_CLASS_FINE,
     KNOWN_BUCKETS,
+)
+from arena_humansim.utils.evaluation.buckets import (
+    DRIVER_CLASS_FINE as DRIVER_CLASS,
 )
 from arena_humansim.utils.evaluation.framing import pick_framing, render_framing
 from arena_humansim.utils.evaluation.metrics import (
@@ -36,11 +40,14 @@ def parse_trial_dir(name: str) -> tuple[str, str, str, int]:
     return scenario, planner, robot_policy, int(seed)
 
 
+from arena_humansim.utils.scenario_discovery import parse_scenario_id  # noqa: E402, F401
+
+
 def infer_bucket(scenario_yaml: dict[str, Any]) -> str:
     """Classify a (resolved) scenario YAML into nav/bt/het.
 
     'bt' if any agent_type uses mode==behavior_tree (interaction-layered humans);
-    'het' otherwise if any agent has kind==1 (robot) — heterogeneous human+robot mix;
+    'het' otherwise if any agent has kind==1 (robot) - heterogeneous human+robot mix;
     'nav' otherwise (pure waypoint navigation).
     """
     agent_types = scenario_yaml.get("agent_types") or {}
@@ -53,75 +60,110 @@ def infer_bucket(scenario_yaml: dict[str, Any]) -> str:
     return "nav"
 
 
-def load_recordings(recordings_dirs: Path | list[Path]) -> pd.DataFrame:
-    from arena_humansim.utils.evaluation.bag_cache import load_multi
+def iter_trials(recordings_dirs: Path | list[Path]) -> Iterator[tuple[pd.DataFrame, dict[str, Any]]]:
+    """Yield (annotated_df, meta) per unique trial; one trial's df is resident at a time.
+    meta keys: scenario, planner, robot_policy, seed, bucket, density, modality,
+    is_robot_scenario, source_dir, recordings_dir, trial_name."""
+    from arena_humansim.utils.evaluation.bag_cache import load_trial
 
     if isinstance(recordings_dirs, Path):
         recordings_dirs = [recordings_dirs]
     seen: set[tuple[str, str, str, int]] = set()
-    frames = []
-    nested = load_multi(recordings_dirs)
     for recordings_dir in recordings_dirs:
-        for trial_name, df in nested.get(recordings_dir.name, {}).items():
+        for trial_dir in sorted(recordings_dir.iterdir()):
+            if not trial_dir.is_dir():
+                continue
             try:
-                scenario, planner, robot_policy, seed = parse_trial_dir(trial_name)
+                scenario, planner, robot_policy, seed = parse_trial_dir(trial_dir.name)
             except ValueError:
-                print(f"skipping {trial_name} (not a trial dir)")
                 continue
             key = (scenario, planner, robot_policy, seed)
             if key in seen:
-                print(f"skipping {recordings_dir.name}/{trial_name} (duplicate of trial already loaded from earlier sweep)")
+                print(f"skipping {recordings_dir.name}/{trial_dir.name} (duplicate of trial already loaded from earlier sweep)")
                 continue
+            df = load_trial(trial_dir)
             if df.empty:
-                print(f"skipping {trial_name} (empty bag)")
+                print(f"skipping {trial_dir.name} (empty bag)")
                 continue
-            trial_dir = recordings_dir / trial_name
+            seen.add(key)
             snapshot = trial_dir / "scenario.yaml"
             if snapshot.exists():
                 try:
                     bucket = infer_bucket(yaml.safe_load(snapshot.read_text()) or {})
                 except Exception as exc:
-                    print(f"warning: {trial_name}: failed to parse scenario.yaml ({exc}); bucket=unknown")
+                    print(f"warning: {trial_dir.name}: failed to parse scenario.yaml ({exc}); bucket=unknown")
                     bucket = "unknown"
             else:
-                print(f"warning: {trial_name}: no scenario.yaml snapshot; bucket=unknown (run backfill_scenario_snapshots)")
+                print(f"warning: {trial_dir.name}: no scenario.yaml snapshot; bucket=unknown (run backfill_scenario_snapshots)")
                 bucket = "unknown"
-            seen.add(key)
+            _, density, modality, is_robot_scenario = parse_scenario_id(scenario)
             df = df.copy()
             df["scenario"] = scenario
             df["seed"] = seed
             df["planner"] = planner
             df["robot_policy"] = robot_policy
             df["bucket"] = bucket
+            df["density"] = density
+            df["modality"] = modality
+            df["is_robot_scenario"] = is_robot_scenario
             df["source_dir"] = recordings_dir.name
-            frames.append(df)
-    if not frames:
-        raise RuntimeError(f"no usable trials under {[str(d) for d in recordings_dirs]}")
-    return pd.concat(frames, ignore_index=True)
+            yield (
+                df,
+                {
+                    "scenario": scenario,
+                    "planner": planner,
+                    "robot_policy": robot_policy,
+                    "seed": seed,
+                    "bucket": bucket,
+                    "density": density,
+                    "modality": modality,
+                    "is_robot_scenario": is_robot_scenario,
+                    "source_dir": recordings_dir.name,
+                    "recordings_dir": recordings_dir,
+                    "trial_name": trial_dir.name,
+                },
+            )
 
 
-def kinematics_per_trial(df: pd.DataFrame) -> pd.DataFrame:
-    rows = []
-    for (scenario, planner, robot_policy, seed), trial in df.groupby(["scenario", "planner", "robot_policy", "seed"]):
-        per_agent = trial.sort_values(["agent_id", "time"]).groupby("agent_id").apply(calculate_kinematic_metrics).reset_index()
-        rows.append(
-            {
-                "bucket": trial["bucket"].iloc[0],
-                "scenario": scenario,
-                "planner": planner,
-                "robot_policy": robot_policy,
-                "seed": seed,
-                "jerk": per_agent["mean_jerk"].mean(),
-                "curvature": per_agent["mean_curvature"].mean(),
-                "collisions": calculate_run_collisions(trial),
-            }
-        )
-    return pd.DataFrame(rows)
+def _enumerate_unique_trials(recordings_dirs: list[Path]) -> list[tuple[Path, str]]:
+    """Walk sweep dirs, dedup by parsed (scenario, planner, robot_policy, seed)."""
+    seen: set[tuple[str, str, str, int]] = set()
+    out: list[tuple[Path, str]] = []
+    for recordings_dir in recordings_dirs:
+        if not recordings_dir.is_dir():
+            continue
+        for trial_dir in sorted(recordings_dir.iterdir()):
+            if not trial_dir.is_dir():
+                continue
+            try:
+                key = parse_trial_dir(trial_dir.name)
+            except ValueError:
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((recordings_dir, trial_dir.name))
+    return out
+
+
+def _kinematics_row(df: pd.DataFrame, meta: dict[str, Any]) -> dict[str, Any]:
+    per_agent = df.sort_values(["agent_id", "time"]).groupby("agent_id").apply(calculate_kinematic_metrics).reset_index()
+    return {
+        "bucket": meta["bucket"],
+        "scenario": meta["scenario"],
+        "planner": meta["planner"],
+        "robot_policy": meta["robot_policy"],
+        "seed": meta["seed"],
+        "jerk": per_agent["mean_jerk"].mean(),
+        "curvature": per_agent["mean_curvature"].mean(),
+        "collisions": calculate_run_collisions(df),
+    }
 
 
 def compute_pairwise_table(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
-    for (scenario, robot_policy, seed, agent_id), group in df.groupby(["scenario", "robot_policy", "seed", "agent_id"]):
+    grouped = df.groupby(["scenario", "robot_policy", "seed", "agent_id"])
+    for (scenario, robot_policy, seed, agent_id), group in tqdm(grouped, total=grouped.ngroups, unit="grp", desc="pairwise"):
         planners = sorted(group["planner"].unique())
         if len(planners) < 2:
             continue
@@ -218,7 +260,7 @@ def _bootstrap_mean(values: np.ndarray, group_keys: np.ndarray, n_iter: int, rng
 
 
 def within_class_pairs(pairwise_df: pd.DataFrame, n_bootstrap: int = 1000, ci_seed: int = 0) -> pd.DataFrame:
-    """Per-pair Hausdorff with scenario-clustered 90% bootstrap CIs, restricted to driver pairs in the same DRIVER_CLASS_FINE class. Generalizes the §4.5 SFM≈HSFM check to NSP/SocialGAIL and any future intra-class pair."""
+    """Per-pair Hausdorff with scenario-clustered 90% bootstrap CIs, restricted to driver pairs in the same DRIVER_CLASS_FINE class. Generalizes the Sec.4.5 SFM~HSFM check to NSP/SocialGAIL and any future intra-class pair."""
     if pairwise_df.empty:
         return pd.DataFrame(columns=["bucket", "class", "p1", "p2", "mean_hausdorff", "ci_lo", "ci_hi", "n_pairs", "n_scenarios"])
 
@@ -243,13 +285,14 @@ def within_class_pairs(pairwise_df: pd.DataFrame, n_bootstrap: int = 1000, ci_se
             vals = grp["hausdorff"].to_numpy()
             scen = grp["scenario"].to_numpy()
             lo, hi = _bootstrap_mean(vals, scen, n_bootstrap, rng)
+            point = float(grp.groupby("scenario")["hausdorff"].mean().mean())
             rows.append(
                 {
                     "bucket": label,
                     "class": cls,
                     "p1": p1,
                     "p2": p2,
-                    "mean_hausdorff": float(vals.mean()),
+                    "mean_hausdorff": point,
                     "ci_lo": lo,
                     "ci_hi": hi,
                     "n_pairs": int(vals.size),
@@ -305,12 +348,25 @@ def run_analysis(
     if isinstance(recordings_dirs, Path):
         recordings_dirs = [recordings_dirs]
 
-    print(f"Loading bags from {len(recordings_dirs)} dir(s): {[d.name for d in recordings_dirs]}")
-    df = load_recordings(recordings_dirs)
+    total_trials = len(_enumerate_unique_trials(recordings_dirs))
+    print(f"Streaming {total_trials} trials from {len(recordings_dirs)} dir(s): {[d.name for d in recordings_dirs]}")
+    frames: list[pd.DataFrame] = []
+    kin_rows: list[dict[str, Any]] = []
+    bar = tqdm(iter_trials(recordings_dirs), total=total_trials, unit="trial", desc="load")
+    for trial_df, meta in bar:
+        frames.append(trial_df)
+        kin_rows.append(_kinematics_row(trial_df, meta))
+        bar.set_postfix_str(f"{meta['scenario']}/{meta['planner']}")
+    bar.close()
+
+    if not frames:
+        raise RuntimeError(f"no usable trials under {[str(d) for d in recordings_dirs]}")
+
+    df = pd.concat(frames, ignore_index=True)
+    frames.clear()
     print(f"  {len(df)} rows | {df['scenario'].nunique()} scenarios x {df['planner'].nunique()} planners x {df['seed'].nunique()} seeds | buckets: {sorted(df['bucket'].unique())}")
 
-    print("Per-trial kinematics...")
-    kin_df = kinematics_per_trial(df)
+    kin_df = pd.DataFrame(kin_rows)
     kin_path = out_dir / "kinematics_per_trial.csv"
     kin_df.to_csv(kin_path, index=False)
     print(f"  wrote {kin_path}")

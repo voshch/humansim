@@ -123,8 +123,8 @@ class DRLVOPlanner(RobotPolicy):
         sys.modules.setdefault("gym", gymnasium)
         sys.modules.setdefault("gym.spaces", gymnasium.spaces)
 
-        # Override pickle-reconstructed objects that don't survive Python 3.7→3.12
-        # nor SB3 v1→v2 (cloudpickled lr_schedule/clip_range bytecode invalid;
+        # Override pickle-reconstructed objects that don't survive Python 3.7->3.12
+        # nor SB3 v1->v2 (cloudpickled lr_schedule/clip_range bytecode invalid;
         # legacy Box class identity != gymnasium.spaces.Box even after alias).
         custom_objects: dict[str, object] = {
             "observation_space": gymnasium.spaces.Box(low=-1.0, high=1.0, shape=(19202,), dtype=np.float32),

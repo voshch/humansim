@@ -28,7 +28,7 @@ For each agent within `radius + margin` of a wall segment:
 
 1. Find the closest point on the segment (clipped to endpoints).
 2. Push the agent out along the outward normal by `(radius + margin) - dist`.
-3. Project velocity onto the wall tangent — agents slide along walls rather than bouncing or sticking.
+3. Project velocity onto the wall tangent - agents slide along walls rather than bouncing or sticking.
 
 Three relaxation passes are run to settle corner cases where resolving wall A drives the agent into wall B. After that, residual overlap is accepted.
 
@@ -37,6 +37,6 @@ Three relaxation passes are run to settle corner cases where resolving wall A dr
 1. Subclass `CollisionResolver` under `collision/`.
 2. Implement `resolve(pool)`. Override `set_walls` if you need derived caches.
 3. Register in `collision/__init__.py` via a `_load_<name>` lazy loader.
-4. Contract coverage: `tests/contracts/test_collision_contract.py` — no-walls no-op, deterministic, bounded-iterations.
+4. Contract coverage: `tests/contracts/test_collision_contract.py` - no-walls no-op, deterministic, bounded-iterations.
 
 Agent-wall `margin` defaults to 1 cm. Increase if you observe jitter at contact; decrease only if you're sure the local planner is keeping agents off walls on its own.

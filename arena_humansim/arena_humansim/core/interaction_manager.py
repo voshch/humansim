@@ -501,7 +501,7 @@ class InteractionManager(Loggable):
 
     def _detach_quiet(self, interaction_id: int, agent_id: int) -> None:
         # Silent counterpart to stop(): used by seek() mid-migration, when the agent is moving
-        # from its own 1p FORMING into a peer's — emitting INTERRUPTED would fail the SeekNode.
+        # from its own 1p FORMING into a peer's - emitting INTERRUPTED would fail the SeekNode.
         interaction = self.interactions.get(interaction_id)
         if interaction is None:
             return

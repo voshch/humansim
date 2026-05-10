@@ -22,15 +22,15 @@ class GlobalPlanner(WallAware, Loggable, ABC):
     def get_cached_paths(self) -> dict[int, list[Pose2D]]: ...
 ```
 
-- `compute` returns the *next immediate subgoal* per agent — not the final target. Advancement along the cached path is handled by `advance_along_path` (shared base-class helper) using dot-product projection.
+- `compute` returns the *next immediate subgoal* per agent - not the final target. Advancement along the cached path is handled by `advance_along_path` (shared base-class helper) using dot-product projection.
 - `get_cached_goals` is how the rest of the pipeline (local planner, markers) reads the planner state without re-triggering work.
 - `get_cached_paths` is optional; only used for visualization.
 - `WallAware.set_walls(segments)` invalidates any grid / graph caches.
 
 ## Shared helpers
 
-- `simplify_path(waypoints, min_area=0.01)` — Visvalingam–Whyatt decimation, in the base module. Use this before returning paths so LOS-connected runs collapse to endpoints.
-- `GlobalPlanner.advance_along_path(agent_pos, waypoints, current_idx)` — dot-product projection; returns the new cursor index.
+- `simplify_path(waypoints, min_area=0.01)` - Visvalingam-Whyatt decimation, in the base module. Use this before returning paths so LOS-connected runs collapse to endpoints.
+- `GlobalPlanner.advance_along_path(agent_pos, waypoints, current_idx)` - dot-product projection; returns the new cursor index.
 
 ## Adding a planner
 

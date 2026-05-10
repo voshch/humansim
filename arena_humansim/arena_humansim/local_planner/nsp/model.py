@@ -1,4 +1,4 @@
-"""Mirror of upstream NSP nn.Modules — layer names match the released SDD checkpoints.
+"""Mirror of upstream NSP nn.Modules - layer names match the released SDD checkpoints.
 
 State_dict compatible with realcrane/Human-Trajectory-Prediction-via-Neural-Social-Physics
 (ECCV 2022, Yue et al.). The forward path here drops the F2 environment branch, since the
@@ -114,7 +114,7 @@ class NSP(nn.Module):
         num_peds = outputs_features2.size(0)
         curr_supp = torch.zeros((num_peds, self.max_peds + 1, 5), dtype=current_step.dtype, device=device)
 
-        # The training distribution had no stationary peds; with current_vel ≈ 0 the cosine cone
+        # The training distribution had no stationary peds; with current_vel ~ 0 the cosine cone
         # collapses to "no neighbors visible" and F1 dies, leaving arrived/stalled agents drifting
         # into each other. When the reference direction is too small to define a cone, we admit
         # every in-range neighbor instead.

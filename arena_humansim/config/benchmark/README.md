@@ -34,8 +34,8 @@ candidate:
 
 Each run uses `reference.params_file` (or `candidate.params_file`) as the sim base config and overlays `params:` on top.
 
-- `stages[].agents` — agent counts to sweep. Each becomes its own measurement row.
-- `stages[].walls` — optional wall layout. Literals: `maze(N)` for an N×N maze; or a list of segments `[[[x1,y1],[x2,y2]], ...]`.
+- `stages[].agents` - agent counts to sweep. Each becomes its own measurement row.
+- `stages[].walls` - optional wall layout. Literals: `maze(N)` for an NxN maze; or a list of segments `[[[x1,y1],[x2,y2]], ...]`.
 - `params_file` supports `pkg://<pkg>/<path>` to resolve package-share paths.
 - `params:` is an inline override dict. Also settable on the command line via `--ref-params k=v,k2=v2`.
 
@@ -57,17 +57,17 @@ Bare names (`astar_vs_dijkstra`) resolve to `config/benchmark/<name>.yaml` in th
 |---|---|
 | `default.yaml` | Self-comparison (config vs itself). Sanity check: RTF spread should be within round-to-round noise. |
 | `quick.yaml` | Fast self-comparison across low/med/high agent counts (10/50/200) in one batch. ~30s to run. |
-| `quick_maze.yaml` | Same as `quick.yaml` but in a 10×10 maze. |
-| `astar_vs_dijkstra.yaml` | Global planner sweep across open space and a 10×10 maze. Canonical example for a stage-with-walls run. |
+| `quick_maze.yaml` | Same as `quick.yaml` but in a 10x10 maze. |
+| `astar_vs_dijkstra.yaml` | Global planner sweep across open space and a 10x10 maze. Canonical example for a stage-with-walls run. |
 
 ## Adding a benchmark
 
 1. Drop a yaml here.
 2. Point `reference` and `candidate` at the params file(s) you want to compare; they can be the same file with different `params:` overlays.
-3. Run `ros2 run arena_humansim benchmark <name>` — no rebuild needed if `install/` is the devel install.
+3. Run `ros2 run arena_humansim benchmark <name>` - no rebuild needed if `install/` is the devel install.
 
 ## Output
 
 Printed table per stage: median, p95, p99, RTF per agent-count. With `--profile`, per-phase means and p95s; with `--csv`, every tick time as a row.
 
-RTF note: the master-mode sim is the time authority — `rtf` is a ceiling. Benchmarks report actual per-tick wall cost, which is the signal that matters for comparison.
+RTF note: the master-mode sim is the time authority - `rtf` is a ceiling. Benchmarks report actual per-tick wall cost, which is the signal that matters for comparison.

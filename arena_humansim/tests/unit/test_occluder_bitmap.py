@@ -43,8 +43,8 @@ def test_mixed_rays_some_blocked_some_clear() -> None:
     # Horizontal wall at y=0 from x=-1 to x=1.
     occ = _occ()
     occ.set_walls([((-1.0, 0.0), (1.0, 0.0))])
-    # ray 0: crosses the wall (from y=-1 to y=1, x=0) → blocked
-    # ray 1: does not cross (from y=2 to y=3, x=0) → clear
+    # ray 0: crosses the wall (from y=-1 to y=1, x=0) -> blocked
+    # ray 1: does not cross (from y=2 to y=3, x=0) -> clear
     # ray 2: lateral, wall at y=0 between x=-1..1, ray goes from (3,0) to (5,0); endpoint on wall row is borderline; use a safe side
     # ray 1: fully above, guaranteed clear
     p_a = np.array([[0.0, -1.0], [0.0, 2.0]])
@@ -55,7 +55,7 @@ def test_mixed_rays_some_blocked_some_clear() -> None:
 
 
 def test_clear_single_point_pair_no_division_by_zero() -> None:
-    # Both endpoints identical — zero-length ray; must return True (no wall hit).
+    # Both endpoints identical - zero-length ray; must return True (no wall hit).
     occ = _occ()
     occ.set_walls([((0.0, -1.0), (0.0, 1.0))])
     p_a = np.array([[0.0, 0.0]])
@@ -87,7 +87,7 @@ def test_wall_perpendicular_ray_not_blocked() -> None:
 
 
 def test_diagonal_wall_blocks_crossing_ray() -> None:
-    # 45° wall from (-1,-1) to (1,1) blocks a ray from (-1,1) to (1,-1).
+    # 45deg wall from (-1,-1) to (1,1) blocks a ray from (-1,1) to (1,-1).
     occ = _occ()
     occ.set_walls([((-1.0, -1.0), (1.0, 1.0))])
     p_a = np.array([[-1.0, 1.0]])

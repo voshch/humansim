@@ -15,7 +15,7 @@ pytestmark = pytest.mark.ros
 
 @pytest.fixture(scope="module")
 def system(ros_system: RosTestSystem) -> RosTestSystem:
-    ros_system.call(RemoveAgents, "remove_agents", make_remove_request([-1]))
+    ros_system.call(RemoveAgents, "remove_agents", make_remove_request([]))
     return ros_system
 
 
@@ -36,7 +36,7 @@ def _make_waypoints(points: list[tuple[float, float]], mode: int = 0):
 def test_set_waypoints_by_agent_id(system: RosTestSystem) -> None:
     from arena_humansim_msgs.srv import SetWaypoints
 
-    system.call(RemoveAgents, "remove_agents", make_remove_request([-1]))
+    system.call(RemoveAgents, "remove_agents", make_remove_request([]))
     specs = [{"x": 0.0, "y": 0.0, "waypoints": [(5.0, 0.0)]}]
     resp = system.call(SpawnAgents, "spawn_agents", make_spawn_request(specs))
     aid = resp.spawned_ids[0]
@@ -62,7 +62,7 @@ def test_set_waypoints_by_agent_id(system: RosTestSystem) -> None:
 def test_set_waypoints_empty_clears_goals(system: RosTestSystem) -> None:
     from arena_humansim_msgs.srv import SetWaypoints
 
-    system.call(RemoveAgents, "remove_agents", make_remove_request([-1]))
+    system.call(RemoveAgents, "remove_agents", make_remove_request([]))
     specs = [{"x": 0.0, "y": 0.0, "waypoints": [(5.0, 0.0)]}]
     resp = system.call(SpawnAgents, "spawn_agents", make_spawn_request(specs))
     aid = resp.spawned_ids[0]
@@ -88,7 +88,7 @@ def test_set_waypoints_by_name_for_robot(system: RosTestSystem) -> None:
     from geometry_msgs.msg import Pose2D as Pose2DMsg
     from geometry_msgs.msg import Vector3
 
-    system.call(RemoveAgents, "remove_agents", make_remove_request([-1]))
+    system.call(RemoveAgents, "remove_agents", make_remove_request([]))
 
     msg = AgentStateMsg()
     msg.agent_id = 0

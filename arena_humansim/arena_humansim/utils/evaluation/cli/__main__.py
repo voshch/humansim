@@ -9,6 +9,7 @@ VERBS = {
     "test": "arena_humansim.utils.evaluation.cli.test",
     "backfill_snapshots": "arena_humansim.utils.evaluation.cli.backfill_snapshots",
     "export": "arena_humansim.utils.evaluation.cli.export",
+    "render": "arena_humansim.utils.evaluation.cli.render",
 }
 
 

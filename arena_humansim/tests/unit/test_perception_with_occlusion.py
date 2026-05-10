@@ -114,7 +114,7 @@ def test_no_occluder_matches_baseline_dense() -> None:
 
     assert 1 in _neighbors(pool, 0)
     assert 0 in _neighbors(pool, 1)
-    # agent 3 is 20 m away — outside range for agents 1 and 2
+    # agent 3 is 20 m away - outside range for agents 1 and 2
     assert 2 not in _neighbors(pool, 0)
     assert 2 not in _neighbors(pool, 1)
 
@@ -144,7 +144,7 @@ def test_no_occluder_matches_baseline_kdtree(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_wall_blocks_agents_in_range_and_fov_dense() -> None:
     # Agent 1 at x=-2, agent 2 at x=2; wall at x=0. Both omni, long range.
-    # Exercises the dense path (N=2 ≤ 64).
+    # Exercises the dense path (N=2 <= 64).
     occ = BitmapOccluder()
     occ.set_walls(_wall_at_x(0.0))
     agents = [
@@ -206,7 +206,7 @@ def test_prox_no_wall_visible_dense() -> None:
 
 
 # ---------------------------------------------------------------------------
-# set_walls([]) with bitmap occluder → identical to no occluder
+# set_walls([]) with bitmap occluder -> identical to no occluder
 # ---------------------------------------------------------------------------
 
 
@@ -234,8 +234,8 @@ def test_bitmap_empty_walls_matches_no_occluder() -> None:
 
 
 def test_vision_occlusion_false_agent_sees_through_wall_dense() -> None:
-    # Agent 1 has vision_occlusion=False → ignores LOS check, sees agent 2 through wall.
-    # Agent 2 has vision_occlusion=True → blocked by the wall, cannot see agent 1.
+    # Agent 1 has vision_occlusion=False -> ignores LOS check, sees agent 2 through wall.
+    # Agent 2 has vision_occlusion=True -> blocked by the wall, cannot see agent 1.
     # Exercises the dense path (N=2).
     occ = BitmapOccluder()
     occ.set_walls(_wall_at_x(0.0))
@@ -246,9 +246,9 @@ def test_vision_occlusion_false_agent_sees_through_wall_dense() -> None:
     pool = _pool_from(agents)
     DefaultPerception(occluder=occ).compute_pool(pool)
 
-    # Agent 1 (idx 0) sees through walls — agent 2 must be in its neighbors.
+    # Agent 1 (idx 0) sees through walls - agent 2 must be in its neighbors.
     assert 1 in _neighbors(pool, 0)
-    # Agent 2 (idx 1) respects LOS — agent 1 is on the other side of the wall.
+    # Agent 2 (idx 1) respects LOS - agent 1 is on the other side of the wall.
     assert 0 not in _neighbors(pool, 1)
 
 
@@ -294,7 +294,7 @@ def test_dense_kdtree_agreement_with_occlusion(monkeypatch: pytest.MonkeyPatch) 
     occ_dense = BitmapOccluder()
     occ_dense.set_walls(wall)
     pool_dense = _pool_from(agents)
-    # N=5 ≤ default threshold (64): dense path
+    # N=5 <= default threshold (64): dense path
     DefaultPerception(occluder=occ_dense).compute_pool(pool_dense)
 
     occ_kdtree = BitmapOccluder()

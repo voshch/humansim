@@ -1,4 +1,4 @@
-# Remove agents from the simulation (-1 = remove all)
+# Remove agents from the simulation (empty list = remove all)
 int32[] agent_ids
 ---
 bool success

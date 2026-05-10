@@ -12,6 +12,7 @@ def main() -> None:
     parser.add_argument("--out_dir", type=str, required=True, help="Destination dir for the dataset tree.")
     parser.add_argument("--name", type=str, required=True, help="Dataset name (used in README + Croissant `name`).")
     parser.add_argument("--mode", choices=("auto", "robots", "divergence"), default="auto", help="Force robots-mode metrics on/off; auto-detects from non-empty robot_policy column.")
+    parser.add_argument("--workers", type=int, default=None, help="Process pool size for per-trial extraction + parquet write. Defaults to os.cpu_count() (or 1). Pass 1 for serial.")
     args = parser.parse_args()
 
     if args.all:
@@ -43,9 +44,10 @@ def main() -> None:
         out_dir=out_dir,
         dataset_name=args.name,
         mode=args.mode,
+        workers=args.workers,
     )
     print()
-    print(f"Exported {summary['n_trials']} trials → {summary['n_parquet_shards']} parquet shards + {len(summary['metrics_tables'])} metric table(s) at {summary['out_dir']}")
+    print(f"Exported {summary['n_trials']} trials -> {summary['n_parquet_shards']} parquet shards + {len(summary['metrics_tables'])} metric table(s) at {summary['out_dir']}")
     print("Next steps:")
     print("  1. Edit README.md (license, citation, links) and croissant.json (TODO fields).")
     print("  2. `huggingface-cli upload <repo_id> <out_dir> .` (or use the `datasets` Python API).")

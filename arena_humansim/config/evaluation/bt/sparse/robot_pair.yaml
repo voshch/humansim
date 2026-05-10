@@ -1,0 +1,42 @@
+# bt/sparse/pair + one robot passing between the two TALK_TO pairs.
+
+name: robot_bt_sparse_pair
+description: >-
+  Two TALK_TO pairs with a robot passing west-to-east between them.
+
+simulation:
+  seed: 83
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 4000
+  execution_mode: master
+  robot_shutdown: true
+
+agent_types:
+  talker:
+    extends: adult
+    mode: behavior_tree
+    desired_velocity: {mean: 1.0, std: 0.1, clip_low: 0.7, clip_high: 1.3}
+    initial_sequence: chat
+    sequences:
+      chat:
+        steps:
+          talk:
+            interaction: TALK_TO
+            duration: {mean: 30.0, std: 8.0, clip_low: 15.0, clip_high: 60.0}
+            patience: {mean: 45.0, std: 10.0, clip_low: 20.0, clip_high: 90.0}
+        then: chat
+
+agents:
+  - {agent_id: 1, agent_type: talker, spawn_pose: {x: -3.0, y:  2.0, theta: 0.0}}
+  - {agent_id: 2, agent_type: talker, spawn_pose: {x: -1.5, y:  2.0, theta: 3.14159}}
+  - {agent_id: 3, agent_type: talker, spawn_pose: {x:  1.5, y: -2.0, theta: 0.0}}
+  - {agent_id: 4, agent_type: talker, spawn_pose: {x:  3.0, y: -2.0, theta: 3.14159}}
+  - agent_id: -1
+    kind: 1
+    policy: straight
+    agent_type: robot
+    spawn_pose: {x: -6.0, y: 0.0, theta: 0.0}
+    goal_sequence: [{x: 6.0, y: 0.0}]
+
+interaction_scripts: []

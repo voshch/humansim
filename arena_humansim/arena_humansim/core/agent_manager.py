@@ -140,7 +140,7 @@ def arrival_latch_step(pool: AgentPool, r_enter: float, r_exit: float) -> None:
     if n == 0:
         return
     pos = pool.pos[:n]
-    # Must run after pool.set_goals / pool.set_terminals — reads fresh goal_pos on release.
+    # Must run after pool.set_goals / pool.set_terminals - reads fresh goal_pos on release.
     goal = pool.goal_pos[:n]
     has_goal = pool.has_goal[:n]
     term = pool.terminal_pos[:n]
@@ -187,6 +187,7 @@ class AgentManager(Node):
         self.declare_parameter("force_local_planner", False)
         self.declare_parameter("robot_policy", "")
         self.declare_parameter("robot_shutdown", "")
+        self.declare_parameter("force_waypoint_mode", "")
         self.declare_parameter("animation", "noop")
         self.declare_parameter("collision", "wall_projection")
         self.declare_parameter("occlusion", "bitmap")
@@ -235,6 +236,15 @@ class AgentManager(Node):
         self._robot_policy_override = str(self.get_parameter("robot_policy").value)
         self._robot_shutdown_override = str(self.get_parameter("robot_shutdown").value).strip().lower()
         self._robot_shutdown = False  # resolved against scenario.simulation.robot_shutdown after load
+        fwm_raw = str(self.get_parameter("force_waypoint_mode").value).strip().lower()
+        if fwm_raw == "":
+            self._force_waypoint_mode: WaypointMode | None = None
+        else:
+            try:
+                self._force_waypoint_mode = WaypointMode[fwm_raw.upper()]
+            except KeyError:
+                valid = ", ".join(m.name.lower() for m in WaypointMode)
+                raise ValueError(f"force_waypoint_mode must be empty or one of {{{valid}}}; got {fwm_raw!r}") from None
         _pm = self.get_parameter("publish_markers").value
         if isinstance(_pm, bool):
             self._publish_markers = 2 if _pm else 0
@@ -554,20 +564,9 @@ class AgentManager(Node):
         return self._perception_cache[name]
 
     def _resolve_scenario_path(self, name_or_path: str) -> Path:
-        p = Path(name_or_path)
-        if p.is_file():
-            return p
-        try:
-            from ament_index_python.packages import get_package_share_directory
+        from arena_humansim.utils.scenario_discovery import find_scenario_path
 
-            share = Path(get_package_share_directory("arena_humansim"))
-        except Exception:
-            share = None
-        if share is not None:
-            candidate = share / "config" / "scenarios" / (p.name if p.suffix else f"{p.name}.yaml")
-            if candidate.is_file():
-                return candidate
-        raise FileNotFoundError(f"scenario not found: {name_or_path}")
+        return find_scenario_path(name_or_path)
 
     def _load_scenario_file(self, name_or_path: str) -> None:
         from arena_humansim.utils.scenario import dump_resolved_scenario, load_scenario
@@ -645,7 +644,7 @@ class AgentManager(Node):
         immediate = SpawnAgents.Request()
         pending: list[tuple[int, AgentStateMsg]] = []
         for a in scenario.agents:
-            if int(a.agent_id) <= 0:
+            if int(a.agent_id) == 0:
                 a.agent_id = self._next_agent_id
                 self._next_agent_id += 1
             if int(a.kind) == int(AgentKind.ROBOT) and a.services:
@@ -664,10 +663,11 @@ class AgentManager(Node):
                 msg.policy = a.policy
             msg.policy_params = a.policy_params
 
+            resolved_mode = self._force_waypoint_mode if (self._force_waypoint_mode is not None and int(a.kind) != int(AgentKind.ROBOT)) else a.waypoint_mode
             wps = WaypointsMsg()
-            wps.mode = int(a.waypoint_mode)
+            wps.mode = int(resolved_mode)
             seq = list(a.goal_sequence)
-            if a.waypoint_mode != WaypointMode.ONCE and len(seq) < 2:
+            if resolved_mode != WaypointMode.ONCE and len(seq) < 2:
                 seq = [*seq, a.spawn_pose]
             for gp in seq:
                 w = WaypointMsg()
@@ -1714,7 +1714,7 @@ class AgentManager(Node):
         spawned_ids = []
         for agent_msg in request.agents:
             aid = agent_msg.agent_id
-            if aid <= 0:
+            if aid == 0:
                 aid = self._next_agent_id
                 self._next_agent_id += 1
 
@@ -1785,7 +1785,7 @@ class AgentManager(Node):
         request: RemoveAgents.Request,
         response: RemoveAgents.Response,
     ) -> RemoveAgents.Response:
-        if not request.agent_ids or -1 in request.agent_ids:
+        if not request.agent_ids:
             count = len(self._agents)
             self._agents.clear()
             self._pool_agent_ids.clear()

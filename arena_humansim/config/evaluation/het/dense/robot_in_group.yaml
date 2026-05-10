@@ -1,0 +1,57 @@
+# Robot threads through a stationary F-formation of 5 colleagues.
+
+name: het_dense_robot_in_group
+description: >-
+  One F-formation of 5 colleagues at a gathering area; robot crosses straight
+  through. Tests robot navigation through a held social formation without
+  disrupting GROUP_CONVERSATION peer slotting.
+
+simulation:
+  seed: 139
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 4000
+  execution_mode: master
+  robot_shutdown: true
+
+world_objects:
+  - object_id: gathering_area
+    type: gathering_area
+    pose: {x: 0.0, y: 0.0, theta: 0.0}
+    capacity: 0
+    formation:
+      type: f_formation
+      anchor: {kind: object, ref: gathering_area}
+      params: {base_radius: 0.8, radius_per_member: 0.12}
+
+agent_types:
+  colleague:
+    extends: adult
+    mode: behavior_tree
+    desired_velocity: {mean: 1.0, std: 0.15, clip_low: 0.6, clip_high: 1.4}
+    initial_sequence: chat
+    sequences:
+      chat:
+        steps:
+          walk_in: {kind: go_to, target: gathering_area}
+          hold:
+            interaction: GROUP_CONVERSATION
+            duration: {mean: 60.0, std: 15.0, clip_low: 30.0, clip_high: 120.0}
+            patience: {mean: 60.0, std: 10.0, clip_low: 30.0, clip_high: 120.0}
+        then: chat
+
+agents:
+  - {agent_id: 1, agent_type: colleague, spawn_pose: {x: -4.0, y: -2.0, theta: 0.5}}
+  - {agent_id: 2, agent_type: colleague, spawn_pose: {x:  4.0, y: -2.0, theta: 2.5}}
+  - {agent_id: 3, agent_type: colleague, spawn_pose: {x:  4.0, y:  2.0, theta: -2.5}}
+  - {agent_id: 4, agent_type: colleague, spawn_pose: {x: -4.0, y:  2.0, theta: -0.5}}
+  - {agent_id: 5, agent_type: colleague, spawn_pose: {x:  0.0, y: -4.0, theta: 1.5708}}
+  - agent_id: -1
+    kind: 1
+    agent_type: robot
+    policy: straight
+    spawn_pose: {x: -8.0, y: 0.0, theta: 0.0}
+    goal_sequence:
+      - {x: 8.0, y: 0.0}
+
+interaction_scripts: []

@@ -35,7 +35,7 @@ def test_get_profile_empty_before_ticks(system: RosTestSystem) -> None:
 
 def test_get_profile_after_ticks(system: RosTestSystem) -> None:
     system.call(ResetSimulation, "reset", make_reset_request())
-    system.call(RemoveAgents, "remove_agents", make_remove_request([-1]))
+    system.call(RemoveAgents, "remove_agents", make_remove_request([]))
     system.call(
         SpawnAgents,
         "spawn_agents",

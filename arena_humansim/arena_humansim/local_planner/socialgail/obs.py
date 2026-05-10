@@ -58,7 +58,7 @@ def build_obs_for_agent(
 
     Mirrors gail_airl_ppo.crowd_env.gym_env._get_ar_relative_graph_observation.
     All positional features are rotated into the goal-aligned frame using ``R``,
-    which the caller pins per (agent, current goal) — upstream pins it at
+    which the caller pins per (agent, current goal) - upstream pins it at
     episode start and never recomputes; recomputing per tick puts the policy
     OOD because it never sees "goal behind me" cases that training relied on.
     The current goal vector itself is still recomputed each tick (goal feature

@@ -49,7 +49,7 @@ def build_temporal_edge(agent: BaseAgent) -> np.ndarray:
 
 def build_spatial_edges(agent: BaseAgent, max_humans: int) -> np.ndarray:
     # Vectors pointing from robot position to each visible human's position. Pad
-    # with the upstream sentinel of (15, 15) — far enough that the SRNN attention
+    # with the upstream sentinel of (15, 15) - far enough that the SRNN attention
     # weights it negligibly compared to nearby visible humans.
     out = np.full((max_humans, 2), 15.0, dtype=np.float32)
     if agent.belief is None:

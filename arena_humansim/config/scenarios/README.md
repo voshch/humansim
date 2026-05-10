@@ -17,15 +17,15 @@ Every BT step that joins or creates an interaction uses `SeekNode` under the hoo
 
 ### Provider-side flags (SERVICE only, with `offer: true`)
 
-- `min_participants: int` — ACTIVE threshold; counts the provider itself.
-- `max_participants: int` — cap (counts the provider). `-1` = unbounded.
-- `queueable: bool` — admit seekers into a FIFO queue when full.
-- `formation_spec: {type, anchor_kind, params}` — formation imposed on participants. Common choice for mobile providers: `{type: line, anchor_kind: provider, params: {base_step: 0.8}}` (line trails the provider's pose, slot-0 is the provider and is skipped by the formation emitter).
+- `min_participants: int` - ACTIVE threshold; counts the provider itself.
+- `max_participants: int` - cap (counts the provider). `-1` = unbounded.
+- `queueable: bool` - admit seekers into a FIFO queue when full.
+- `formation_spec: {type, anchor_kind, params}` - formation imposed on participants. Common choice for mobile providers: `{type: line, anchor_kind: provider, params: {base_step: 0.8}}` (line trails the provider's pose, slot-0 is the provider and is skipped by the formation emitter).
 
 ### Ending an interaction
 
-- `duration: {mean: ..., std: ...}` — contract-level timeout. IM tears down with outcome `COMPLETED` when elapsed.
-- `{cancel: true}` as its own follow-up step — emits STOP on the agent's current `interaction_id` with `reason=CANCELED`.
+- `duration: {mean: ..., std: ...}` - contract-level timeout. IM tears down with outcome `COMPLETED` when elapsed.
+- `{cancel: true}` as its own follow-up step - emits STOP on the agent's current `interaction_id` with `reason=CANCELED`.
 
 Pick one. Mixing them on the same step is allowed (duration is a fallback if Cancel never runs).
 
@@ -38,9 +38,9 @@ Two roles, same number:
 
 Cascade (first non-null wins):
 
-1. `StepDef.interaction_radius` — per-step override.
-2. `WorldObject.interaction_radius` — per-object override on the target.
-3. `InteractionKind.interaction_radius` — per-type default (see below).
+1. `StepDef.interaction_radius` - per-step override.
+2. `WorldObject.interaction_radius` - per-object override on the target.
+3. `InteractionKind.interaction_radius` - per-type default (see below).
 4. `DISTANCE_TOLERANCE` = 0.5 m (from [../../arena_humansim/utils/const.py](../../arena_humansim/utils/const.py)).
 
 ### Type defaults
@@ -93,7 +93,7 @@ chat:
 
 ### Object-anchored (OBJECT)
 
-`target:` is an object id or object type. The compiler emits `Resolve → GoTo → Seek`.
+`target:` is an object id or object type. The compiler emits `Resolve -> GoTo -> Seek`.
 
 ```yaml
 queue_and_drink:
@@ -130,7 +130,7 @@ hail:
   patience: {mean: 90.0}
 ```
 
-### Agent-targeted (AGENT — BLOCK)
+### Agent-targeted (AGENT - BLOCK)
 
 `target:` is an agent id; `BlockNode` pursues and emits SEEK on arrival.
 
@@ -174,8 +174,8 @@ agents:
         max_participants: -1     # unbounded
 ```
 
-- `tag: str` — free-form identifier. Matched string-equal against human seekers' `target:`.
-- `max_participants: int` — cap, **counting the robot itself**. Set `N+1` for "N humans at once". Use `-1` for unbounded.
-- Seeker side is a plain `{interaction: SERVICE, target: <tag>}` step — same node as any other service seeker.
+- `tag: str` - free-form identifier. Matched string-equal against human seekers' `target:`.
+- `max_participants: int` - cap, **counting the robot itself**. Set `N+1` for "N humans at once". Use `-1` for unbounded.
+- Seeker side is a plain `{interaction: SERVICE, target: <tag>}` step - same node as any other service seeker.
 
 Matcher semantics (visibility, provider anchor, queueing) live in [../../arena_humansim/core/README.md](../../arena_humansim/core/README.md).

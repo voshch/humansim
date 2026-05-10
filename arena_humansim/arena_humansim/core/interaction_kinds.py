@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 class InteractionType(enum.IntEnum):
-    # Values are persisted in logs/replays — never reassign or reuse an index.
+    # Values are persisted in logs/replays - never reassign or reuse an index.
     TALK_TO = 0
     GROUP_CONVERSATION = 1
     SIT_ON = 3

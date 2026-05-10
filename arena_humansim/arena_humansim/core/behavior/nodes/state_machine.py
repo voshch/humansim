@@ -66,7 +66,7 @@ class SequenceStateMachine(py_trees.behaviour.Behaviour):
         # stop() cascades terminate() down composites; terminate() alone is a leaf-only hook.
         self._current_node.stop(py_trees.common.Status.INVALID)
         # Evict from lingering interaction memberships only when switching sequences. A self-loop
-        # (e.g. chat `then: chat`) means the agent is continuing the same behavior — ejecting them
+        # (e.g. chat `then: chat`) means the agent is continuing the same behavior - ejecting them
         # would kick everyone out of a group conversation the moment it re-enters the seek step.
         if target != self._current_name and self._im is not None:
             self._im.force_stop(self._agent.state.agent_id, reason=InteractionOutcome.INTERRUPTED)

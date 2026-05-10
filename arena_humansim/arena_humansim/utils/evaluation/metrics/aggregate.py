@@ -4,13 +4,15 @@ import pandas as pd
 
 def calculate_kinematic_metrics(agent_df: pd.DataFrame) -> pd.Series:
     dt = 0.05
+    if len(agent_df) < 2:
+        return pd.Series({"mean_jerk": np.nan, "mean_curvature": np.nan})
     v = agent_df[["vx", "vy"]].values
     v_next = np.roll(v, -1, axis=0)
     v_prev = np.roll(v, 1, axis=0)
     jerk_vec = (v_next - 2 * v + v_prev) / (dt**2)
     jerk_vec = jerk_vec[1:-1]
     jerk_mag = np.linalg.norm(jerk_vec, axis=1)
-    mean_jerk = np.nanmean(jerk_mag)
+    mean_jerk = np.nanmean(jerk_mag) if jerk_mag.size else np.nan
     vx = agent_df["vx"].values
     vy = agent_df["vy"].values
     ax = np.gradient(vx, dt)

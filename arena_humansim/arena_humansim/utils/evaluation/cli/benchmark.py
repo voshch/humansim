@@ -9,43 +9,103 @@ from pathlib import Path
 
 from arena_humansim.utils.evaluation.cli._resume import latest_sweep_dir, peds_root
 from arena_humansim.utils.evaluation.cli.sweep import _trial_dir_name
+from arena_humansim.utils.scenario_discovery import scenario_roots
 
-DEFAULT_NAV = ["simple_crossing", "corridor", "flow_coverage", "t_junction", "bottleneck", "l_corridor"]
-DEFAULT_BT = ["escort", "queue", "bt_coverage"]
-DEFAULT_PLANNERS = ["sfm", "hsfm", "orca", "straight", "nsp", "socialgail"]
+
+def _discover_robot_policies() -> list[str]:
+    """List robot policy names by walking arena_humansim/local_planner/robot/."""
+    from arena_humansim.local_planner import robot as _robot_pkg
+
+    root = Path(_robot_pkg.__file__).parent
+    return sorted(p.name for p in root.iterdir() if p.is_dir() and not p.name.startswith("_"))
+
+
+def _discover_ped_planners() -> list[str]:
+    """Pedestrian planners = registry minus robot/ policies."""
+    from arena_humansim.local_planner import LocalPlanner
+
+    robot_set = set(_discover_robot_policies())
+    return sorted(name for name in LocalPlanner.list_available() if name not in robot_set)
+
+
+def _discover_scenarios(robots_mode: bool) -> list[str]:
+    # Returns relative paths (e.g. `nav/sparse/corridor`) so the launch resolver
+    # doesn't have to disambiguate same-stem files across density tiers.
+    # robots_mode=True  -> every robot variant (`robot_*.yaml`) plus all of `het/` (constitutive).
+    # robots_mode=False -> every pure-ped scenario (no `robot_` prefix, excluding `het/`).
+    out: set[str] = set()
+    for root in scenario_roots():
+        if root.name != "evaluation":
+            continue
+        for yaml_path in root.glob("**/*.yaml"):
+            rel = yaml_path.relative_to(root).with_suffix("")
+            in_het = "het" in rel.parts
+            is_robot_variant = yaml_path.stem.startswith("robot_")
+            if robots_mode:
+                if is_robot_variant or in_het:
+                    out.add(str(rel))
+            else:
+                if not is_robot_variant and not in_het:
+                    out.add(str(rel))
+    return sorted(out)
 
 MAX_WORKERS = 50
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Parallel sweep + monitor + analyze. Add --robot_policies for a robot-policy sweep; otherwise runs the pedestrian divergence sweep.")
-    parser.add_argument("--scenarios", nargs="+", default=None, help="Default = pedestrian-only scenarios for divergence mode, robot_-prefixed scenarios when --robot_policies is set.")
-    parser.add_argument("--planners", nargs="+", default=DEFAULT_PLANNERS, help="Pedestrian local planners.")
+    parser.add_argument("--scenarios", nargs="+", default=None, help="Scenario relative paths under config/evaluation/ (e.g. nav/dense/corridor). Default = auto-discovered: pure-ped scenarios in divergence mode, robot variants + all het/ scenarios when --robot_policies is set.")
+    parser.add_argument("--planners", nargs="*", default=None, help="Pedestrian local planners. Omit or pass --planners with no values -> auto-discover all (registry minus local_planner/robot/). Pass --planners a b c -> use those.")
     parser.add_argument(
         "--robot_policies",
         nargs="*",
-        default=[],
-        help="Robot local planners. When non-empty: robots mode (4-axis trials, no auto-divergence-analysis). When empty: divergence sweep.",
+        default=None,
+        help="Robot local planners. Omit the flag entirely -> divergence sweep (no robot trials). Pass --robot_policies with no values -> robots mode using every policy under local_planner/robot/ (auto-discovered). Pass --robot_policies a b c -> robots mode with the listed policies.",
     )
     parser.add_argument("--seeds", type=int, default=20)
     parser.add_argument("--workers", type=int, default=max((os.cpu_count() or 1) // 2, 1))
     parser.add_argument("--sim_duration", type=int, default=60)
     parser.add_argument("--force_planner_scenarios", nargs="*", default=[])
-    parser.add_argument("--run_dir", type=str, default=None, help="Output dir; defaults to $ARENA_DATA_DIR/peds/<ts>_sweep")
+    parser.add_argument("--run_dir", type=str, default=None, help="Output dir; defaults to $ARENA_DATA_DIR/peds/<ts>_sweep. The suffix is convention only - `--resume` finds any dir under peds/ containing a run_args.json manifest.")
     parser.add_argument("--resume", action="store_true", help="Resume the latest incomplete run under $ARENA_DATA_DIR/peds; mode (divergence/robots) is reconstructed from the stored manifest.")
     parser.add_argument("--cop", action="store_true", help="Mark this as a cognitive-object-permanence ablation run. Requires --robot_policies. Recorded in the manifest as cop=true so the COP analyzer can gate on it.")
-    parser.add_argument("--robot_shutdown", choices=("", "true", "false"), default="", help="end each trial when every robot reaches its goal (scenario.simulation.robot_shutdown override). Empty leaves the scenario value (default false).")
+    parser.add_argument(
+        "--force_waypoint_mode",
+        choices=("", "once", "repeat", "reverse", "random"),
+        default="reverse",
+        help="Override scenario waypoint_mode for every kind=human agent (robots untouched). Default 'reverse' keeps single-waypoint pedestrians cycling for the full sim_duration instead of freezing at the goal. Pass '' to use scenario values.",
+    )
     args = parser.parse_args()
 
-    robot_policies: list[str] = [rp for rp in args.robot_policies if rp]
-    robots_mode = bool(robot_policies)
+    if args.robot_policies is None:
+        robot_policies: list[str] = []
+        robots_mode = False
+    else:
+        robot_policies = [rp for rp in args.robot_policies if rp]
+        if not robot_policies:
+            robot_policies = _discover_robot_policies()
+            if not robot_policies:
+                parser.error("--robot_policies passed without values, but no robot policies discovered under local_planner/robot/")
+            print(f"Auto-discovered robot policies: {robot_policies}")
+        robots_mode = True
     if args.cop and not robots_mode:
         parser.error("--cop requires --robot_policies (COP is a property of the robot policy under test)")
     mode = "robots" if robots_mode else "divergence"
+    args.robot_policies = robot_policies
+
+    explicit_planners = [p for p in args.planners if p] if args.planners else []
+    if not explicit_planners:
+        args.planners = _discover_ped_planners()
+        if not args.planners:
+            parser.error("no pedestrian planners discovered in the local_planner registry")
+        print(f"Auto-discovered pedestrian planners: {args.planners}")
+    else:
+        args.planners = explicit_planners
 
     if args.scenarios is None:
-        base = DEFAULT_NAV + DEFAULT_BT
-        args.scenarios = [f"robot_{s}" for s in base] if robots_mode else base
+        args.scenarios = _discover_scenarios(robots_mode)
+        if not args.scenarios:
+            parser.error("no scenarios discovered under config/evaluation/. Pass --scenarios explicitly or check the install.")
 
     if args.run_dir:
         run_dir = Path(args.run_dir).resolve()
@@ -70,7 +130,7 @@ def main() -> None:
     # Trial-defining args must stay consistent across resumes; runtime knobs
     # (workers, resume) come from the current invocation.
     # `mode` and `cop` are run-defining markers that downstream analyzers gate on.
-    trial_keys = {"scenarios", "planners", "robot_policies", "seeds", "sim_duration", "force_planner_scenarios", "mode", "cop", "robot_shutdown"}
+    trial_keys = {"scenarios", "planners", "robot_policies", "seeds", "sim_duration", "force_planner_scenarios", "mode", "cop", "force_waypoint_mode"}
     if manifest_path.exists():
         stored = json.loads(manifest_path.read_text())
         print(f"Resuming run from {run_dir}; using stored run_args.json for trial set.")
@@ -80,6 +140,8 @@ def main() -> None:
         robot_policies = [rp for rp in (args.robot_policies or []) if rp]
         robots_mode = stored.get("mode") == "robots" if "mode" in stored else bool(robot_policies)
         args.cop = bool(stored.get("cop", False))
+        # Pre-existing runs predate force_waypoint_mode; keep their behavior identical.
+        args.force_waypoint_mode = str(stored.get("force_waypoint_mode", ""))
     else:
         args.mode = mode
         stored = {k: v for k, v in vars(args).items() if k in trial_keys}
@@ -154,8 +216,10 @@ def main() -> None:
             ]
             if args.force_planner_scenarios:
                 cmd.extend(["--force_planner_scenarios", *args.force_planner_scenarios])
-            if args.robot_shutdown:
-                cmd.extend(["--robot_shutdown", args.robot_shutdown])
+            if robots_mode:
+                cmd.extend(["--robot_shutdown", "true"])
+            if args.force_waypoint_mode:
+                cmd.extend(["--force_waypoint_mode", args.force_waypoint_mode])
 
             logf = open(log_file, "wb")
             log_files.append(logf)

@@ -3,11 +3,11 @@ from collections.abc import Iterable
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from arena_humansim.utils.evaluation.buckets import (
     DRIVER_CLASS,
     KNOWN_BUCKETS,
-    SCENARIO_BUCKET,
 )
 from arena_humansim.utils.evaluation.metrics import pairwise_hausdorff
 
@@ -23,7 +23,8 @@ def self_divergence_table(df: pd.DataFrame) -> pd.DataFrame:
     group_cols = ["scenario", "agent_id", "planner"]
     if "robot_policy" in df.columns:
         group_cols.append("robot_policy")
-    for keys, group in df.groupby(group_cols):
+    grouped = df.groupby(group_cols)
+    for keys, group in tqdm(grouped, total=grouped.ngroups, unit="grp", desc="self-div"):
         if not isinstance(keys, tuple):
             keys = (keys,)
         named = dict(zip(group_cols, keys, strict=False))
@@ -35,7 +36,7 @@ def self_divergence_table(df: pd.DataFrame) -> pd.DataFrame:
         if len(seeds) < 2:
             continue
         traj = {s: group[group["seed"] == s][["x", "y"]].values for s in seeds}
-        bucket = SCENARIO_BUCKET.get(scenario, "unknown")
+        bucket = group["bucket"].iloc[0]
         cls = DRIVER_CLASS.get(planner, "unknown")
         for s_i, s_j in itertools.combinations(seeds, 2):
             t_i, t_j = traj[s_i], traj[s_j]
@@ -113,7 +114,7 @@ def headline_seed_ratio(
 
     K_seed >> 1 supports the abstract claim that driver substitution dominates
     trial-to-trial variation. K_seed ~ 1 is the negative result. Does not separate
-    scheduler-induced from seed-induced variance — for that, same-seed reruns are
+    scheduler-induced from seed-induced variance - for that, same-seed reruns are
     required.
     """
     rng = np.random.default_rng(ci_seed)
@@ -172,7 +173,7 @@ def decompose_scalar_variance(kin_df: pd.DataFrame, metrics: Iterable[str] = SCA
 
     Factors: scenario x planner x seed, one trial per cell. Without replication the
     three-way interaction is folded into the residual. Type-I SS is approximate when
-    the design is unbalanced — `n_trials` is reported so imbalance is visible.
+    the design is unbalanced - `n_trials` is reported so imbalance is visible.
     Shares are reported as fraction of total SS and may not sum to exactly 1.0 due
     to rounding when residual = 0.
     """

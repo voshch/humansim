@@ -105,7 +105,7 @@ class SocialGAILPlanner(LocalPlanner):
         from .history import HistoryBuffer
 
         self._history = HistoryBuffer(past_len=self.past_len)
-        # Per-agent pinned (goal, R, R_inv) — recomputed only when the goal
+        # Per-agent pinned (goal, R, R_inv) - recomputed only when the goal
         # changes by more than _GOAL_REFRESH_DIST. Upstream pins R at episode
         # start; we approximate by pinning at first sight of each goal.
         self._rot_cache: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}

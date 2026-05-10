@@ -68,7 +68,7 @@ def test_line_slots_are_leader_defined_and_immediate() -> None:
 
 
 def test_line_slots_retarget_immediately_when_leader_moves() -> None:
-    # If the anchor jumps, every slot moves by the same delta in the same tick —
+    # If the anchor jumps, every slot moves by the same delta in the same tick -
     # no reaction-delay lag, no wave propagation.
     anchor = PoseAnchor(fixed=Pose2D(x=0.0, y=0.0, theta=0.0))
     f = LineFormation(anchor=anchor, agent_lookup=_mk_lookup(), base_step=1.0)
@@ -180,7 +180,7 @@ def test_line_front_pose_caches_across_ticks() -> None:
     f.on_join(1)
     first = f.tick(dt=0.01)
     second = f.tick(dt=0.01)
-    assert second[1] is first[1]  # identity — cache hit
+    assert second[1] is first[1]  # identity - cache hit
 
 
 def test_line_front_pose_invalidates_on_anchor_change() -> None:

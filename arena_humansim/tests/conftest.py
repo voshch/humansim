@@ -19,7 +19,7 @@ from arena_humansim.utils.scenario import (
 )
 from arena_humansim.utils.types import AgentState, Pose2D, Segments
 
-_ROS_SKIP_REASON = "ROS2 not discoverable — source install/setup.bash to enable"
+_ROS_SKIP_REASON = "ROS2 not discoverable - source install/setup.bash to enable"
 
 
 def _ros_available() -> bool:

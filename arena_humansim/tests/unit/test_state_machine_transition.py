@@ -130,7 +130,7 @@ def test_need_transition_evicts_agent_from_existing_interaction() -> None:
     agent.needs.needs["thirst"].value = 25.0
     sm.update()
 
-    # _goto called im.force_stop directly — agent is immediately evicted.
+    # _goto called im.force_stop directly - agent is immediately evicted.
     assert not mgr.is_bound(agent_id)
     assert agent_id not in mgr._agent_membership or not mgr._agent_membership[agent_id]
 
@@ -187,6 +187,6 @@ def test_success_transition_via_then_also_evicts() -> None:
 
     sm.update()
 
-    # _goto called im.force_stop directly — agent is immediately evicted.
+    # _goto called im.force_stop directly - agent is immediately evicted.
     assert not mgr.is_bound(agent_id)
     assert agent.movement.last_outcome == InteractionOutcome.INTERRUPTED

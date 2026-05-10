@@ -1,0 +1,113 @@
+# Mobile SERVICE provider: an escort that picks up passengers at one region
+# and drops them at another. Reformulates the legacy escort.yaml.
+
+name: bt_sparse_service_mobile
+description: >-
+  Two escort agents shuttle between region A (west) and region B (east).
+  Each escort offers a SERVICE at the current region, rides across with one
+  passenger via a trailing line-on-provider formation, cancels to drop the
+  passenger, then offers again at the new region. Residents on each side
+  hail for one ride and stay put.
+
+simulation:
+  seed: 17
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 6000
+  execution_mode: master
+
+agent_types:
+  escort:
+    extends: adult
+    mode: behavior_tree
+    desired_velocity: {mean: 1.0, std: 0.1, clip_low: 0.7, clip_high: 1.2}
+    perception:
+      vision_range: {mean: 8.0, std: 0.5, clip_low: 5.0, clip_high: 12.0}
+    initial_sequence: default
+    sequences:
+      default:
+        steps:
+          offer_A:
+            interaction: SERVICE
+            target: escort_ride_east
+            offer: true
+            min_participants: 2
+            max_participants: 2
+            queueable: false
+            formation_spec: {type: line, anchor_kind: provider, params: {base_step: 0.8}}
+            patience: {mean: 60.0, std: 10.0, clip_low: 30.0, clip_high: 120.0}
+          ride_to_B:
+            kind: go_to
+            target_pose: {x: 7.0, y: 0.0}
+            patience: {mean: 60.0, std: 5.0, clip_low: 30.0, clip_high: 120.0}
+          drop_B:
+            cancel: true
+          offer_B:
+            interaction: SERVICE
+            target: escort_ride_west
+            offer: true
+            min_participants: 2
+            max_participants: 2
+            queueable: false
+            formation_spec: {type: line, anchor_kind: provider, params: {base_step: 0.8}}
+            patience: {mean: 60.0, std: 10.0, clip_low: 30.0, clip_high: 120.0}
+          ride_to_A:
+            kind: go_to
+            target_pose: {x: -7.0, y: 0.0}
+            patience: {mean: 60.0, std: 5.0, clip_low: 30.0, clip_high: 120.0}
+          drop_A:
+            cancel: true
+        then: default
+        on_failure: default
+
+  resident_west:
+    extends: adult
+    mode: behavior_tree
+    desired_velocity: {mean: 0.9, std: 0.1, clip_low: 0.5, clip_high: 1.3}
+    initial_sequence: hail
+    sequences:
+      hail:
+        steps:
+          ride:
+            interaction: SERVICE
+            target: escort_ride_east
+            wait_for_outcome: true
+            patience: {mean: 90.0, std: 15.0, clip_low: 45.0, clip_high: 180.0}
+        then: done
+        on_failure: done
+      done:
+        steps:
+          stay: {duration: {mean: 1000000.0, std: 0.0, clip_low: 1000000.0, clip_high: 1000000.0}}
+        then: done
+
+  resident_east:
+    extends: adult
+    mode: behavior_tree
+    desired_velocity: {mean: 0.9, std: 0.1, clip_low: 0.5, clip_high: 1.3}
+    initial_sequence: hail
+    sequences:
+      hail:
+        steps:
+          ride:
+            interaction: SERVICE
+            target: escort_ride_west
+            wait_for_outcome: true
+            patience: {mean: 90.0, std: 15.0, clip_low: 45.0, clip_high: 180.0}
+        then: done
+        on_failure: done
+      done:
+        steps:
+          stay: {duration: {mean: 1000000.0, std: 0.0, clip_low: 1000000.0, clip_high: 1000000.0}}
+        then: done
+
+agents:
+  - {agent_id: 1, agent_type: escort, spawn_pose: {x: -7.0, y: 0.0, theta: 0.0}}
+  - {agent_id: 2, agent_type: escort, spawn_pose: {x:  7.0, y: 0.0, theta: 3.14159}}
+  - {agent_id: 10, agent_type: resident_west, spawn_pose: {x: -8.5, y: -1.5, theta: 0.0}}
+  - {agent_id: 11, agent_type: resident_west, spawn_pose: {x: -7.5, y:  1.5, theta: 0.0}}
+  - {agent_id: 12, agent_type: resident_west, spawn_pose: {x: -6.5, y: -0.5, theta: 0.0}}
+  - {agent_id: 20, agent_type: resident_east, spawn_pose: {x:  8.5, y:  1.5, theta: 3.14159}}
+  - {agent_id: 21, agent_type: resident_east, spawn_pose: {x:  7.5, y: -1.5, theta: 3.14159}}
+  - {agent_id: 22, agent_type: resident_east, spawn_pose: {x:  6.5, y:  0.5, theta: 3.14159}}
+
+interaction_scripts: []
