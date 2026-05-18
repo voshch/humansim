@@ -1,0 +1,70 @@
+# nav/sparse/flow + two robots crossing established bidirectional pedestrian flow.
+# Smallest scenario that exercises the multi-robot eval path (agent_id < 0):
+# both robots wait until tick 100 (5 s at dt=0.05) so the source has time to
+# fill the corridor before they enter. Robot -1 crosses north, robot -2 crosses
+# south at a different x; their paths don't cross each other but both intersect
+# both pedestrian streams near the middle.
+
+name: robot_nav_sparse_flow_multi
+description: >-
+  Free-flow open-space scenario with two robots crossing a steady bidirectional
+  human flow. Sources warm up for 5 sim-seconds before robots spawn, so each
+  robot meets a populated corridor rather than an empty arena. Smoke-test for
+  multi-robot eval (one row per robot in robot_metrics / failures tables).
+
+simulation:
+  seed: 31
+  dt: 0.05
+  bt_tick_interval: 5
+  max_ticks: 4000
+  execution_mode: master
+  robot_shutdown: true
+
+flow:
+  sources:
+    # east-bound stream
+    - pose: {x: -6.0, y: 0.0, theta: 0.0}
+      shape: {type: circle, radius: 0.8}
+      rate_profile: [{t: 0.0, rate: 0.8}]
+      max_concurrent: 12
+      max_total: -1
+      agent_template:
+        desired_velocity_min: 1.0
+        desired_velocity_max: 1.3
+        agent_radius: 0.25
+        agent_type: adult
+        sink_affinity: [{sink_idx: 0, weight: 1.0}]
+    # west-bound stream (offset in y so the two streams don't collide head-on)
+    - pose: {x: 6.0, y: 0.6, theta: 3.14159}
+      shape: {type: circle, radius: 0.8}
+      rate_profile: [{t: 0.0, rate: 0.8}]
+      max_concurrent: 12
+      max_total: -1
+      agent_template:
+        desired_velocity_min: 1.0
+        desired_velocity_max: 1.3
+        agent_radius: 0.25
+        agent_type: adult
+        sink_affinity: [{sink_idx: 1, weight: 1.0}]
+
+  sinks:
+    - {pose: {x: 6.0, y: 0.0, theta: 0.0}, shape: {type: circle, radius: 1.0}, absorption_radius: 1.0, capacity: -1}
+    - {pose: {x: -6.0, y: 0.6, theta: 3.14159}, shape: {type: circle, radius: 1.0}, absorption_radius: 1.0, capacity: -1}
+
+agents:
+  - agent_id: -1
+    kind: 1
+    policy: straight
+    agent_type: robot
+    spawn_tick: 100
+    spawn_pose: {x: -2.0, y: -7.0, theta: 1.5708}
+    goal_sequence: [{x: -2.0, y: 7.0}]
+  - agent_id: -2
+    kind: 1
+    policy: straight
+    agent_type: robot
+    spawn_tick: 100
+    spawn_pose: {x: 2.0, y: 7.0, theta: -1.5708}
+    goal_sequence: [{x: 2.0, y: -7.0}]
+
+interaction_scripts: []

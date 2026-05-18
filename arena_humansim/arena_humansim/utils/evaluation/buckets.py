@@ -26,6 +26,7 @@ SCENARIO_BUCKET = {
     "nav_sparse_merge":     "nav",   "robot_nav_sparse_merge":     "nav",
     "nav_sparse_bend":      "nav",   "robot_nav_sparse_bend":      "nav",
     "nav_sparse_flow":      "nav",   "robot_nav_sparse_flow":      "nav",
+    "robot_nav_sparse_flow_multi": "nav",
     # nav/dense
     "nav_dense_corridor":   "nav",   "robot_nav_dense_corridor":   "nav",
     "nav_dense_crossing":   "nav",   "robot_nav_dense_crossing":   "nav",

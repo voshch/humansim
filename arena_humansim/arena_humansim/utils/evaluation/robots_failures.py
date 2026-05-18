@@ -9,9 +9,9 @@ from arena_humansim.utils.evaluation.bag_cache import load_multi
 from arena_humansim.utils.evaluation.buckets import SCENARIO_BUCKET
 from arena_humansim.utils.evaluation.robots import (
     GOAL_REACH_THRESHOLD_M,
-    ROBOT_AGENT_ID,
     _load_snapshot,
     parse_robots_trial_dir,
+    robot_ids_in,
 )
 
 _FREEZE_SPEED_THRESHOLD = 0.05
@@ -32,11 +32,12 @@ CAUSES = (
 )
 
 
-def classify_trial(
+def _classify_one_robot(
     trial_df: pd.DataFrame,
+    robot_id: int,
     goal: tuple[float, float] | None,
 ) -> str:
-    robot = trial_df[trial_df["agent_id"] == ROBOT_AGENT_ID].sort_values("time")
+    robot = trial_df[trial_df["agent_id"] == robot_id].sort_values("time")
     if robot.empty:
         return "other"
 
@@ -63,12 +64,12 @@ def classify_trial(
     collision_t: float | None = None
     collision_static = False
     for _t, frame in trial_df.groupby("time"):
-        rb = frame[frame["agent_id"] == ROBOT_AGENT_ID]
+        rb = frame[frame["agent_id"] == robot_id]
         if rb.empty:
             continue
         rb_x = float(rb["x"].iloc[0])
         rb_y = float(rb["y"].iloc[0])
-        others = frame[frame["agent_id"] != ROBOT_AGENT_ID]
+        others = frame[frame["agent_id"] != robot_id]
         if others.empty:
             continue
         ox = others["x"].to_numpy()
@@ -100,6 +101,15 @@ def classify_trial(
     return "timeout_no_progress"
 
 
+def classify_trial(
+    trial_df: pd.DataFrame,
+    goals: dict[int, tuple[float, float] | None] | None = None,
+) -> dict[int, str]:
+    """Per-robot failure-cause classification keyed by robot_id."""
+    goals = goals or {}
+    return {rid: _classify_one_robot(trial_df, rid, goals.get(rid)) for rid in robot_ids_in(trial_df)}
+
+
 def classify_run(recordings_dirs: Path | list[Path]) -> pd.DataFrame:
     if isinstance(recordings_dirs, Path):
         recordings_dirs = [recordings_dirs]
@@ -118,20 +128,21 @@ def classify_run(recordings_dirs: Path | list[Path]) -> pd.DataFrame:
             if df.empty:
                 continue
             seen.add(key)
-            canonical, goal = _load_snapshot(recordings_dir / trial_name)
+            canonical, goals = _load_snapshot(recordings_dir / trial_name)
             bucket_key = canonical or scenario
-            cause = classify_trial(df, goal)
-            rows.append(
-                {
-                    "scenario": scenario,
-                    "bucket": SCENARIO_BUCKET.get(bucket_key, "unknown"),
-                    "ped_planner": planner,
-                    "robot_policy": robot_policy,
-                    "seed": seed,
-                    "source_dir": recordings_dir.name,
-                    "cause": cause,
-                }
-            )
+            for robot_id, cause in classify_trial(df, goals).items():
+                rows.append(
+                    {
+                        "scenario": scenario,
+                        "bucket": SCENARIO_BUCKET.get(bucket_key, "unknown"),
+                        "ped_planner": planner,
+                        "robot_policy": robot_policy,
+                        "seed": seed,
+                        "robot_id": robot_id,
+                        "source_dir": recordings_dir.name,
+                        "cause": cause,
+                    }
+                )
     return pd.DataFrame(rows)
 
 

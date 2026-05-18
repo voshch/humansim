@@ -10,8 +10,6 @@ from tqdm import tqdm
 from arena_humansim.utils.evaluation.bag_cache import load_multi
 from arena_humansim.utils.evaluation.buckets import SCENARIO_BUCKET
 
-ROBOT_AGENT_ID = -1
-
 
 def assert_run_mode(run_dir: Path, expected_mode: str, *, require_cop: bool = False) -> dict[str, object]:
     manifest_path = run_dir / "run_args.json"
@@ -47,27 +45,35 @@ def parse_robots_trial_dir(name: str) -> tuple[str, str, str, int] | None:
         return None
 
 
-def _name_and_goal(yaml_path: Path) -> tuple[str | None, tuple[float, float] | None]:
+def _name_and_robot_goals(yaml_path: Path) -> tuple[str | None, dict[int, tuple[float, float] | None]]:
+    """Returns (canonical scenario name, {robot_id: goal}). Robot rows are those with agent_id < 0;
+    goal is None when the scenario yaml has no goal_sequence for that robot."""
     try:
         from arena_humansim.utils.scenario import load_scenario
 
         scen = load_scenario(str(yaml_path))
     except Exception:
-        return None, None
+        return None, {}
     name = scen.name or None
+    robots: dict[int, tuple[float, float] | None] = {}
     for a in scen.agents:
-        if int(a.kind) == 1 and int(a.agent_id) == ROBOT_AGENT_ID and a.goal_sequence:
+        aid = int(a.agent_id)
+        if aid >= 0:
+            continue
+        goal: tuple[float, float] | None = None
+        if a.goal_sequence:
             last = a.goal_sequence[-1]
-            return name, (float(last.x), float(last.y))
-    return name, None
+            goal = (float(last.x), float(last.y))
+        robots[aid] = goal
+    return name, robots
 
 
-_eval_goal_index: dict[str, tuple[float, float] | None] | None = None
+_eval_goal_index: dict[str, dict[int, tuple[float, float] | None]] | None = None
 
 
-def _eval_goal_for(canonical: str) -> tuple[float, float] | None:
-    """Lazy index of {scenario name: robot goal} from the eval tree, used when a snapshot
-    lacks a goal (older recordings predate goal_sequence on het scenarios)."""
+def _eval_goals_for(canonical: str) -> dict[int, tuple[float, float] | None]:
+    """Lazy index of {scenario name: {robot_id: goal}} from the eval tree, used when a snapshot
+    lacks goals (older recordings predate goal_sequence on het scenarios)."""
     global _eval_goal_index
     if _eval_goal_index is None:
         from arena_humansim.utils.scenario_discovery import scenario_roots
@@ -77,24 +83,27 @@ def _eval_goal_for(canonical: str) -> tuple[float, float] | None:
             if root.name != "evaluation":
                 continue
             for path in root.glob("**/*.yaml"):
-                name, goal = _name_and_goal(path)
+                name, robots = _name_and_robot_goals(path)
                 if name is not None:
-                    _eval_goal_index[name] = goal
-    return _eval_goal_index.get(canonical)
+                    _eval_goal_index[name] = robots
+    return _eval_goal_index.get(canonical, {})
 
 
-def _load_snapshot(trial_dir: Path) -> tuple[str | None, tuple[float, float] | None]:
-    """Read the per-trial scenario.yaml snapshot, returning (canonical name, robot goal).
-    Falls back to the matching eval-tree source yaml if the snapshot lacks a goal — older
-    snapshots predate the het scenarios using `goal_sequence`. Returns (None, None) when
+def _load_snapshot(trial_dir: Path) -> tuple[str | None, dict[int, tuple[float, float] | None]]:
+    """Read the per-trial scenario.yaml snapshot, returning (canonical name, {robot_id: goal}).
+    Falls back to the matching eval-tree source yaml for any robot lacking a goal — older
+    snapshots predate the het scenarios using `goal_sequence`. Returns (None, {}) when
     no snapshot or canonical match is found."""
     snap = trial_dir / "scenario.yaml"
     if not snap.is_file():
-        return None, None
-    name, goal = _name_and_goal(snap)
-    if goal is None and name is not None:
-        goal = _eval_goal_for(name)
-    return name, goal
+        return None, {}
+    name, goals = _name_and_robot_goals(snap)
+    if name is not None and any(g is None for g in goals.values()):
+        fallback = _eval_goals_for(name)
+        for rid, g in goals.items():
+            if g is None and rid in fallback:
+                goals[rid] = fallback[rid]
+    return name, goals
 
 
 def _trajectory_arc_length(xy: np.ndarray) -> float:
@@ -104,23 +113,27 @@ def _trajectory_arc_length(xy: np.ndarray) -> float:
     return float(np.linalg.norm(diffs, axis=1).sum())
 
 
-def compute_robot_metrics(
+_NAN_ROBOT_METRICS: dict[str, float] = {
+    "success": float("nan"),
+    "time_to_goal_s": float("nan"),
+    "ttg_ratio": float("nan"),
+    "path_efficiency": float("nan"),
+    "n_robot_collisions": float("nan"),
+    "personal_space_violations": float("nan"),
+    "psv_per_sec": float("nan"),
+    "frozen_at_end": float("nan"),
+    "final_goal_dist": float("nan"),
+}
+
+
+def _compute_one_robot_metrics(
     trial_df: pd.DataFrame,
+    robot_id: int,
     goal: tuple[float, float] | None,
 ) -> dict[str, float]:
-    robot = trial_df[trial_df["agent_id"] == ROBOT_AGENT_ID].sort_values("time")
+    robot = trial_df[trial_df["agent_id"] == robot_id].sort_values("time")
     if robot.empty:
-        return {
-            "success": float("nan"),
-            "time_to_goal_s": float("nan"),
-            "ttg_ratio": float("nan"),
-            "path_efficiency": float("nan"),
-            "n_robot_collisions": float("nan"),
-            "personal_space_violations": float("nan"),
-            "psv_per_sec": float("nan"),
-            "frozen_at_end": float("nan"),
-            "final_goal_dist": float("nan"),
-        }
+        return dict(_NAN_ROBOT_METRICS)
 
     times = robot["time"].to_numpy()
     xy = robot[["x", "y"]].to_numpy()
@@ -159,12 +172,12 @@ def compute_robot_metrics(
     n_collisions = 0
     psv_count = 0
     for _t, frame in trial_df.groupby("time"):
-        rb = frame[frame["agent_id"] == ROBOT_AGENT_ID]
+        rb = frame[frame["agent_id"] == robot_id]
         if rb.empty:
             continue
         rb_x = float(rb["x"].iloc[0])
         rb_y = float(rb["y"].iloc[0])
-        others = frame[frame["agent_id"] != ROBOT_AGENT_ID]
+        others = frame[frame["agent_id"] != robot_id]
         if others.empty:
             continue
         ox = others["x"].to_numpy()
@@ -196,6 +209,21 @@ def compute_robot_metrics(
     }
 
 
+def robot_ids_in(trial_df: pd.DataFrame) -> list[int]:
+    """Sorted list of robot agent ids (negative) present in the trial dataframe."""
+    return sorted({int(aid) for aid in trial_df["agent_id"].unique() if int(aid) < 0})
+
+
+def compute_robot_metrics(
+    trial_df: pd.DataFrame,
+    goals: dict[int, tuple[float, float] | None] | None = None,
+) -> dict[int, dict[str, float]]:
+    """Per-robot metrics keyed by robot_id. Robots are agents with agent_id < 0; the goal
+    for each robot is looked up in `goals` (missing or None -> goal-based metrics are NaN)."""
+    goals = goals or {}
+    return {rid: _compute_one_robot_metrics(trial_df, rid, goals.get(rid)) for rid in robot_ids_in(trial_df)}
+
+
 def load_robots_recordings(recordings_dirs: Path | list[Path]) -> pd.DataFrame:
     if isinstance(recordings_dirs, Path):
         recordings_dirs = [recordings_dirs]
@@ -218,20 +246,22 @@ def load_robots_recordings(recordings_dirs: Path | list[Path]) -> pd.DataFrame:
             if df.empty:
                 continue
             seen.add(key)
-            canonical, goal = _load_snapshot(recordings_dir / trial_name)
+            canonical, goals = _load_snapshot(recordings_dir / trial_name)
             bucket_key = canonical or scenario
-            metrics = compute_robot_metrics(df, goal)
-            rows.append(
-                {
-                    "scenario": scenario,
-                    "bucket": SCENARIO_BUCKET.get(bucket_key, "unknown"),
-                    "ped_planner": planner,
-                    "robot_policy": robot_policy,
-                    "seed": seed,
-                    "source_dir": recordings_dir.name,
-                    **metrics,
-                }
-            )
+            per_robot = compute_robot_metrics(df, goals)
+            for robot_id, metrics in per_robot.items():
+                rows.append(
+                    {
+                        "scenario": scenario,
+                        "bucket": SCENARIO_BUCKET.get(bucket_key, "unknown"),
+                        "ped_planner": planner,
+                        "robot_policy": robot_policy,
+                        "seed": seed,
+                        "robot_id": robot_id,
+                        "source_dir": recordings_dir.name,
+                        **metrics,
+                    }
+                )
     bar.close()
 
     return pd.DataFrame(rows)
@@ -297,7 +327,9 @@ def run_robots_analysis(
     per_trial = load_robots_recordings(recordings_dirs)
     if per_trial.empty:
         raise RuntimeError(f"no usable robots trials under {[str(d) for d in recordings_dirs]}")
-    print(f"  {len(per_trial)} trials | {per_trial['scenario'].nunique()} scenarios x {per_trial['ped_planner'].nunique()} ped planners x {per_trial['robot_policy'].nunique()} robot policies x {per_trial['seed'].nunique()} seeds")
+    n_robot_rows = len(per_trial)
+    n_trials_unique = per_trial[["scenario", "ped_planner", "robot_policy", "seed"]].drop_duplicates().shape[0]
+    print(f"  {n_robot_rows} robot rows across {n_trials_unique} trials | {per_trial['scenario'].nunique()} scenarios x {per_trial['ped_planner'].nunique()} ped planners x {per_trial['robot_policy'].nunique()} robot policies x {per_trial['seed'].nunique()} seeds")
     per_trial_path = out_dir / "robots_per_trial.csv"
     per_trial.to_csv(per_trial_path, index=False)
     print(f"  wrote {per_trial_path}")

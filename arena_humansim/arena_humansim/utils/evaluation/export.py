@@ -237,7 +237,8 @@ def _build_croissant(
 
 _FIELD_DOCS: dict[str, tuple[str, str]] = {
     "time": ("s", "sim time, monotonic per trial"),
-    "agent_id": ("-", "unique within trial; humans use positive ids (auto-assigned from 1), robots use negative ids"),
+    "agent_id": ("-", "unique within trial; humans use positive ids (auto-assigned from 1), robots use negative ids (any agent_id < 0)"),
+    "robot_id": ("-", "negative agent_id identifying which robot a metrics/failures row refers to; trials may have >1 robot"),
     "x": ("m", "world-frame x position"),
     "y": ("m", "world-frame y position"),
     "vx": ("m/s", "world-frame x velocity"),
@@ -508,26 +509,24 @@ def _process_trial(recordings_dir: Path, trial_name: str, states_dir: Path, do_r
         "kin_row": _kinematics_row(df, meta),
     }
     if do_robots and robot_policy:
-        canonical, goal = _load_snapshot(trial_dir)
+        canonical, goals = _load_snapshot(trial_dir)
         robot_bucket = SCENARIO_BUCKET.get(canonical or scenario, "unknown")
-        result["rm_row"] = {
+        trial_id = {
             "scenario": scenario,
             "bucket": robot_bucket,
             "ped_planner": planner,
             "robot_policy": robot_policy,
             "seed": seed,
             "source_dir": recordings_dir.name,
-            **compute_robot_metrics(df, goal),
         }
-        result["fl_row"] = {
-            "scenario": scenario,
-            "bucket": robot_bucket,
-            "ped_planner": planner,
-            "robot_policy": robot_policy,
-            "seed": seed,
-            "source_dir": recordings_dir.name,
-            "cause": classify_trial(df, goal),
-        }
+        result["rm_rows"] = [
+            {**trial_id, "robot_id": rid, **metrics}
+            for rid, metrics in compute_robot_metrics(df, goals).items()
+        ]
+        result["fl_rows"] = [
+            {**trial_id, "robot_id": rid, "cause": cause}
+            for rid, cause in classify_trial(df, goals).items()
+        ]
     return result
 
 
@@ -578,11 +577,11 @@ def run_export(
             full_columns = result["full_columns"]
             full_dtypes = result["full_dtypes"]
         kin_rows.append(result["kin_row"])
-        if "rm_row" in result:
-            rm_rows.append(result["rm_row"])
+        if "rm_rows" in result:
+            rm_rows.extend(result["rm_rows"])
             has_robot_policy = True
-        if "fl_row" in result:
-            fl_rows.append(result["fl_row"])
+        if "fl_rows" in result:
+            fl_rows.extend(result["fl_rows"])
         scenarios_seen.add(meta["scenario"])
         planners_seen.add(meta["planner"])
         n_trials += 1
