@@ -519,14 +519,8 @@ def _process_trial(recordings_dir: Path, trial_name: str, states_dir: Path, do_r
             "seed": seed,
             "source_dir": recordings_dir.name,
         }
-        result["rm_rows"] = [
-            {**trial_id, "robot_id": rid, **metrics}
-            for rid, metrics in compute_robot_metrics(df, goals).items()
-        ]
-        result["fl_rows"] = [
-            {**trial_id, "robot_id": rid, "cause": cause}
-            for rid, cause in classify_trial(df, goals).items()
-        ]
+        result["rm_rows"] = [{**trial_id, "robot_id": rid, **metrics} for rid, metrics in compute_robot_metrics(df, goals).items()]
+        result["fl_rows"] = [{**trial_id, "robot_id": rid, "cause": cause} for rid, cause in classify_trial(df, goals).items()]
     return result
 
 

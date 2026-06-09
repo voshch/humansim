@@ -49,6 +49,7 @@ def _discover_scenarios(robots_mode: bool) -> list[str]:
                     out.add(str(rel))
     return sorted(out)
 
+
 MAX_WORKERS = 50
 
 
