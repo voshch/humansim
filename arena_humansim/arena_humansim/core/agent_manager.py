@@ -791,6 +791,7 @@ class AgentManager(Node):
 
         agent_type = resolve_agent_type_name(type_name, self._agent_types)
         if agent_type is not None:
+            self._agent_types[agent_type.name] = agent_type
             rng = self._rng.get_agent_substream(aid, "params")
             agent = create_agent(agent_type, state, self._module_pool, self._module_selections, rng)
         else:
