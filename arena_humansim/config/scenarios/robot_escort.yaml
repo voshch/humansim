@@ -178,7 +178,7 @@ agents:
   - agent_id: 100
     kind: 1
     policy: straight
-    agent_type: robot
+    agent_type: escort
     spawn_pose: {x: -9.0, y: -2.5, theta: 0.0}
     goal_sequence: [{x: 9.0, y: -2.5}]
 

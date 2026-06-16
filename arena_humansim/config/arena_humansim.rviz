@@ -3,9 +3,12 @@ Panels:
     Help Height: 70
     Name: Displays
     Property Tree Widget:
-      Expanded: ~
+      Expanded:
+        - /Global Options1
+        - /Viz1
+        - /Viz1/Namespaces1
       Splitter Ratio: 0.5
-    Tree Height: 411
+    Tree Height: 391
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -23,7 +26,7 @@ Visualization Manager:
       Cell Size: 1
       Class: rviz_default_plugins/Grid
       Color: 160; 160; 164
-      Enabled: true
+      Enabled: false
       Line Style:
         Line Width: 0.029999999329447746
         Value: Lines
@@ -36,22 +39,24 @@ Visualization Manager:
       Plane: XY
       Plane Cell Count: 50
       Reference Frame: <Fixed Frame>
-      Value: true
+      Value: false
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
       Name: Viz
       Namespaces:
+        agent_body: true
+        agent_heading: true
         cmd: true
         f_goal: true
+        f_obstacle: true
         f_social: true
         goal: true
         igoal: true
-        interaction_label: true
-        needs_chore: true
-        needs_chore_label: true
         observed: true
+        path: true
+        proximity_sense: true
         vel: true
-        vision_cone: true
+        vision_cone: false
         wp: true
       Topic:
         Depth: 5
@@ -76,14 +81,7 @@ Visualization Manager:
       Enabled: true
       Name: Viz Static Objects
       Namespaces:
-        sources: true
-        src_label: true
-        sinks: true
-        sink_label: true
-        world_obj: true
-        world_obj_label: true
-        obstacles: true
-        obstacle_label: true
+        {}
       Topic:
         Depth: 1
         Durability Policy: Transient Local
@@ -93,7 +91,7 @@ Visualization Manager:
       Value: true
   Enabled: true
   Global Options:
-    Background Color: 48; 48; 48
+    Background Color: 255; 255; 255
     Fixed Frame: map
     Frame Rate: 30
   Name: root
@@ -119,18 +117,23 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 28.78043556213379
+      Scale: 45
       Target Frame: <Fixed Frame>
       Value: TopDownOrtho (rviz_default_plugins)
-      X: 0
-      Y: 0
+      X: -0.07881978899240494
+      Y: -0.06740342825651169
     Saved: ~
 Window Geometry:
   Displays:
-    collapsed: true
-  Height: 1008
-  Hide Left Dock: true
+    collapsed: false
+  Height: 1016
+  Hide Left Dock: false
   Hide Right Dock: true
-  Width: 1920
-  X: 0
-  Y: 0
+  QMainWindow State: 000000ff00000000fd000000010000000000000276000003a2fc0200000003fb000000100044006900730070006c006100790073010000003b00000208000000c700fffffffb0000000a0056006900650077007301000002490000014d000000a000fffffffb0000000800540069006d0065010000039c000000410000003700ffffff000004be000003a200000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Time:
+    collapsed: false
+  Views:
+    collapsed: false
+  Width: 1850
+  X: 70
+  Y: 27

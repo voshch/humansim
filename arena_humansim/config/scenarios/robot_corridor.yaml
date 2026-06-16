@@ -79,7 +79,7 @@ agents:
     policy: straight
     agent_type: robot
     spawn_pose: {x: -16.0, y: 0.0, theta: 0.0}
-    goal_sequence: [{x: 16.0, y: 0.0}]
+    goal_sequence: [{x: 16.0, y: -0.6}]
 
 walls:
   - {name: north, start: {x: -16.0, y:  1.2}, end: {x: 16.0, y:  1.2}}

@@ -53,24 +53,24 @@ agents:
   - agent_id: 6
     spawn_pose: {x: -0.4, y: -10.0, theta: 1.5708}
     goal_sequence:
-      - {x: -0.4, y: 0.0}
-      - {x: -12.0, y: 0.0}
+    - {x: -0.4, y: 0.0}
+    - {x: -12.0, y: 0.0}
     waypoint_mode: reverse
     desired_velocity: 1.2
 
   - agent_id: 7
     spawn_pose: {x:  0.0, y:  -9.0, theta: 1.5708}
     goal_sequence:
-      - {x: 0.0, y: 0.0}
-      - {x: 12.0, y: 0.0}
+    - {x: 0.0, y: 0.0}
+    - {x: 12.0, y: 0.0}
     waypoint_mode: reverse
     desired_velocity: 1.25
 
   - agent_id: 8
     spawn_pose: {x:  0.4, y: -10.0, theta: 1.5708}
     goal_sequence:
-      - {x: 0.4, y: 0.0}
-      - {x: 12.0, y: 0.4}
+    - {x: 0.4, y: 0.0}
+    - {x: 12.0, y: 0.4}
     waypoint_mode: reverse
     desired_velocity: 1.15
 
@@ -79,7 +79,9 @@ agents:
     policy: straight
     agent_type: robot
     spawn_pose: {x: -13.0, y: 0.8, theta: 0.0}
-    goal_sequence: [{x: 13.0, y: 0.8}]
+    goal_sequence: 
+    - {x: 0.0, y: 0.0}
+    - {x: 0.0, y: -10.0}
 
 walls:
   - {name: h_north,    start: {x: -13.0, y:  1.2}, end: {x:  13.0, y:  1.2}}

@@ -65,6 +65,10 @@ agent_types:
             duration: {mean: 6.0, std: 1.5, clip_low: 3.0, clip_high: 12.0}
             satisfies: {thirst: 100.0}
         then: chat
+  robot:
+    extends: colleague
+    mode: behavior_tree
+    desired_velocity: {mean: 0.8, std: 0.5, clip_low: 0.5, clip_high: 1.6}
 
 agents:
   - agent_id: 1

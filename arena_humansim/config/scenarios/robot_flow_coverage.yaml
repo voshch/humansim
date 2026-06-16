@@ -58,6 +58,6 @@ agents:
     policy: straight
     agent_type: robot
     spawn_pose: {x: -7.0, y: 1.0, theta: 0.0}
-    goal_sequence: [{x: 7.0, y: 1.0}]
+    goal_sequence: [{x: 7.0, y: -1.0}]
 
 interaction_scripts: []
