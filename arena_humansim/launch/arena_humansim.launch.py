@@ -20,9 +20,13 @@ from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import ExecutableInPackage
 
 
-def _compute_record_dir(context, *args, **kwargs):
+def _compute_record_dir(context, *args, plan=None, **kwargs):
+    render = LaunchConfiguration("render").perform(context).lower() == "true"
     record = LaunchConfiguration("record").perform(context).lower() == "true"
+    fmt = LaunchConfiguration("render_format").perform(context)
     if not record:
+        if plan is not None:
+            plan.update(render=render, record=record, rd="", fmt=fmt)
         return [SetLaunchConfiguration("_record_dir", "")]
     rd = LaunchConfiguration("record_dir").perform(context)
     if not rd:
@@ -36,6 +40,8 @@ def _compute_record_dir(context, *args, **kwargs):
             if slug:
                 suffix = f"_{slug}"
         rd = os.path.join(os.getcwd(), "recordings", f"{ts}{suffix}")
+    if plan is not None:
+        plan.update(render=render, record=record, rd=rd, fmt=fmt)
     return [SetLaunchConfiguration("_record_dir", rd)]
 
 
@@ -58,13 +64,12 @@ def _rviz_action(context, *args, **kwargs):
     )]
 
 
-def _renderer_action(context, *args, **kwargs):
-    render = LaunchConfiguration("render").perform(context).lower() == "true"
-    record = LaunchConfiguration("record").perform(context).lower() == "true"
-    rd = LaunchConfiguration("_record_dir").perform(context)
+def _renderer_action(context, *args, plan=None, **kwargs):
+    plan = plan or {}
+    render, record, rd = plan.get("render"), plan.get("record"), plan.get("rd")
     if not (render and record and rd):
         return [Shutdown(reason="node exited; no render requested")]
-    fmt = LaunchConfiguration("render_format").perform(context)
+    fmt = plan["fmt"]
     bag_dir = os.path.join(rd, "bag")
     output = os.path.join(rd, f"scenario.{fmt}")
     log_path = os.path.join(rd, "render.log")
@@ -118,6 +123,8 @@ def generate_launch_description():
 
     kill_rviz = ExecuteProcess(cmd=["pkill", "-INT", "-f", "rviz2.*arena_humansim.rviz"], output="log")
 
+    renderer_plan: dict = {}
+
     return LaunchDescription([
         DeclareLaunchArgument("namespace", default_value="arena_humansim", description="node namespace"),
         DeclareLaunchArgument("mode", default_value="master", choices=["master", "subsystem"]),
@@ -143,12 +150,12 @@ def generate_launch_description():
         DeclareLaunchArgument("collision", default_value="wall_projection", description="collision resolver module"),
         DeclareLaunchArgument("occlusion", default_value="bitmap", description="occlusion module"),
         DeclareLaunchArgument("seed", default_value="0", description="Random seed for the simulation RNG"),
-        OpaqueFunction(function=_compute_record_dir),
+        OpaqueFunction(function=_compute_record_dir, kwargs={"plan": renderer_plan}),
         map_tf,
         node,
         OpaqueFunction(function=_rviz_action),
         RegisterEventHandler(OnProcessExit(
             target_action=node,
-            on_exit=[kill_rviz, OpaqueFunction(function=_renderer_action)],
+            on_exit=[kill_rviz, OpaqueFunction(function=_renderer_action, kwargs={"plan": renderer_plan})],
         )),
     ])
