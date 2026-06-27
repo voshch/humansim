@@ -19,7 +19,8 @@ COPY arena_humansim_msgs arena_humansim_msgs
 
 # All Python deps from setup.py. The `test` extra transitively pulls
 # socialgail, nsp, and robot (sarl, dsrnn, drlvo, cadrl) — i.e. everything.
-RUN pip3 install --break-system-packages -e "$WS/src/arena_humansim[test]"
+RUN pip3 install --break-system-packages --ignore-installed numpy && \
+    pip3 install --break-system-packages -e "$WS/src/arena_humansim[test]"
 
 WORKDIR $WS
 RUN source /opt/ros/jazzy/setup.bash && colcon build --symlink-install

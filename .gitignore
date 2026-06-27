@@ -2,5 +2,6 @@
 __pycache__/
 *.pt
 arena_humansim/arena_humansim/scripts/recordings/
+arena_humansim/experiments/scenarios/
 /arena_humansim/build
 *.egg-info
