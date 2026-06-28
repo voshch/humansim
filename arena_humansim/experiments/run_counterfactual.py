@@ -43,6 +43,10 @@ def run_counterfactual_sweep(registry_path: str = "/opt/arena_ws/src/arena_human
     os.makedirs(output_dir, exist_ok=True)
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
+    clean_env = os.environ.copy()
+    clean_env["PYTHONWARNINGS"] = "ignore"
+    clean_env["RCUTILS_LOGGING_SEVERITY_THRESHOLD"] = "WARN"
+
     subset_index = 0
     for index, row in subset_df.iterrows():
         scenario = row['scenario']
@@ -61,32 +65,35 @@ def run_counterfactual_sweep(registry_path: str = "/opt/arena_ws/src/arena_human
             bag_name = f"cf_{scenario}_seed{seed}_target{i}"
             bag_path = os.path.join(output_dir, bag_name)
 
-            config = os.path.join(script_dir, "scenarios", f"{scenario}.yaml")
+            scenario_yaml_path = os.path.join(script_dir, "scenarios", f"{scenario}.yaml")
             
             print(f"  -> Running Run {i}/{total_agents-1}: Target Agent {i} set to {baseline_planner}")
             
             cmd = [
                 "ros2", "launch", "arena_humansim", "arena_humansim.launch.py",
-                f"scenario:={scenario}",
+                f"scenario:={scenario_yaml_path}",
                 f"robot_policy:={robot_policy}",
                 f"ped_planners:={planner_array}",
                 f"seed:={seed}",
                 f"record_dir:={bag_path}",
-                f"config_path:={config}",
-
                 "record:=true",
                 "rtf:=0.0",
                 "render:=false",
                 "rviz:=false",
-                "markers:=0"
+                "markers:=0",
+                "robot_shutdown:=true"
             ]
             
             try:
-                subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
+                subprocess.run(cmd, check=True, env=clean_env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+                print("SUCCESS")
             except subprocess.CalledProcessError as e:
-                print(f"Simulation failed for Target Agent {i}. Error: {e}")
-                print("Halting sweep due to simulation error.")
+                print("FAILTURE")
+                print(f"\nSTDERR (target {i})")
+                print(e.stderr[-2000:])
+                print("Halting sweep.")
                 sys.exit(1)
+
 
         subset_index += 1
 
