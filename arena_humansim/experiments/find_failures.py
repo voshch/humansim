@@ -2,7 +2,8 @@ import pandas as pd
 import os
 import sys
 
-def build_failure_registry(metrics_dir: str = "/data/metrics", output_file: str = "/data/metrics/failure_registry.csv"):
+def build_failure_registry(metrics_dir: str = "/data/metrics", 
+                           output_file: str = "/opt/arena_ws/src/arena_humansim/arena_humansim/experiments/data/metrics/failure_registry.csv"):
     robot_metrics_path = os.path.join(metrics_dir, "robot_metrics.parquet")
     failures_path = os.path.join(metrics_dir, "failures.parquet")
 

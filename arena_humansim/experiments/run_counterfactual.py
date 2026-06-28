@@ -28,7 +28,10 @@ def build_planner_array(factual_planner: str, target_index: int, total_agents: i
     planners[target_index] = baseline
     return ",".join(planners)
 
-def run_counterfactual_sweep(registry_path: str = "/data/metrics/failure_registry.csv", output_dir: str = "/data/counterfactual_bags", baseline_planner: str = "straight"):
+def run_counterfactual_sweep(registry_path: str = "/opt/arena_ws/src/arena_humansim/arena_humansim/experiments/data/metrics/failure_registry.csv", 
+                             output_dir: str = "/opt/arena_ws/src/arena_humansim/arena_humansim/experiments/data/counterfactual_bags", 
+                             baseline_planner: str = "straight"):
+
     if not os.path.exists(registry_path):
         print(f"Error: Registry not found at {registry_path}. Run Phase 1 first.")
         sys.exit(1)
