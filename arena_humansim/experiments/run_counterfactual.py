@@ -37,8 +37,29 @@ def run_counterfactual_sweep(registry_path: str = "/opt/arena_ws/src/arena_human
         sys.exit(1)
         
     registry_df = pd.read_csv(registry_path)
-    subset_df = registry_df.drop_duplicates(subset=['scenario']).head(5)
-    print(f"Loaded {len(subset_df)} failing trials for counterfactual expansion.")
+
+    # DRL-VO never succeeds regardless of crowd behavior, so counterfactuals on it will always be 0.
+    registry_df = registry_df[registry_df['robot_policy'] != 'drlvo']
+    # exclude the counterfactual itself
+    registry_df = registry_df[registry_df['ped_planner'] != 'straight']
+
+    target_scenarios = [
+        'bt_dense_robot_service_mobile',       # 25 agents, 0.67 success rate
+        'bt_dense_robot_queue_use',            # 13 agents, 0.72 success rate
+        'bt_sparse_robot_service_mobile',      #  9 agents, 0.67 success rate
+        'bt_sparse_robot_group_conversation',  #  6 agents, 0.83 success rate
+        'bt_sparse_robot_queue_use',           #  5 agents, 0.78 success rate
+    ]
+
+    registry_df = registry_df[registry_df['scenario'].isin(target_scenarios)]
+
+    if registry_df.empty:
+        print("Error: No valid trials found for target scenarios after filtering.")
+        sys.exit(1)
+
+    # Run all seeds per scenario for better statistical coverage
+    subset_df = registry_df.drop_duplicates(subset=['scenario', 'seed'])
+    print(f"Loaded {len(subset_df)} failing trials across {subset_df['scenario'].nunique()} scenarios.")
 
     os.makedirs(output_dir, exist_ok=True)
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -62,7 +83,7 @@ def run_counterfactual_sweep(registry_path: str = "/opt/arena_ws/src/arena_human
         for i in range(total_agents):
             planner_array = build_planner_array(factual_planner, target_index=i, total_agents=total_agents, baseline=baseline_planner)
             
-            bag_name = f"cf_{scenario}_seed{seed}_target{i}"
+            bag_name = f"cf_{scenario}_seed{seed}_planner{factual_planner}_target{i}"
             bag_path = os.path.join(output_dir, bag_name)
 
             scenario_yaml_path = os.path.join(script_dir, "scenarios", f"{scenario}.yaml")
@@ -88,7 +109,7 @@ def run_counterfactual_sweep(registry_path: str = "/opt/arena_ws/src/arena_human
                 subprocess.run(cmd, check=True, env=clean_env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
                 print("SUCCESS")
             except subprocess.CalledProcessError as e:
-                print("FAILTURE")
+                print("FAILURE")
                 print(f"\nSTDERR (target {i})")
                 print(e.stderr[-2000:])
                 print("Halting sweep.")
@@ -101,3 +122,4 @@ def run_counterfactual_sweep(registry_path: str = "/opt/arena_ws/src/arena_human
 
 if __name__ == "__main__":
     run_counterfactual_sweep()
+
