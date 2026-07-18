@@ -113,6 +113,20 @@ class ObstacleData:
 
 _MSG_BLOCK = 16
 
+_EXTERNAL_TIMEOUT_S = 2.0
+_EXTERNAL_ADOPT_RADIUS = 1.0
+
+
+@attrs.define
+class _ExternalEntity:
+    """Pool binding for a world_state agent id, saved_policy_idx is None for spawned mirrors."""
+
+    agent_id: int
+    last_seen: int = 0
+    owned: bool = True
+    saved_policy_idx: int | None = None
+    vel: tuple[float, float] = (0.0, 0.0)
+
 
 class _AgentStateMsgPool:
     def __init__(self) -> None:
@@ -346,6 +360,8 @@ class AgentManager(Node):
         self._agents: dict[int, BaseAgent] = {}
         self._pool_agent_ids: list[int] = []
         self._robot_name_to_id: dict[str, int] = {}
+        self._external_entities: dict[int, _ExternalEntity] = {}
+        self._external_timeout_ticks = max(1, int(round(_EXTERNAL_TIMEOUT_S / self._dt)))
         self._walls: dict[str, tuple[tuple[float, float], tuple[float, float]]] = {}
         self._obstacles: dict[str, ObstacleData] = {}
         self._marker_pub = MarkerPublisher(self) if self._publish_markers > 0 else None
@@ -917,6 +933,9 @@ class AgentManager(Node):
         for name, mapped_id in list(self._robot_name_to_id.items()):
             if mapped_id == aid:
                 del self._robot_name_to_id[name]
+        for ext_id, entity in list(self._external_entities.items()):
+            if entity.agent_id == aid:
+                del self._external_entities[ext_id]
 
     def _phase_end(self, name: str, t0: float):
         self._tick_phases[name] = (time.perf_counter() - t0) * 1000.0
@@ -1016,11 +1035,11 @@ class AgentManager(Node):
                 )
         self._phase_end("spawn", t0)
 
+        world_state = self._consume_world_state()
+
         agents = [self._agents[aid] for aid in self._pool_agent_ids]
         pool = self._pool
         is_bt_tick = self._tick_count % self._bt_tick_interval == 0
-
-        world_state = self._consume_world_state()
 
         t0 = time.perf_counter()
         default_layer = next(iter(self._perception_cache.values()), None)
@@ -1196,6 +1215,7 @@ class AgentManager(Node):
         t0 = time.perf_counter()
         self._apply_arrival_damp(pool)
         self._apply_kinematic_constraints_vectorized(pool)
+        self._apply_external_velocity_pins()
         self._phase_end("kinematics", t0)
 
         t0 = time.perf_counter()
@@ -1654,9 +1674,12 @@ class AgentManager(Node):
         if aid is None:
             self._logger.debug(f"feedback: unknown robot name '{name}', skipping")
             return
+        self._teleport_agent(aid, x, y, theta, radius)
+
+    def _teleport_agent(self, aid: int, x: float, y: float, theta: float, radius: float) -> None:
         idx = self._pool._id_to_idx.get(aid)
         if idx is None:
-            self._logger.debug(f"feedback: robot '{name}' (id={aid}) not in pool, skipping")
+            self._logger.debug(f"teleport: agent id={aid} not in pool, skipping")
             return
         self._pool.pos[idx, 0] = x
         self._pool.pos[idx, 1] = y
@@ -1680,19 +1703,111 @@ class AgentManager(Node):
                     ),
                     velocity=(agent_msg.velocity.x, agent_msg.velocity.y),
                 )
+                self._ingest_external_agent(agent_msg)
             self._latest_world_state = None
+        self._expire_external_entities()
+        self._apply_external_velocity_pins()
         return world
+
+    def _ingest_external_agent(self, agent_msg: AgentStateMsg) -> None:
+        """Teleport the pool entity bound to this world_state id, binding or spawning it on first sight."""
+        entity = self._external_entities.get(agent_msg.agent_id)
+        if entity is None:
+            claimed = {e.agent_id for e in self._external_entities.values()}
+            if agent_msg.agent_id in self._agents and agent_msg.agent_id not in claimed:
+                entity = self._bind_internal_agent(agent_msg.agent_id)
+            else:
+                adopted = self._match_registered_robot(agent_msg)
+                if adopted is not None:
+                    entity = _ExternalEntity(agent_id=adopted, owned=False)
+                else:
+                    entity = _ExternalEntity(agent_id=self._spawn_external_agent(agent_msg))
+            self._external_entities[agent_msg.agent_id] = entity
+        entity.last_seen = self._tick_count
+        radius = agent_msg.radius if agent_msg.radius > 0 else 0.3
+        self._teleport_agent(entity.agent_id, agent_msg.pose.x, agent_msg.pose.y, agent_msg.pose.theta, radius)
+        if entity.saved_policy_idx is not None:
+            entity.vel = (agent_msg.velocity.x, agent_msg.velocity.y)
+
+    def _match_registered_robot(self, agent_msg: AgentStateMsg) -> int | None:
+        """Nearest unbound robot-kind agent within _EXTERNAL_ADOPT_RADIUS, None if no match."""
+        pool = self._pool
+        bound = {e.agent_id for e in self._external_entities.values()}
+        best_aid: int | None = None
+        best_d2 = _EXTERNAL_ADOPT_RADIUS**2
+        for i in range(pool.n):
+            if int(pool.kind[i]) != KIND_ROBOT:
+                continue
+            aid = int(pool.agent_ids[i])
+            if aid in bound:
+                continue
+            dx = float(pool.pos[i, 0]) - agent_msg.pose.x
+            dy = float(pool.pos[i, 1]) - agent_msg.pose.y
+            d2 = dx * dx + dy * dy
+            if d2 <= best_d2:
+                best_d2 = d2
+                best_aid = aid
+        return best_aid
+
+    def _bind_internal_agent(self, aid: int) -> _ExternalEntity:
+        """Pin an engine-spawned agent to external control, saving its autonomy for restore on lease expiry."""
+        idx = self._pool.idx(aid)
+        saved = int(self._pool.policy_idx[idx])
+        self._pool.policy_idx[idx] = -1
+        return _ExternalEntity(agent_id=aid, owned=False, saved_policy_idx=saved)
+
+    def _spawn_external_agent(self, agent_msg: AgentStateMsg) -> int:
+        """Add a non-autonomous robot-kind pool entity mirroring an externally simulated body."""
+        aid = self._next_agent_id
+        self._next_agent_id += 1
+        agent = self._build_base_agent(aid, agent_msg, [])
+        agent.state.kind = KIND_ROBOT
+        self._agents[aid] = agent
+        idx = self._pool.add_agent(agent)
+        self._pool.kind[idx] = KIND_ROBOT
+        self._pool_agent_ids.append(aid)
+        self._behavior_trees[aid] = None
+        return aid
+
+    def _expire_external_entities(self) -> None:
+        """Drop bindings not refreshed within _EXTERNAL_TIMEOUT_S, removing owned mirrors and releasing bound agents."""
+        for ext_id, entity in list(self._external_entities.items()):
+            if self._tick_count - entity.last_seen <= self._external_timeout_ticks:
+                continue
+            del self._external_entities[ext_id]
+            if entity.owned:
+                if entity.agent_id in self._agents:
+                    self._remove_agent(entity.agent_id)
+            elif entity.saved_policy_idx is not None:
+                idx = self._pool._id_to_idx.get(entity.agent_id)
+                if idx is not None:
+                    self._pool.policy_idx[idx] = entity.saved_policy_idx
+
+    def _apply_external_velocity_pins(self) -> None:
+        """Reassert fed velocities on bound agents after planning zeroes non-autonomous rows."""
+        pool = self._pool
+        for entity in self._external_entities.values():
+            if entity.saved_policy_idx is None:
+                continue
+            idx = pool._id_to_idx.get(entity.agent_id)
+            if idx is None:
+                continue
+            pool.vel[idx, 0] = entity.vel[0]
+            pool.vel[idx, 1] = entity.vel[1]
+            pool.prev_vel[idx] = pool.vel[idx]
 
     def _build_agent_states_msg(self) -> AgentStatesMsg:
         pool = self._pool
         n = pool.n
-        msg = self._agent_states_pool.get(n)
+        external = {e.agent_id for e in self._external_entities.values() if e.saved_policy_idx is None}
+        own_idxs = [i for i in range(n) if int(pool.agent_ids[i]) not in external] if external else list(range(n))
+        msg = self._agent_states_pool.get(len(own_idxs))
         msg.header.stamp.sec = int(self._sim_time_ns // int(1e9))
         msg.header.stamp.nanosec = int(self._sim_time_ns % int(1e9))
-        if n == 0:
+        if not own_idxs:
             return msg
-        for i in range(n):
-            a = msg.agents[i]
+        for j, i in enumerate(own_idxs):
+            a = msg.agents[j]
             a.agent_id = int(pool.agent_ids[i])
             a.pose.x = float(pool.pos[i, 0])
             a.pose.y = float(pool.pos[i, 1])
@@ -1794,6 +1909,7 @@ class AgentManager(Node):
             self._high_level_cmds.clear()
             self._behavior_trees.clear()
             self._robot_name_to_id.clear()
+            self._external_entities.clear()
             self._despawn_monitor.clear()
             self._spawn_scheduler.reset_counts()
             self._interaction_manager.interactions.clear()
@@ -1826,6 +1942,7 @@ class AgentManager(Node):
         self._high_level_cmds.clear()
         self._behavior_trees.clear()
         self._robot_name_to_id.clear()
+        self._external_entities.clear()
         self._despawn_monitor.clear()
         self._spawn_scheduler.reset_counts()
         self._spawn_scheduler.clear_sources()
