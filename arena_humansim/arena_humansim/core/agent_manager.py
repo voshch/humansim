@@ -186,6 +186,8 @@ class AgentManager(Node):
         self.declare_parameter("local_planner", "sfm")
         self.declare_parameter("force_local_planner", False)
         self.declare_parameter("robot_policy", "")
+        self.declare_parameter("counterfactual_target_agent_id", 0)
+        self.declare_parameter("counterfactual_planner", "")
         self.declare_parameter("robot_shutdown", "")
         self.declare_parameter("force_waypoint_mode", "")
         self.declare_parameter("animation", "noop")
@@ -234,6 +236,21 @@ class AgentManager(Node):
         self._subsystem_overrun_policy = str(self.get_parameter("subsystem_overrun_policy").value)
         self._force_local_planner = bool(self.get_parameter("force_local_planner").value)
         self._robot_policy_override = str(self.get_parameter("robot_policy").value)
+        self._counterfactual_target_agent_id = int(
+            self.get_parameter("counterfactual_target_agent_id").value
+        )
+        self._counterfactual_planner = str(
+            self.get_parameter("counterfactual_planner").value
+        ).strip()
+        if bool(self._counterfactual_target_agent_id) != bool(
+            self._counterfactual_planner
+        ):
+            raise ValueError(
+                "counterfactual_target_agent_id and counterfactual_planner "
+                "must either both be set or both be disabled"
+            )
+        if self._counterfactual_target_agent_id < 0:
+            raise ValueError("counterfactual_target_agent_id must be non-negative")
         self._robot_shutdown_override = str(self.get_parameter("robot_shutdown").value).strip().lower()
         self._robot_shutdown = False  # resolved against scenario.simulation.robot_shutdown after load
         fwm_raw = str(self.get_parameter("force_waypoint_mode").value).strip().lower()
@@ -991,7 +1008,15 @@ class AgentManager(Node):
             agent = self._build_base_agent_from_spawn(aid, spawn_req)
             self._agents[aid] = agent
             idx = self._pool.add_agent(agent)
-            self._pool.policy_idx[idx] = self._default_policy_idx
+            if aid == self._counterfactual_target_agent_id:
+                policy_idx = self._resolve_policy_idx(self._counterfactual_planner)
+                self._logger.info(
+                    f"Applying counterfactual planner "
+                    f"'{self._counterfactual_planner}' to flow human {aid}"
+                )
+            else:
+                policy_idx = self._default_policy_idx
+            self._pool.policy_idx[idx] = policy_idx
             self._pool_agent_ids.append(aid)
             self._compile_behavior_tree(agent)
             spawn_req.lifetime.agent_id = aid
