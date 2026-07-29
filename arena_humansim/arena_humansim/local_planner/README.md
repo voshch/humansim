@@ -65,7 +65,7 @@ See the contract-test file for the invariants (velocity clipping, `set_walls` id
 
 ## Parameter sampling
 
-Per-agent local-planner params live under `local_planner_params:` in each agent type yaml (see [config/agent_types/](../../../config/agent_types/)). The schema is taken from the active planner's `PARAM_DEFAULTS`; yaml entries override individual keys. Sampled once at spawn and stored on the agent as `dict[str, float]`.
+Per-agent local-planner params live under `local_planner_params:` in each agent type yaml (see [config/agent_types/](../../config/agent_types/)). The schema is taken from the active planner's `PARAM_DEFAULTS`; yaml entries override individual keys. Sampled once at spawn and stored on the agent as `dict[str, float]`.
 
 | Planner | Keys |
 |---|---|
