@@ -1451,7 +1451,7 @@ class AgentManager(Node):
             dx = float(pool.pos[i, 0]) - goal.x
             dy = float(pool.pos[i, 1]) - goal.y
             dist_sq = dx * dx + dy * dy
-            if dist_sq > r * r:
+            if dist_sq > r * r and not bool(pool.latched[i]):
                 continue
 
             idx = mv.index
