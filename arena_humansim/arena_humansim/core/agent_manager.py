@@ -367,6 +367,7 @@ class AgentManager(Node):
         self._marker_pub = MarkerPublisher(self) if self._publish_markers > 0 else None
         self._tick_count: int = 0
         self._sim_time_ns: int = 0
+        self._subsystem_epoch_ns: int = 0
         self._pending_scenario_spawns: deque[tuple[int, AgentStateMsg]] = deque()
         self._agent_states_pool = _AgentStateMsgPool()
         self._tick_phases: dict[str, float] = {}
@@ -1644,6 +1645,7 @@ class AgentManager(Node):
     def _subsystem_timer_callback(self):
         if self._tick_count == 0:
             self._publish_world_geometry()
+            self._subsystem_epoch_ns = self.get_clock().now().nanoseconds
         self._sim_time_ns = self._tick_count * int(self._dt * 1e9)
         t0 = time.perf_counter()
         self.tick()
@@ -1802,8 +1804,16 @@ class AgentManager(Node):
         external = {e.agent_id for e in self._external_entities.values() if e.saved_policy_idx is None}
         own_idxs = [i for i in range(n) if int(pool.agent_ids[i]) not in external] if external else list(range(n))
         msg = self._agent_states_pool.get(len(own_idxs))
-        msg.header.stamp.sec = int(self._sim_time_ns // int(1e9))
-        msg.header.stamp.nanosec = int(self._sim_time_ns % int(1e9))
+        if self._mode == self.MODE_SUBSYSTEM:
+            # covered time on the clock epoch: the stamp advances only as ticks
+            # actually complete, so consumers (and lockstep gates) see true
+            # coverage instead of a fresh-looking stamp masking engine lag
+            ns = self._subsystem_epoch_ns + self._sim_time_ns
+            msg.header.stamp.sec = int(ns // int(1e9))
+            msg.header.stamp.nanosec = int(ns % int(1e9))
+        else:
+            msg.header.stamp.sec = int(self._sim_time_ns // int(1e9))
+            msg.header.stamp.nanosec = int(self._sim_time_ns % int(1e9))
         if not own_idxs:
             return msg
         for j, i in enumerate(own_idxs):
