@@ -1646,12 +1646,18 @@ class AgentManager(Node):
         if self._tick_count == 0:
             self._publish_world_geometry()
             self._subsystem_epoch_ns = self.get_clock().now().nanoseconds
-        self._sim_time_ns = self._tick_count * int(self._dt * 1e9)
+        # rcl drops missed timer cycles, so tick once per period the clock has
+        # covered since the epoch: coverage (and the stamp) tracks the clock
+        dt_ns = int(self._dt * 1e9)
+        covered = (self.get_clock().now().nanoseconds - self._subsystem_epoch_ns) // dt_ns + 1
+        owed = max(1, covered - self._tick_count)
         t0 = time.perf_counter()
-        self.tick()
+        for _ in range(owed):
+            self._sim_time_ns = self._tick_count * dt_ns
+            self.tick()
+            self._accumulated_spawned.extend(self._last_spawned_ids)
+            self._accumulated_despawned.extend(self._last_despawned_ids)
         self._check_overrun(time.perf_counter() - t0)
-        self._accumulated_spawned.extend(self._last_spawned_ids)
-        self._accumulated_despawned.extend(self._last_despawned_ids)
 
     def _feedback_callback(
         self,
