@@ -22,9 +22,11 @@ For symmetric types (peer-to-peer, no service tag or object anchor - e.g. `GROUP
 | `interaction: BLOCK` with `target: <int>` | `ClearOutcome -> Block` (pursuit + SEEK on arrival) |
 | `kind: go_to, target_pose:` | unchanged - nav to pose |
 | `kind: go_to, target:` | `ClearOutcome -> Resolve -> GoTo` |
+| `kind: attention` (or `attention:` alone) | `ClearOutcome -> Attention -> Satisfy?` (bare: halt, face, raise intent) |
+| any of the above plus `attention:` | same inner sequence, plus an `AttentionNode` rider as a third `Parallel` child |
 | only `duration:` (pure wait) | `ClearOutcome -> Hold` |
 
-Every compiled step is wrapped in a `Parallel(SuccessOnOne)` with a `PatienceWatchdogNode` - step-level patience spans every phase below.
+Every compiled step is wrapped in a `Parallel(SuccessOnOne)` with a `PatienceWatchdogNode` - step-level patience spans every phase below. Every step without `attention:` also gets a `ClearGestureNode` right after its `ClearOutcomeNode` (autonomous steps are wrapped as `Sequence(ClearGesture, Autonomous)`), so a `hold: keep` intent survives only into a directly following step with `attention:`, which retargets it. `attention:` is rejected on autonomous steps and inside `actions:` - `AutonomousNode` drives actions directly, not through the step compiler.
 
 ## Patience phases
 

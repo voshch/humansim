@@ -158,6 +158,62 @@ ride_to_B: {kind: go_to, target_pose: {x: 7.0, y: 0.0}}
 drop_B:    {cancel: true}
 ```
 
+## Attention
+
+`attention:` is one block, valid on every step kind (`go_to`, interaction, wait, cancel, BLOCK) and as a step of its own (`kind: attention`, or just `attention:` plus duration-ish fields and no interaction/target/cancel/autonomous keys). A kind-less step that mixes `attention:` with interaction-only fields (`offer`, `formation_spec`, `until`, ...) is rejected by the loader, add `kind:` or `interaction:`. It faces a target and raises an opaque gesture intent for the animation layer. The engine has no skeleton: `gesture` is passed through untouched on `AgentState.gesture`, the resolved world point on `AgentState.gesture_at`, and `{"hand": ...}` as JSON on `AgentState.gesture_opts`.
+
+```yaml
+attention:
+  gesture: point           # opaque str, "none" clears (then at is optional: face only, or just clear)
+  at: partner              # one ref or a list of refs
+  hand: auto               # auto | left | right
+  face: auto               # auto | true | false
+  hold: release            # release | keep
+  dwell: 0.9               # seconds per target when at is a list (default 1.0)
+  at_z: 1.4                # intent height for entity refs only
+```
+
+| `at` ref | Resolves to |
+|---|---|
+| `partner` | Nearest other participant of the agent's current interaction. |
+| `partners` | All other participants, cycled with `dwell`. |
+| `target` | The step's own resolved object or `target_pose`. |
+| `goal` | The agent's current navigation goal. |
+| `robot:<name>` | Agent name lookup restricted to robots. |
+| plain `str` | Object id, then agent name (peds and robots), then object type (nearest). Ids and names also match on their last `/` segment when unique, so `ped_3` finds `env_0/ped_3`. |
+| `int` | Agent id. |
+| `{x, y, z}` | Literal world point. |
+| `{azimuth, elevation[, distance]}` | Degrees relative to the agent's own pose and yaw, re-evaluated each tick, default distance 3.0 m. Forces `face: false`. |
+
+Entity refs point at 1.2 m for agents and 0.8 m for objects unless `at_z` overrides (rejected with literal or relative refs). Agent targets are tracked while the step runs, and an agent that disappears is re-resolved by name or id, so a respawned ped or re-adopted robot is picked up again. `goal` is unresolved while the agent is halted or has no navigate command. Unresolved refs make the node wait (no intent) with one warning. A bare attention step fails after `RESOLVE_TIMEOUT_S` (4 s) unresolved, on any other step the rider keeps waiting silently.
+
+**face.** `auto` turns to the target only when the step is otherwise idle (a bare attention step or a wait step) and the agent is not bound in a formation. `true` also tries on `go_to` and interaction steps but never writes a heading while bound. `false` never turns. The turn must come within `FACE_ENTER_RAD` (0.25 rad) before the first raise, then only re-faces if the current target leaves a `FACE_KEEP_RAD` (0.6 rad) cone. If facing was required and not reached within `FACE_TIMEOUT_S` (4 s), a bare attention step fails, any other step just raises without facing.
+
+**hold.** `release` clears the intent when the step ends. `keep` leaves it up: the next step's `attention:` retargets it, a step without `attention:` clears it. A bare single-ref step without `duration` succeeds on the tick it raises, so with `hold: release` the intent is raised and cleared in the same tick and never published, use `duration` or `hold: keep`.
+
+**Lists and dwell.** A bare attention step without `duration` walks the list once (`duration` = sum of dwells) then succeeds. With `duration` it cycles until the duration expires. On any other step the list cycles until the step ends. A single ref ignores `dwell`.
+
+```yaml
+# bare: halt, turn to each bench, point for 1.5 s each, keep the arm up into the next step
+show_benches:
+  attention: {gesture: point, at: [bench_1, bench_2], dwell: 1.5, hold: keep}
+show_door:
+  attention: {gesture: point, at: exit_door}
+  duration: {mean: 1.5}
+
+# burst: glance around without turning
+look_around:
+  attention: {gesture: look, at: [{azimuth: -60, elevation: 0}, {azimuth: 60, elevation: 0}], dwell: 0.7}
+
+# go_to while pointing at the partner, then at a named agent
+escort: {kind: go_to, target_pose: {x: 7.0, y: 0.0}, attention: {gesture: point, at: [partner, ped_3], dwell: 2.0}}
+
+# interaction step: the formation owns the heading, the intent tracks the nearest partner
+chat: {interaction: TALK_TO, duration: {mean: 8.0}, attention: {gesture: look, at: partner}}
+```
+
+`attention:` is only valid inside `sequences`, not in the autonomous `actions` library, and not on `autonomous: true` steps.
+
 ## Robot services
 
 Robot agents (`kind: 1`) can offer named services via a `services:` list. Each tick, `RobotServiceAdvertiser` emits one `SEEK` command with `offer: true` per declared service, producing parallel `SERVICE` interactions that humans bind to.

@@ -48,6 +48,14 @@ class WorldKnowledge(Loggable):
     def get(self, object_id: str) -> WorldObject | None:
         return self._objects.get(object_id)
 
+    def find(self, name: str) -> WorldObject | None:
+        """Exact id, else the unique object whose id ends in ``/name``."""
+        obj = self._objects.get(name)
+        if obj is not None:
+            return obj
+        hits = [o for oid, o in self._objects.items() if oid.rsplit("/", 1)[-1] == name]
+        return hits[0] if len(hits) == 1 else None
+
     def get_by_type(self, object_type: str) -> list[WorldObject]:
         return list(self._by_type.get(object_type, []))
 

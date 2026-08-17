@@ -6,10 +6,16 @@ import cattrs
 from arena_humansim.core.agents.types import (
     ActionDef,
     AgentType,
+    AttentionDef,
+    AttentionRef,
+    AttentionStepDef,
     GoToStepDef,
     NeedCondition,
     NeedDist,
     PerceptionDist,
+    Pose3,
+    RelativeRef,
+    RobotRef,
     SequenceDef,
     StepDef,
     TransitionDef,
@@ -63,6 +69,8 @@ def _structure_action_def(val: object, _: type) -> ActionDef:
     if isinstance(val, ActionDef):
         return val
     d = dict(val)
+    if "attention" in d or d.get("kind") == "attention":
+        raise ValueError("'attention' is not supported in the autonomous 'actions' library, AutonomousNode drives actions directly and only sequence steps carry attention")
     if "when" in d and isinstance(d["when"], dict):
         d["when"] = {k: converter.structure(v, NeedCondition) for k, v in d["when"].items()}
     return ActionDef(**d)
@@ -71,7 +79,102 @@ def _structure_action_def(val: object, _: type) -> ActionDef:
 converter.register_structure_hook(ActionDef, _structure_action_def)
 
 
-_STEP_KINDS = ("object_interact", "go_to")
+_STEP_KINDS = ("object_interact", "go_to", "attention")
+
+_HANDS = ("auto", "left", "right")
+_HOLDS = ("release", "keep")
+
+
+def _structure_attention_ref(val: object) -> AttentionRef:
+    if isinstance(val, (Pose3, RobotRef, RelativeRef)):
+        return val
+    if isinstance(val, bool):
+        raise ValueError(f"attention 'at' ref must not be a bool, got {val!r}")
+    if isinstance(val, int):
+        return val
+    if isinstance(val, str):
+        if not val:
+            raise ValueError("attention 'at' ref must be a non-empty string")
+        if val.startswith("robot:"):
+            name = val[len("robot:") :]
+            if not name:
+                raise ValueError("attention 'at: robot:<name>' requires a name")
+            return RobotRef(name)
+        return val
+    if isinstance(val, dict):
+        keys = set(val)
+        if keys == {"x", "y", "z"}:
+            return Pose3(x=float(val["x"]), y=float(val["y"]), z=float(val["z"]))
+        if keys in ({"azimuth", "elevation"}, {"azimuth", "elevation", "distance"}):
+            for k in keys:
+                if isinstance(val[k], bool) or not isinstance(val[k], (int, float)):
+                    raise ValueError(f"attention relative ref {k!r} must be a number, got {val[k]!r}")
+            distance = float(val.get("distance", 3.0))
+            if distance <= 0:
+                raise ValueError("attention relative ref 'distance' must be > 0")
+            return RelativeRef(azimuth=float(val["azimuth"]), elevation=float(val["elevation"]), distance=distance)
+        raise ValueError(f"attention 'at' mapping must be {{x, y, z}} or {{azimuth, elevation[, distance]}}, got keys {sorted(keys)}")
+    raise ValueError(f"attention 'at' ref must be a keyword, object id, agent name, robot:<name>, agent id, {{x, y, z}} or {{azimuth, elevation}}, got {val!r}")
+
+
+def _structure_face(val: object) -> bool | None:
+    if val is None or val == "auto":
+        return None
+    if isinstance(val, bool):
+        return val
+    if val == "true":
+        return True
+    if val == "false":
+        return False
+    raise ValueError(f"attention 'face' must be auto | true | false, got {val!r}")
+
+
+def _structure_attention_def(val: object) -> AttentionDef:
+    if isinstance(val, AttentionDef):
+        return val
+    if not isinstance(val, dict):
+        raise ValueError(f"'attention' must be a mapping, got {type(val).__name__}")
+    d = dict(val)
+    known = {f.name for f in attrs.fields(AttentionDef)}
+    unknown = set(d) - known
+    if unknown:
+        raise ValueError(f"unknown attention fields: {sorted(unknown)}")
+    gesture = d.get("gesture")
+    if not isinstance(gesture, str) or not gesture:
+        raise ValueError("attention requires a non-empty 'gesture: <str>' ('none' clears)")
+    at_raw = d.get("at")
+    at: AttentionRef | tuple[AttentionRef, ...] | None
+    if at_raw is None:
+        if gesture != "none":
+            raise ValueError("attention requires 'at: <ref | [refs]>' unless gesture is 'none'")
+        at = None
+    elif isinstance(at_raw, (list, tuple)):
+        if not at_raw:
+            raise ValueError("attention 'at' list must not be empty")
+        at = tuple(_structure_attention_ref(r) for r in at_raw)
+    else:
+        at = _structure_attention_ref(at_raw)
+    refs = at if isinstance(at, tuple) else () if at is None else (at,)
+    hand = d.get("hand", "auto")
+    if hand not in _HANDS:
+        raise ValueError(f"attention 'hand' must be one of {_HANDS}, got {hand!r}")
+    face = _structure_face(d.get("face"))
+    hold = d.get("hold", "release")
+    if hold not in _HOLDS:
+        raise ValueError(f"attention 'hold' must be one of {_HOLDS}, got {hold!r}")
+    dwell = d.get("dwell", 1.0)
+    if isinstance(dwell, bool) or not isinstance(dwell, (int, float)) or dwell <= 0:
+        raise ValueError(f"attention 'dwell' must be a number > 0, got {dwell!r}")
+    if face is True and any(isinstance(r, RelativeRef) for r in refs):
+        raise ValueError("attention 'face: true' is not valid with a relative {azimuth, elevation} ref")
+    at_z = d.get("at_z")
+    if at_z is not None:
+        if isinstance(at_z, bool) or not isinstance(at_z, (int, float)):
+            raise ValueError(f"attention 'at_z' must be a number, got {at_z!r}")
+        if not refs or any(isinstance(r, (Pose3, RelativeRef)) for r in refs):
+            raise ValueError("attention 'at_z' is only valid with entity refs, not literal or relative ones")
+        at_z = float(at_z)
+    return AttentionDef(gesture=gesture, at=at, hand=hand, face=face, hold=hold, dwell=float(dwell), at_z=at_z)
 
 
 def _structure_go_to_step_def(val: object, _: type) -> GoToStepDef:
@@ -92,10 +195,37 @@ def _structure_go_to_step_def(val: object, _: type) -> GoToStepDef:
         else:
             pose_d = dict(pose)
             d["target_pose"] = Pose2D(x=float(pose_d["x"]), y=float(pose_d["y"]), theta=float(pose_d.get("theta", 0.0)))
+    if d.get("attention") is not None:
+        d["attention"] = _structure_attention_def(d["attention"])
+    known = {f.name for f in attrs.fields(GoToStepDef)}
+    unknown = set(d) - known
+    if unknown:
+        raise ValueError(f"unknown go_to step fields: {sorted(unknown)}")
     return GoToStepDef(**d)
 
 
 converter.register_structure_hook(GoToStepDef, _structure_go_to_step_def)
+
+
+def _structure_attention_step_def(val: object, _: type) -> AttentionStepDef:
+    if isinstance(val, AttentionStepDef):
+        return val
+    d = dict(val)
+    explicit_kind = d.pop("kind", None) is not None
+    if "attention" not in d:
+        raise ValueError("attention step requires an 'attention:' block")
+    d["attention"] = _structure_attention_def(d["attention"])
+    known = {f.name for f in attrs.fields(AttentionStepDef)}
+    unknown = set(d) - known
+    if unknown:
+        step_only = sorted(unknown & {f.name for f in attrs.fields(StepDef)})
+        if step_only and not explicit_kind:
+            raise ValueError(f"step has attention plus interaction-only fields {step_only}, add kind or interaction")
+        raise ValueError(f"unknown attention step fields: {sorted(unknown)}")
+    return AttentionStepDef(**d)
+
+
+converter.register_structure_hook(AttentionStepDef, _structure_attention_step_def)
 
 
 def _structure_step_def(val: object, _: type) -> StepDef:
@@ -168,6 +298,10 @@ def _structure_step_def(val: object, _: type) -> StepDef:
             anchor_ref=fs.get("anchor_ref"),
             anchor_pose=anchor_pose,
         )
+    if d.get("attention") is not None:
+        if d.get("autonomous", False):
+            raise ValueError("'attention' is not supported on 'autonomous: true' steps")
+        d["attention"] = _structure_attention_def(d["attention"])
     known = {f.name for f in attrs.fields(StepDef)}
     unknown = set(d) - known
     if unknown:
@@ -178,12 +312,21 @@ def _structure_step_def(val: object, _: type) -> StepDef:
 converter.register_structure_hook(StepDef, _structure_step_def)
 
 
-def _structure_step_variant(val: object) -> StepDef | GoToStepDef:
-    if isinstance(val, (StepDef, GoToStepDef)):
+_BARE_ATTENTION_EXCLUDES = ("interaction", "target", "target_pose", "cancel", "autonomous")
+
+
+def _structure_step_variant(val: object) -> StepDef | GoToStepDef | AttentionStepDef:
+    if isinstance(val, (StepDef, GoToStepDef, AttentionStepDef)):
         return val
-    kind = dict(val).get("kind", "object_interact")
+    d = dict(val)
+    kind = d.get("kind")
+    if kind is None:
+        bare = "attention" in d and not any(k in d for k in _BARE_ATTENTION_EXCLUDES)
+        kind = "attention" if bare else "object_interact"
     if kind == "go_to":
         return converter.structure(val, GoToStepDef)
+    if kind == "attention":
+        return converter.structure(val, AttentionStepDef)
     if kind == "object_interact":
         return converter.structure(val, StepDef)
     raise ValueError(f"unknown step kind {kind!r}; expected one of {_STEP_KINDS}")

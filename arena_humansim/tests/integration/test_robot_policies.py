@@ -99,7 +99,7 @@ def test_robot_sfm_policy_symmetric_yield(manager_factory: Callable[..., AgentMa
 def test_robot_teleport_only_policy_stays_still_until_feedback(manager_factory: Callable[..., AgentManager], minimal_scenario: ScenarioConfig) -> None:
     mgr = manager_factory(minimal_scenario, node_name="test_robot_teleport")
     aid = _spawn(mgr, x=0.0, y=0.0, gx=5.0, gy=0.0, kind=1, policy="", radius=0.3)
-    robot_name = next(name for name, rid in mgr._robot_name_to_id.items() if rid == aid)
+    robot_name = next(name for name, rid in mgr._agent_name_to_id.items() if rid == aid)
 
     for _ in range(10):
         mgr.tick()

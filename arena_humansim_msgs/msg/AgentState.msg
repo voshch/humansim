@@ -3,6 +3,7 @@ uint8 KIND_HUMAN=0
 uint8 KIND_ROBOT=1
 
 int32 agent_id
+string name                  # empty = unnamed
 geometry_msgs/Pose2D pose
 geometry_msgs/Vector3 velocity       # linear velocity (x, y, z=0)
 float64 desired_velocity              # preferred walking speed (m/s)
@@ -21,3 +22,7 @@ arena_humansim_msgs/Waypoints waypoints
 uint8 kind 0                 # KIND_HUMAN | KIND_ROBOT
 string policy                # registered local planner name; empty = teleport-only
 string policy_params         # opaque JSON blob for planner
+
+string gesture               # opaque gesture kind, empty = none
+geometry_msgs/Point gesture_at # gesture target, world frame
+string gesture_opts          # JSON gesture options ({"hand": "auto|left|right"}), empty = none

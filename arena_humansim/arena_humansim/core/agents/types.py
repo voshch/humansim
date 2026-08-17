@@ -1,11 +1,17 @@
 __all__ = [
     "ActionDef",
     "AgentType",
+    "AttentionDef",
+    "AttentionRef",
+    "AttentionStepDef",
     "GoToStepDef",
     "NeedCondition",
     "NeedDist",
     "ParamDist",
     "PerceptionDist",
+    "Pose3",
+    "RelativeRef",
+    "RobotRef",
     "SampledNeed",
     "SampledParams",
     "SampledPerception",
@@ -85,6 +91,39 @@ class TransitionDef:
 
 
 @attrs.frozen
+class Pose3:
+    x: float
+    y: float
+    z: float
+
+
+@attrs.frozen
+class RobotRef:
+    name: str
+
+
+@attrs.frozen
+class RelativeRef:
+    azimuth: float
+    elevation: float
+    distance: float = 3.0
+
+
+AttentionRef = str | int | Pose3 | RobotRef | RelativeRef
+
+
+@attrs.frozen
+class AttentionDef:
+    gesture: str
+    at: AttentionRef | tuple[AttentionRef, ...] | None = None
+    hand: str = "auto"
+    face: bool | None = None  # None = auto
+    hold: str = "release"
+    dwell: float = 1.0
+    at_z: float | None = None
+
+
+@attrs.frozen
 class StepDef:
     target: str | None = None
     interaction: str | None = None
@@ -111,11 +150,24 @@ class StepDef:
     formation_spec: FormationSpec | None = None
     wait_for_outcome: bool = False
 
+    attention: AttentionDef | None = None
+
+
+@attrs.frozen
+class AttentionStepDef:
+    attention: AttentionDef
+    duration: ParamDist | None = attrs.field(default=None, converter=_as_paramdist)
+    patience: ParamDist | None = attrs.field(default=None, converter=_as_paramdist)
+    satisfies: dict[str, float] = attrs.Factory(dict)
+    on_failure: str = "abort"
+    interruptible: bool | None = None
+
 
 @attrs.frozen
 class GoToStepDef:
     target_pose: Pose2D | None = None
     target: str | None = None
+    attention: AttentionDef | None = None
     duration: ParamDist | None = attrs.field(default=None, converter=_as_paramdist)
     patience: ParamDist | None = attrs.field(default=None, converter=_as_paramdist)
     satisfies: dict[str, float] = attrs.Factory(dict)
@@ -125,7 +177,7 @@ class GoToStepDef:
 
 @attrs.frozen
 class SequenceDef:
-    steps: dict[str, StepDef | GoToStepDef]
+    steps: dict[str, StepDef | GoToStepDef | AttentionStepDef]
     then: str | None = None
     on_failure: str | None = None
     interruptible: bool = True

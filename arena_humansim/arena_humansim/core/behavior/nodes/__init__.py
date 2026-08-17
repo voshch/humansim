@@ -1,3 +1,4 @@
+from arena_humansim.core.behavior.nodes.attention import AttentionNode
 from arena_humansim.core.behavior.nodes.autonomous import AutonomousNode
 from arena_humansim.core.behavior.nodes.helpers import (
     _at_target,
@@ -11,6 +12,7 @@ from arena_humansim.core.behavior.nodes.helpers import (
 from arena_humansim.core.behavior.nodes.interaction import BlockNode, CancelNode, SeekNode
 from arena_humansim.core.behavior.nodes.navigation import GoToNode, ResolveObjectNode
 from arena_humansim.core.behavior.nodes.primitives import (
+    ClearGestureNode,
     ClearOutcomeNode,
     HoldNode,
     NeedsDecayNode,
@@ -21,9 +23,11 @@ from arena_humansim.core.behavior.nodes.state_machine import SequenceStateMachin
 from arena_humansim.core.behavior.nodes.utility import check_condition, preconditions_met, score_actions
 
 __all__ = [
+    "AttentionNode",
     "AutonomousNode",
     "BlockNode",
     "CancelNode",
+    "ClearGestureNode",
     "ClearOutcomeNode",
     "GoToNode",
     "HoldNode",

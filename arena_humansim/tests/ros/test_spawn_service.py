@@ -88,4 +88,4 @@ def test_spawn_robot_kind_and_policy(system: RosTestSystem) -> None:
     idx = pool._id_to_idx[aid]
     assert int(pool.kind[idx]) == 1
     assert int(pool.policy_idx[idx]) == -1
-    assert system.manager._robot_name_to_id.get("robot_alpha") == aid
+    assert system.manager._agent_name_to_id.get("robot_alpha") == aid

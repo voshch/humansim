@@ -8,8 +8,9 @@ Composable `py_trees.Behaviour` primitives the compiler assembles into per-agent
 |---|---|
 | `helpers.py` | `_nav_command`, `_seek_command`, `_cancel_command`, `_at_target`, `_resolve_interaction_radius`, `_sample_param_dist`, `_bt_logger`. |
 | `utility.py` | Utility scoring: `check_condition`, `preconditions_met`, `score_actions`. |
-| `primitives.py` | Leaf nodes that don't resolve world state: `ClearOutcomeNode`, `PatienceWatchdogNode`, `HoldNode`, `SatisfyNode`, `NeedsDecayNode`. |
+| `primitives.py` | Leaf nodes that don't resolve world state: `ClearOutcomeNode`, `ClearGestureNode`, `PatienceWatchdogNode`, `HoldNode`, `SatisfyNode`, `NeedsDecayNode`. |
 | `navigation.py` | `ResolveObjectNode`, `GoToNode` - target resolution and approach. |
+| `attention.py` | `AttentionNode` - resolve the `attention.at` refs each tick (`partner`/`partners` via `ctx.im`, `target` via `StepContext`, `goal` via `movement.command`, `robot:<name>`, object id, agent name, object type, agent id, literal xyz, relative azimuth/elevation), face the current one when `face` allows (`FACE_ENTER_RAD` before the first raise, re-face past `FACE_KEEP_RAD` while pointing, `FACE_TIMEOUT_S` cap), then raise an opaque `GestureIntent` on `movement.gesture`. Unresolved refs wait (RUNNING). `bare=True` (a `kind: attention` step) halts, owns duration/dwell and returns SUCCESS or FAILURE (facing timeout). As a rider it never finishes. Lists cycle with `dwell`. `terminate()` clears `heading_goal` and, unless `hold: keep`, `gesture`. |
 | `interaction.py` | `SeekNode` (universal find-or-create-or-join), `CancelNode` (explicit teardown), `BlockNode` (pursuit+SEEK for BLOCK). |
 | `autonomous.py` | `AutonomousNode` - utility-based action selection inside a step. |
 | `state_machine.py` | `SequenceStateMachine` - runs one compiled sequence with `transitions` / `then` / `on_failure` edges. |
@@ -29,6 +30,7 @@ Public API is re-exported from `__init__.py`. Import `from arena_humansim.core.b
   - `last_outcome` - `COMPLETED` / `CANCELED` / `INTERRUPTED` set on interaction end. Nodes return SUCCESS on `COMPLETED` / `CANCELED`, FAILURE on `INTERRUPTED`. `INTERRUPTED` wins same-tick collisions against a still-bound check.
   - `ClearOutcomeNode` at the head of every compiled step resets `last_outcome` and `interaction_id` so stale signals from a previous step don't short-circuit the next one.
   - "Is the agent bound?" is not stored on the movement - use `im.is_bound(aid)` (threaded into `StepContext.is_bound_lookup`).
+- **`gesture` and `heading_goal` on `BehaviorTreeMovement` are BT-owned signals:** set by `AttentionNode`, cleared by `AttentionNode` on exit (`heading_goal` always, `gesture` unless `hold: keep`) or by the `ClearGestureNode` at the head of every step without `attention:`, never by IM. `agent_manager` merges `heading_goal` into `pool.set_heading_goals` (formation headings win) and publishes `gesture` on `AgentState.gesture` / `gesture_at` / `gesture_opts`.
 - **Watchdogs never succeed.** `PatienceWatchdogNode` returns only RUNNING or FAILURE. It sits in a `Parallel(SuccessOnOne)` where the sibling sequence signals success.
 - **Context over args.** Multi-node step chains (resolve -> go-to -> seek) thread `StepContext` rather than passing resolved poses through constructor args - initialisation order in `Sequence` isn't guaranteed to match authoring order.
 
@@ -111,6 +113,6 @@ close:  {cancel: true}
 
 1. Pick the module whose concern matches; add a new module and import from `__init__.py` if none fits.
 2. Subclass `py_trees.behaviour.Behaviour`. Keep state under `self._` attributes and reset in `initialise()` - nodes are constructed once and re-ticked.
-3. If the node emits a `HighLevelCommand`, pick once-vs-every-tick per the rules above. Movement-owning nodes (`GoToNode`, `HoldNode`, `BlockNode`) re-emit every tick and restore on `terminate()`. Signal nodes (`SeekNode`) re-emit until bound; teardown is done by a separate `CancelNode`, not `terminate()`.
+3. If the node emits a `HighLevelCommand`, pick once-vs-every-tick per the rules above. Movement-owning nodes (`GoToNode`, `HoldNode`, `BlockNode`, bare `AttentionNode`) re-emit every tick and restore on `terminate()`. Signal nodes (`SeekNode`) re-emit until bound; teardown is done by a separate `CancelNode`, not `terminate()`.
 4. Wire it into [../compiler.py](../compiler.py) - most primitives are constructed inside the step-builder helpers.
 5. Cover it in [tests/unit/test_node_primitives.py](../../../../tests/unit/test_node_primitives.py) or a sibling unit test module.

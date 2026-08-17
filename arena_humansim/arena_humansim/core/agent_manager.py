@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import time
 from collections import deque
@@ -359,7 +360,7 @@ class AgentManager(Node):
         self._agent_types: dict[str, AgentType] = dict(BUILTIN_AGENTS)
         self._agents: dict[int, BaseAgent] = {}
         self._pool_agent_ids: list[int] = []
-        self._robot_name_to_id: dict[str, int] = {}
+        self._agent_name_to_id: dict[str, int] = {}
         self._external_entities: dict[int, _ExternalEntity] = {}
         self._external_timeout_ticks = max(1, int(round(_EXTERNAL_TIMEOUT_S / self._dt)))
         self._walls: dict[str, tuple[tuple[float, float], tuple[float, float]]] = {}
@@ -885,6 +886,16 @@ class AgentManager(Node):
         agent_msg.agent_type = spawn_req.agent_type
         return self._build_base_agent(aid, agent_msg, list(spawn_req.waypoints))
 
+    def _lookup_agent_name(self, name: str, kind: int | None = None) -> int | None:
+        """Exact name, else the unique agent whose name ends in ``/name``, optionally restricted to one AgentState kind."""
+        pool = self._pool
+        candidates = self._agent_name_to_id if kind is None else {n: a for n, a in self._agent_name_to_id.items() if a in pool._id_to_idx and int(pool.kind[pool.idx(a)]) == kind}
+        aid = candidates.get(name)
+        if aid is not None:
+            return aid
+        hits = [a for n, a in candidates.items() if n.rsplit("/", 1)[-1] == name]
+        return hits[0] if len(hits) == 1 else None
+
     def _compile_behavior_tree(self, agent: BaseAgent) -> None:
         aid = agent.state.agent_id
         type_name = agent.params.name
@@ -912,6 +923,7 @@ class AgentManager(Node):
             pool=self._pool,
             is_bound_lookup=self._interaction_manager.is_bound,
             im=self._interaction_manager,
+            name_lookup=self._lookup_agent_name,
         )
         self._behavior_trees[aid] = bt
         if bt is not None:
@@ -931,9 +943,9 @@ class AgentManager(Node):
         self._interaction_manager.force_stop(aid)
         self._event_bus.clear_agent(aid)
         self._rng.remove_agent_substreams(aid)
-        for name, mapped_id in list(self._robot_name_to_id.items()):
+        for name, mapped_id in list(self._agent_name_to_id.items()):
             if mapped_id == aid:
-                del self._robot_name_to_id[name]
+                del self._agent_name_to_id[name]
         for ext_id, entity in list(self._external_entities.items()):
             if entity.agent_id == aid:
                 del self._external_entities[ext_id]
@@ -1179,7 +1191,14 @@ class AgentManager(Node):
                 target_pose=pose,
                 desired_velocity=agent.state.desired_velocity,
             )
-        pool.set_heading_goals({aid: pose.theta for aid, pose in formation_targets.items()})
+        heading_goals = {aid: pose.theta for aid, pose in formation_targets.items()}
+        for aid, agent in self._agents.items():
+            if aid in heading_goals:
+                continue
+            mv = agent.movement
+            if isinstance(mv, BehaviorTreeMovement) and mv.heading_goal is not None:
+                heading_goals[aid] = mv.heading_goal
+        pool.set_heading_goals(heading_goals)
 
         for aid in departed_agents:
             agent = self._agents.get(aid)
@@ -1426,7 +1445,7 @@ class AgentManager(Node):
         goal_theta = pool.goal_theta[:n]
         has_goal_theta = pool.has_goal_theta[:n]
         target_theta = np.where(moving, vel_theta, goal_theta)
-        rotating = (moving | has_goal_theta) & ~provides_heading
+        rotating = (moving & ~provides_heading) | (has_goal_theta & ~moving)
         delta = np.arctan2(
             np.sin(target_theta - theta),
             np.cos(target_theta - theta),
@@ -1678,7 +1697,7 @@ class AgentManager(Node):
         return response
 
     def _teleport_robot(self, name: str, x: float, y: float, theta: float, radius: float) -> None:
-        aid = self._robot_name_to_id.get(name)
+        aid = self._agent_name_to_id.get(name)
         if aid is None:
             self._logger.debug(f"feedback: unknown robot name '{name}', skipping")
             return
@@ -1731,6 +1750,8 @@ class AgentManager(Node):
                 else:
                     entity = _ExternalEntity(agent_id=self._spawn_external_agent(agent_msg))
             self._external_entities[agent_msg.agent_id] = entity
+        if agent_msg.name:
+            self._agent_name_to_id[agent_msg.name] = entity.agent_id
         entity.last_seen = self._tick_count
         radius = agent_msg.radius if agent_msg.radius > 0 else 0.3
         self._teleport_agent(entity.agent_id, agent_msg.pose.x, agent_msg.pose.y, agent_msg.pose.theta, radius)
@@ -1822,6 +1843,9 @@ class AgentManager(Node):
             msg.header.stamp.nanosec = int(self._sim_time_ns % int(1e9))
         if not own_idxs:
             return msg
+        names: dict[int, str] = {}
+        for name, aid in self._agent_name_to_id.items():
+            names.setdefault(aid, name)
         for j, i in enumerate(own_idxs):
             a = msg.agents[j]
             a.agent_id = int(pool.agent_ids[i])
@@ -1836,6 +1860,18 @@ class AgentManager(Node):
             a.kind = int(pool.kind[i])
             pidx = int(pool.policy_idx[i])
             a.policy = self._policy_names[pidx] if 0 <= pidx < len(self._policy_names) else ""
+            a.name = names.get(a.agent_id, "")
+            agent = self._agents.get(a.agent_id)
+            mv = agent.movement if agent is not None else None
+            intent = mv.gesture if isinstance(mv, BehaviorTreeMovement) else None
+            if intent is None:
+                a.gesture = ""
+                a.gesture_at.x = a.gesture_at.y = a.gesture_at.z = 0.0
+                a.gesture_opts = ""
+            else:
+                a.gesture = intent.kind
+                a.gesture_at.x, a.gesture_at.y, a.gesture_at.z = intent.x, intent.y, intent.z
+                a.gesture_opts = json.dumps({"hand": intent.hand})
         return msg
 
     def _spawn_agents_callback(
@@ -1881,11 +1917,14 @@ class AgentManager(Node):
             self._pool.policy_idx[idx] = policy_idx
             self._pool_agent_ids.append(aid)
 
+            if agent_msg.name:
+                self._agent_name_to_id[agent_msg.name] = aid
+            if kind != 0:
+                self._agent_name_to_id.setdefault(agent.params.name or f"robot_{aid}", aid)
             if kind == 0:
                 self._compile_behavior_tree(agent)
             else:
                 self._behavior_trees[aid] = None
-                self._robot_name_to_id[agent.params.name or f"robot_{aid}"] = aid
 
             mv = agent.movement
             if isinstance(mv, WaypointMovement) and mv.waypoints:
@@ -1924,7 +1963,7 @@ class AgentManager(Node):
             self._pool.reset()
             self._high_level_cmds.clear()
             self._behavior_trees.clear()
-            self._robot_name_to_id.clear()
+            self._agent_name_to_id.clear()
             self._external_entities.clear()
             self._despawn_monitor.clear()
             self._spawn_scheduler.reset_counts()
@@ -1957,7 +1996,7 @@ class AgentManager(Node):
         self._pool.reset()
         self._high_level_cmds.clear()
         self._behavior_trees.clear()
-        self._robot_name_to_id.clear()
+        self._agent_name_to_id.clear()
         self._external_entities.clear()
         self._despawn_monitor.clear()
         self._spawn_scheduler.reset_counts()
@@ -2005,7 +2044,7 @@ class AgentManager(Node):
     ) -> SetWaypoints.Response:
         aid = int(request.agent_id) if request.agent_id != 0 else 0
         if aid == 0:
-            aid = self._robot_name_to_id.get(request.name, 0)
+            aid = self._agent_name_to_id.get(request.name, 0)
         agent = self._agents.get(aid) if aid else None
         if agent is None:
             response.success = False

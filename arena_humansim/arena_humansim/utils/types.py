@@ -258,11 +258,22 @@ class WaypointMovement:
     forward: bool = True
 
 
+@attrs.frozen
+class GestureIntent:
+    kind: str
+    x: float
+    y: float
+    z: float
+    hand: str = "auto"
+
+
 @attrs.define
 class BehaviorTreeMovement:
     command: HighLevelCommand | None = None
     last_outcome: int | None = None
     interaction_id: int | None = None
+    heading_goal: float | None = None
+    gesture: GestureIntent | None = None
 
 
 class ShapeType(enum.Enum):
