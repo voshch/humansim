@@ -1238,6 +1238,7 @@ class AgentManager(Node):
 
         t0 = time.perf_counter()
         self._advance_waypoints(agents, pool)
+        self._update_animation_states()
         msg = self._build_agent_states_msg()
         self._agent_states_pub.publish(msg)
 
@@ -1798,6 +1799,50 @@ class AgentManager(Node):
             pool.vel[idx, 1] = entity.vel[1]
             pool.prev_vel[idx] = pool.vel[idx]
 
+    def _update_animation_states(self) -> None:
+        """Update animation states of all agents in the pool."""
+        pool = self._pool
+        n = pool.n
+        for idx in range(n):
+            agent_id = int(pool.agent_ids[idx])
+
+            # Find if this agent is in an active interaction
+            active_interaction_type = None
+            roles = self._interaction_manager._agent_membership.get(agent_id)
+            if roles is not None:
+                for iid, role in roles.items():
+                    if role == 0:  # MembershipRole.PARTICIPANT is 0
+                        interaction = self._interaction_manager.interactions.get(iid)
+                        if interaction is not None and interaction.outcome == 1:  # InteractionOutcome.ACTIVE is 1
+                            active_interaction_type = interaction.type
+                            break
+
+            if active_interaction_type is not None:
+                if active_interaction_type in (InteractionType.SIT_ON, InteractionType.LIE_ON):
+                    pool.animation_state[idx] = 11  # SIT
+                elif active_interaction_type in (InteractionType.TALK_TO, InteractionType.GROUP_CONVERSATION):
+                    pool.animation_state[idx] = 12  # TALK
+                elif active_interaction_type == InteractionType.WAVE_AT:
+                    pool.animation_state[idx] = 13  # WAVE
+                else:
+                    # Fallback to speed-based if interaction doesn't map to a specific animation
+                    speed = math.hypot(float(pool.vel[idx, 0]), float(pool.vel[idx, 1]))
+                    if speed > 1.5:
+                        pool.animation_state[idx] = 2  # RUNNING
+                    elif speed > 0.05:
+                        pool.animation_state[idx] = 1  # WALKING
+                    else:
+                        pool.animation_state[idx] = 0  # IDLE
+            else:
+                # No active interaction, use speed-based fallback
+                speed = math.hypot(float(pool.vel[idx, 0]), float(pool.vel[idx, 1]))
+                if speed > 1.5:
+                    pool.animation_state[idx] = 2  # RUNNING
+                elif speed > 0.05:
+                    pool.animation_state[idx] = 1  # WALKING
+                else:
+                    pool.animation_state[idx] = 0  # IDLE
+
     def _build_agent_states_msg(self) -> AgentStatesMsg:
         pool = self._pool
         n = pool.n
@@ -1828,6 +1873,7 @@ class AgentManager(Node):
             a.desired_velocity = float(pool.desired_vel[i])
             a.radius = float(pool.agent_radius[i])
             a.kind = int(pool.kind[i])
+            a.animation_state = int(pool.animation_state[i])
             pidx = int(pool.policy_idx[i])
             a.policy = self._policy_names[pidx] if 0 <= pidx < len(self._policy_names) else ""
         return msg

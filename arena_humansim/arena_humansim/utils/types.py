@@ -115,6 +115,7 @@ class AgentState:
     velocity: tuple[float, float] = (0.0, 0.0)
     desired_velocity: float = 1.3
     kind: int = 0
+    animation_state: int = 0
 
 
 @attrs.define

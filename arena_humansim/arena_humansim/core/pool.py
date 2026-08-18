@@ -76,6 +76,7 @@ class AgentPool:
 
         self.kind = np.zeros(capacity, dtype=np.uint8)
         self.policy_idx = np.full(capacity, -1, dtype=np.int32)
+        self.animation_state = np.zeros(capacity, dtype=np.uint8)
 
         self.neighbor_indptr = np.zeros(1, dtype=np.int32)
         self.neighbor_indices = np.empty(0, dtype=np.int32)
@@ -125,6 +126,7 @@ class AgentPool:
         self.prev_vel[i] = self.vel[i]
         self.kind[i] = 0
         self.policy_idx[i] = -1
+        self.animation_state[i] = getattr(agent.state, "animation_state", 0)
 
         for ext in self._extensions:
             ext.on_pool_add(i, agent)
@@ -157,6 +159,7 @@ class AgentPool:
                 self.latched,
                 self.kind,
                 self.policy_idx,
+                self.animation_state,
             ):
                 arr[idx] = arr[last]
             for arr in (self.pos, self.vel, self.prev_vel, self.goal_pos, self.terminal_pos):
@@ -180,6 +183,7 @@ class AgentPool:
             agent.state.pose.y = float(self.pos[i, 1])
             agent.state.pose.theta = float(self.theta[i])
             agent.state.velocity = (float(self.vel[i, 0]), float(self.vel[i, 1]))
+            agent.state.animation_state = int(self.animation_state[i])
 
     def set_goals(self, goals: dict[int, Pose2D]) -> None:
         self.has_goal[: self.n] = False
@@ -273,6 +277,9 @@ class AgentPool:
         pidx_new = np.full(new_cap, -1, dtype=self.policy_idx.dtype)
         pidx_new[:old] = self.policy_idx[:old]
         self.policy_idx = pidx_new
+        anim_new = np.zeros(new_cap, dtype=self.animation_state.dtype)
+        anim_new[:old] = self.animation_state[:old]
+        self.animation_state = anim_new
         self.capacity = new_cap
 
         for ext in self._extensions:
