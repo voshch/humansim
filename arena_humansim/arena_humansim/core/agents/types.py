@@ -20,6 +20,7 @@ __all__ = [
     "TransitionDef",
     "VarDef",
     "sample_agent_type",
+    "shift_agent_type",
 ]
 
 import math
@@ -344,3 +345,41 @@ def sample_agent_type(
         utility_weights=dict(agent_type.utility_weights),
         idle_gaze_rate_hz=idle_gaze_rate_hz,
     )
+
+
+def _shift_pose(pose: Pose2D | None, dx: float, dy: float) -> Pose2D | None:
+    return None if pose is None else Pose2D(x=pose.x + dx, y=pose.y + dy, theta=pose.theta)
+
+
+def _shift_ref(ref: AttentionRef, dx: float, dy: float) -> AttentionRef:
+    return Pose3(x=ref.x + dx, y=ref.y + dy, z=ref.z) if isinstance(ref, Pose3) else ref
+
+
+def _shift_attention(att: AttentionDef | None, dx: float, dy: float) -> AttentionDef | None:
+    if att is None or att.at is None:
+        return att
+    at = tuple(_shift_ref(r, dx, dy) for r in att.at) if isinstance(att.at, tuple) else _shift_ref(att.at, dx, dy)
+    return attrs.evolve(att, at=at)
+
+
+def _shift_step(step: StepDef | GoToStepDef | AttentionStepDef, dx: float, dy: float) -> StepDef | GoToStepDef | AttentionStepDef:
+    attention = _shift_attention(step.attention, dx, dy)
+    if isinstance(step, GoToStepDef):
+        return attrs.evolve(step, target_pose=_shift_pose(step.target_pose, dx, dy), attention=attention)
+    if isinstance(step, AttentionStepDef):
+        return attrs.evolve(step, attention=attention)
+    fs = step.formation_spec
+    if fs is not None and fs.anchor_pose is not None:
+        fs = attrs.evolve(fs, anchor_pose=_shift_pose(fs.anchor_pose, dx, dy))
+    return attrs.evolve(step, formation_spec=fs, attention=attention)
+
+
+def shift_agent_type(agent_type: AgentType, dx: float, dy: float) -> AgentType:
+    """Translate every authored map coordinate (go_to targets, attention points, formation anchors) by (dx, dy)."""
+    if dx == 0.0 and dy == 0.0:
+        return agent_type
+    sequences = {
+        name: attrs.evolve(seq, steps={k: _shift_step(v, dx, dy) for k, v in seq.steps.items()})
+        for name, seq in agent_type.sequences.items()
+    }
+    return attrs.evolve(agent_type, sequences=sequences)
