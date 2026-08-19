@@ -10,6 +10,9 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import ColorRGBA
 from visualization_msgs.msg import Marker, MarkerArray
 
+from arena_humansim.core.interaction_kinds import InteractionType
+from arena_humansim.utils.types import CommandType
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -19,7 +22,7 @@ if TYPE_CHECKING:
     from arena_humansim.global_planner import GlobalPlanner
     from arena_humansim.local_planner import LocalPlanner
     from arena_humansim.perception import Perception
-    from arena_humansim.utils.types import HighLevelCommand, InteractionState, InteractionType, Pose2D, Shape, SinkConfig, SourceConfig
+    from arena_humansim.utils.types import HighLevelCommand, InteractionState, Pose2D, Shape, SinkConfig, SourceConfig
 
 _FRAME = "map"
 _MISSING = object()
@@ -157,21 +160,6 @@ def _shape_outline(pose: Pose2D, shape: Shape) -> list[tuple[float, float]]:
         pts.append(pts[0])
         return pts
     return []
-
-
-_CMD_NAMES = {0: "NAV", 1: "STOP", 2: "SEEK"}
-# Sync with InteractionType
-_ITYPE_NAMES = {
-    InteractionType.TALK_TO: "TALK",
-    InteractionType.GROUP_CONVERSATION: "GROUP",
-    InteractionType.SIT_ON: "SIT",
-    InteractionType.LIE_ON: "LIE",
-    InteractionType.USE: "USE",
-    InteractionType.QUEUE_USE: "QUEUE",
-    InteractionType.WAVE_AT: "WAVE",
-    InteractionType.BLOCK: "BLOCK",
-    InteractionType.SERVICE: "SERVICE",
-}
 
 
 class MarkerView:
@@ -378,9 +366,7 @@ def publish_behavior(
                 m.color = _C_CMD
             m.pose.position.x, m.pose.position.y, m.pose.position.z = x, y, 0.9
             m.scale.z = 0.2
-            label = _CMD_NAMES.get(cmd.type, str(cmd.type))
-            if aid in in_interaction and cmd.type == 0:
-                label = "INTR"
+            label = "INTR" if aid in in_interaction and cmd.type == CommandType.NAVIGATE else CommandType(cmd.type).name
             m.text = label
         if agent.needs is not None:
             for i, (name, need) in enumerate(agent.needs.needs.items()):
@@ -430,8 +416,7 @@ def publish_interaction(pub: MarkerPublisher, agents: Iterable[BaseAgent], inter
         if live:
             cx = sum(amap[p].state.pose.x for p in live) / len(live)
             cy = sum(amap[p].state.pose.y for p in live) / len(live)
-            itype = _ITYPE_NAMES.get(inter.type, str(inter.type))
-            lbl = f"{itype} [{len(parts)}p"
+            lbl = f"{InteractionType(inter.type).kind.label} [{len(parts)}p"
             if inter.contract.queue:
                 lbl += f" +{len(inter.contract.queue)}q"
             lbl += "]"
