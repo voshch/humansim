@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -51,6 +52,11 @@ def rclpy_context():
         return
     from arena_humansim.utils.loggable import Loggable
 
+    # xdist workers share one DDS domain, so each subscription sees every worker's publishers
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    if worker is not None:
+        base = int(os.environ.get("ROS_DOMAIN_ID", "0"))
+        os.environ["ROS_DOMAIN_ID"] = str(base + 1 + int(worker.removeprefix("gw")))
     rclpy.init()
     node = rclpy.node.Node("pytest_host")
     Loggable.init_logging(node)
