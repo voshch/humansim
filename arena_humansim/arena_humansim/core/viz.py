@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from arena_humansim.global_planner import GlobalPlanner
     from arena_humansim.local_planner import LocalPlanner
     from arena_humansim.perception import Perception
-    from arena_humansim.utils.types import HighLevelCommand, InteractionState, Pose2D, Shape, SinkConfig, SourceConfig
+    from arena_humansim.utils.types import HighLevelCommand, InteractionState, InteractionType, Pose2D, Shape, SinkConfig, SourceConfig
 
 _FRAME = "map"
 _MISSING = object()
@@ -160,16 +160,17 @@ def _shape_outline(pose: Pose2D, shape: Shape) -> list[tuple[float, float]]:
 
 
 _CMD_NAMES = {0: "NAV", 1: "STOP", 2: "SEEK"}
+# Sync with InteractionType
 _ITYPE_NAMES = {
-    0: "TALK",
-    1: "GROUP",
-    2: "SIT",
-    3: "LIE",
-    4: "USE",
-    5: "QUEUE",
-    6: "WAVE",
-    7: "BLOCK",
-    8: "SERVICE",
+    InteractionType.TALK_TO: "TALK",
+    InteractionType.GROUP_CONVERSATION: "GROUP",
+    InteractionType.SIT_ON: "SIT",
+    InteractionType.LIE_ON: "LIE",
+    InteractionType.USE: "USE",
+    InteractionType.QUEUE_USE: "QUEUE",
+    InteractionType.WAVE_AT: "WAVE",
+    InteractionType.BLOCK: "BLOCK",
+    InteractionType.SERVICE: "SERVICE",
 }
 
 
