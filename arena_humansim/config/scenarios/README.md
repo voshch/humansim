@@ -160,59 +160,80 @@ drop_B:    {cancel: true}
 
 ## Attention
 
-`attention:` is one block, valid on every step kind (`go_to`, interaction, wait, cancel, BLOCK) and as a step of its own (`kind: attention`, or just `attention:` plus duration-ish fields and no interaction/target/cancel/autonomous keys). A kind-less step that mixes `attention:` with interaction-only fields (`offer`, `formation_spec`, `until`, ...) is rejected by the loader, add `kind:` or `interaction:`. It faces a target and raises an opaque gesture intent for the animation layer. The engine has no skeleton: `gesture` is passed through untouched on `AgentState.gesture`, the resolved world point on `AgentState.gesture_at`, and `{"hand": ...}` as JSON on `AgentState.gesture_opts`.
+`attention:` is one block of channels. It rides on every step kind (`go_to`, interaction, wait, cancel, BLOCK), stands as a step of its own (`kind: attention`, or just `attention:` plus duration-ish fields and no interaction/target/cancel/autonomous keys), and rides on a whole sequence (`sequences.<seq>.attention`). A kind-less step that mixes `attention:` with interaction-only fields (`offer`, `formation_spec`, `until`, ...) is rejected by the loader, add `kind:` or `interaction:`. The engine has no skeleton: it publishes the active channels each tick as `AgentState.gestures` (`Gesture{slot, at, opts}`), the animation layer moves the body.
 
 ```yaml
 attention:
-  gesture: point           # opaque str, "none" clears (then at is optional: face only, or just clear)
-  at: partner              # one ref or a list of refs
-  hand: auto               # auto | left | right
-  face: auto               # auto | true | false
-  hold: release            # release | keep
-  dwell: 0.9               # seconds per target when at is a list (default 1.0)
-  at_z: 1.4                # intent height for entity refs only
+  gaze:    partner                                   # head
+  point:   {at: [bench_1, bench_2], dwell: 1.5}      # one arm, side picked by the arena layer
+  point_l: exit_door                                 # left arm, explicit
+  point_r: exit_door                                 # right arm, explicit
+  face: auto                                         # auto | true | false | <ref>
+  required: false                                    # riders only, bare steps are always required
 ```
 
-| `at` ref | Resolves to |
+At least one channel, and exactly one arm channel (`point` xor `point_l` xor `point_r`). Nothing is implicit: a body part without a channel stays idle. Slots on the wire: `gaze` -> `head`, `point` -> `arm` with `opts {"dominant": "l"|"r"}` from the ped's sampled handedness, `point_l`/`point_r` -> `arm_l`/`arm_r`.
+
+A channel is either `<targets>` (shorthand for `{at: <targets>}`) or a mapping:
+
+```yaml
+gaze: {at: [partner, bench_1], dwell: 1.0, advance: dwell, hold: release, at_z: 1.4}
+```
+
+- `at`: one ref or a list. A single ref is a list of one, so `dwell` applies to it too.
+- `dwell` (default 1.0 s) with `advance: dwell` (default): entries in order, `dwell` seconds each, the list ends on the last entry and stays there until the step ends.
+- `advance: unreachable`: entries cycle forever by reach. Reach is the azimuth of the entry against the commanded heading (`heading_goal` while turning, else the body yaw): an arm shows below `ARM_IN` (90 deg) and hides above `ARM_OUT` (110 deg), the head shows below `HEAD_IN` (60 deg) and hides above `HEAD_OUT` (70 deg). When the current entry leaves reach the channel jumps to the next entry in list order (wrapping) that is in reach, or holds on the current one publishing nothing until one comes back. Never advances during a face turn or before `MIN_RESIDENCE_S` (0.5 s) on the current entry. Constants live in `arena_humansim/core/behavior/reach.py`.
+- `hold`: `release` (default) unpublishes the channel when the step ends, `keep` leaves it published, frozen at its last target, until a later step names the same channel or the sequence ends.
+- `at_z`: height for entity refs (default head 1.6, arm 1.2 on agents, 0.8 on objects), rejected with literal or relative refs.
+
+| ref | Resolves to |
 |---|---|
 | `partner` | Nearest other participant of the agent's current interaction. |
-| `partners` | All other participants, cycled with `dwell`. |
+| `partners` | All other participants, as the list they expand to. |
 | `target` | The step's own resolved object or `target_pose`. |
 | `goal` | The agent's current navigation goal. |
 | `robot:<name>` | Agent name lookup restricted to robots. |
 | plain `str` | Object id, then agent name (peds and robots), then object type (nearest). Ids and names also match on their last `/` segment when unique, so `ped_3` finds `env_0/ped_3`. |
 | `int` | Agent id. |
-| `{x, y, z}` | Literal world point. |
-| `{azimuth, elevation[, distance]}` | Degrees relative to the agent's own pose and yaw, re-evaluated each tick, default distance 3.0 m. Forces `face: false`. |
+| `{x, y, z}` | Literal world point, shifted with the engine origin like go_to targets. |
+| `{azimuth, elevation[, distance]}` | Degrees relative to the agent's own pose and yaw, re-evaluated each tick, default distance 3.0 m. Never drives `face`. |
 
-Entity refs point at 1.2 m for agents and 0.8 m for objects unless `at_z` overrides (rejected with literal or relative refs). Agent targets are tracked while the step runs, and an agent that disappears is re-resolved by name or id, so a respawned ped or re-adopted robot is picked up again. `goal` is unresolved while the agent is halted or has no navigate command. Unresolved refs make the node wait (no intent) with one warning. A bare attention step fails after `RESOLVE_TIMEOUT_S` (4 s) unresolved, on any other step the rider keeps waiting silently.
+`partner`, `partners`, `target` and `goal` are reserved: `SpawnAgents` rejects agents named like one. Entries are unresolved until resolved: retried every tick, never dropped, one warning. A bare step FAILS when a channel sits on an unresolved entry for `RESOLVE_TIMEOUT_S` (4 s). A rider with `required: false` (default) warns once, publishes nothing for that channel and keeps retrying, with `required: true` the host step FAILS after the same grace.
 
-**face.** `auto` turns to the target only when the step is otherwise idle (a bare attention step or a wait step) and the agent is not bound in a formation. `true` also tries on `go_to` and interaction steps but never writes a heading while bound. `false` never turns. The turn must come within `FACE_ENTER_RAD` (0.25 rad) before the first raise, then only re-faces if the current target leaves a `FACE_KEEP_RAD` (0.6 rad) cone. If facing was required and not reached within `FACE_TIMEOUT_S` (4 s), a bare attention step fails, any other step just raises without facing.
+**face.** For `auto` and `true` the face target is the current entry of the winning channel (`point` > `point_r` > `point_l` > `gaze`), skipping relative entries (the heading holds). `true` forces the turn and the loader rejects it when the winning channel's first entry is relative. `false` never turns. `<ref>` turns toward that ref. Facing is skipped while the ped is walking (`GoToNode` or `BlockNode` running) or bound in a formation, so on a `go_to` it applies during the post-arrival hold, and on wait, interaction and bare steps it applies throughout. The turn must come within `FACE_ENTER_RAD` (0.25 rad), afterwards the ped re-faces only when the target leaves a `FACE_KEEP_RAD` (0.6 rad) cone. A bare step FAILS after `FACE_TIMEOUT_S` (4 s) without reaching the target, a rider gives up and keeps its heading. Channels publish against the commanded heading, so an arm rises while the body is still turning.
 
-**hold.** `release` clears the intent when the step ends. `keep` leaves it up: the next step's `attention:` retargets it, a step without `attention:` clears it. A bare single-ref step without `duration` succeeds on the tick it raises, so with `hold: release` the intent is raised and cleared in the same tick and never published, use `duration` or `hold: keep`.
+**Bare step end.** Without `duration`: SUCCESS once every channel finished its list, so a cycling channel needs `duration` or `patience` (loader error). With `duration`: SUCCESS at duration regardless of list progress. `patience` bounds resolve + turn + hold, on expiry FAILURE. Riders have no end of their own.
 
-**Lists and dwell.** A bare attention step without `duration` walks the list once (`duration` = sum of dwells) then succeeds. With `duration` it cycles until the duration expires. On any other step the list cycles until the step ends. A single ref ignores `dwell`.
+**Sequence rider.** `sequences.<seq>.attention` persists across the steps of the sequence. A step with its own `attention:` overrides it while the step runs (the rider is lowered, not reset), afterwards it resumes with its list index and held pose intact. Autonomous steps take no attention and suspend the rider for their span. Leaving the sequence releases everything, kept channels included.
 
 ```yaml
-# bare: halt, turn to each bench, point for 1.5 s each, keep the arm up into the next step
+# bare: halt, turn to each bench, point 1.5 s each, keep the arm up into the next step
 show_benches:
-  attention: {gesture: point, at: [bench_1, bench_2], dwell: 1.5, hold: keep}
+  attention: {point: {at: [bench_1, bench_2], dwell: 1.5, hold: keep}}
 show_door:
-  attention: {gesture: point, at: exit_door}
+  attention: {point: exit_door, gaze: partner}
   duration: {mean: 1.5}
 
 # burst: glance around without turning
 look_around:
-  attention: {gesture: look, at: [{azimuth: -60, elevation: 0}, {azimuth: 60, elevation: 0}], dwell: 0.7}
+  attention: {gaze: {at: [{azimuth: -60, elevation: 0}, {azimuth: 60, elevation: 0}], dwell: 0.7}}
 
-# go_to while pointing at the partner, then at a named agent
-escort: {kind: go_to, target_pose: {x: 7.0, y: 0.0}, attention: {gesture: point, at: [partner, ped_3], dwell: 2.0}}
+# go_to while pointing at whatever landmark is in reach, cycling as the ped turns
+escort: {kind: go_to, target_pose: {x: 7.0, y: 0.0}, attention: {point: {at: [ped_3, exit_door], advance: unreachable}}}
 
-# interaction step: the formation owns the heading, the intent tracks the nearest partner
-chat: {interaction: TALK_TO, duration: {mean: 8.0}, attention: {gesture: look, at: partner}}
+# interaction step: the formation owns the heading, the head tracks the nearest partner
+chat: {interaction: TALK_TO, duration: {mean: 8.0}, attention: {gaze: partner}}
+
+# sequence rider: keep looking at the robot across every step of the sequence
+sequences:
+  greet:
+    attention: {gaze: {at: "robot:bot", advance: unreachable}}
+    steps: {...}
 ```
 
-`attention:` is only valid inside `sequences`, not in the autonomous `actions` library, and not on `autonomous: true` steps.
+`attention:` is not valid in the autonomous `actions` library and not on `autonomous: true` steps.
+
+Handedness is sampled once per ped from the agent type (`handedness: {right: 0.9, left: 0.1}`, weights per hand) and can be pinned per spawn via `AgentState.handedness` (`l` | `r`); it is republished on `AgentState.handedness`.
 
 ## Robot services
 

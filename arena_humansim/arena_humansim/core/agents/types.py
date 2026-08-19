@@ -4,6 +4,7 @@ __all__ = [
     "AttentionDef",
     "AttentionRef",
     "AttentionStepDef",
+    "ChannelDef",
     "GoToStepDef",
     "NeedCondition",
     "NeedDist",
@@ -113,15 +114,41 @@ class RelativeRef:
 AttentionRef = str | int | Pose3 | RobotRef | RelativeRef
 
 
+def _as_refs(val: AttentionRef | tuple[AttentionRef, ...] | list[AttentionRef]) -> tuple[AttentionRef, ...]:
+    return tuple(val) if isinstance(val, (tuple, list)) else (val,)
+
+
+@attrs.frozen
+class ChannelDef:
+    at: tuple[AttentionRef, ...] = attrs.field(converter=_as_refs)
+    dwell: float = 1.0
+    advance: str = "dwell"
+    hold: str = "release"
+    at_z: float | None = None
+
+
+CHANNEL_SLOTS = {"gaze": "head", "point": "arm", "point_l": "arm_l", "point_r": "arm_r"}
+ARM_CHANNELS = ("point", "point_r", "point_l")
+ATTENTION_KEYWORDS = ("partner", "partners", "target", "goal")
+
+
 @attrs.frozen
 class AttentionDef:
-    gesture: str
-    at: AttentionRef | tuple[AttentionRef, ...] | None = None
-    hand: str = "auto"
-    face: bool | None = None  # None = auto
-    hold: str = "release"
-    dwell: float = 1.0
-    at_z: float | None = None
+    gaze: ChannelDef | None = None
+    point: ChannelDef | None = None
+    point_l: ChannelDef | None = None
+    point_r: ChannelDef | None = None
+    face: bool | AttentionRef | None = None  # None = auto
+    required: bool = False
+
+    def channels(self) -> dict[str, ChannelDef]:
+        pairs = (("gaze", self.gaze), ("point", self.point), ("point_l", self.point_l), ("point_r", self.point_r))
+        return {name: ch for name, ch in pairs if ch is not None}
+
+    def face_channel(self) -> str | None:
+        """Winning channel for face auto/true: point > point_r > point_l > gaze."""
+        present = self.channels()
+        return next((name for name in (*ARM_CHANNELS, "gaze") if name in present), None)
 
 
 @attrs.frozen
@@ -183,6 +210,7 @@ class SequenceDef:
     on_failure: str | None = None
     interruptible: bool = True
     transitions: tuple[TransitionDef, ...] = ()
+    attention: AttentionDef | None = None
 
 
 @attrs.frozen
@@ -211,6 +239,7 @@ class AgentType:
     personal_space_min: ParamDist = attrs.field(default=ParamDist(0.6, 0.15, clip_low=0.2, clip_high=2.0), converter=_as_paramdist)
 
     idle_gaze_rate: ParamDist = attrs.field(default=ParamDist(0.0, 0.0, clip_low=0.0, clip_high=0.0), converter=_as_paramdist)
+    handedness: dict[str, float] = attrs.Factory(lambda: {"right": 0.9, "left": 0.1})
 
     perception: PerceptionDist = attrs.Factory(PerceptionDist)
     local_planner_params: dict[str, ParamDist] = attrs.Factory(dict)
@@ -272,6 +301,18 @@ class SampledParams:
     utility_weights: dict[str, float] = attrs.Factory(dict)
 
     idle_gaze_rate_hz: float = 0.0
+    handedness: str = "r"
+
+
+_HANDS = {"right": "r", "r": "r", "left": "l", "l": "l"}
+
+
+def _sample_handedness(weights: dict[str, float], rng: np.random.Generator) -> str:
+    hands = [_HANDS[k] for k in weights]
+    w = np.asarray([max(float(v), 0.0) for v in weights.values()])
+    if not hands or w.sum() <= 0.0:
+        return "r"
+    return hands[int(rng.choice(len(hands), p=w / w.sum()))]
 
 
 def _sample_dist(dist: ParamDist, rng: np.random.Generator) -> float:
@@ -323,6 +364,7 @@ def sample_agent_type(
     sampled_lp = {k: _sample_dist(d, rng) for k, d in lp_dists.items()}
 
     idle_gaze_rate_hz = _sample_dist(agent_type.idle_gaze_rate, rng)
+    handedness = _sample_handedness(agent_type.handedness, rng)
 
     return SampledParams(
         name=agent_type.name,
@@ -344,6 +386,7 @@ def sample_agent_type(
         needs=sampled_needs,
         utility_weights=dict(agent_type.utility_weights),
         idle_gaze_rate_hz=idle_gaze_rate_hz,
+        handedness=handedness,
     )
 
 
@@ -356,10 +399,11 @@ def _shift_ref(ref: AttentionRef, dx: float, dy: float) -> AttentionRef:
 
 
 def _shift_attention(att: AttentionDef | None, dx: float, dy: float) -> AttentionDef | None:
-    if att is None or att.at is None:
-        return att
-    at = tuple(_shift_ref(r, dx, dy) for r in att.at) if isinstance(att.at, tuple) else _shift_ref(att.at, dx, dy)
-    return attrs.evolve(att, at=at)
+    if att is None:
+        return None
+    channels = {name: attrs.evolve(ch, at=tuple(_shift_ref(r, dx, dy) for r in ch.at)) for name, ch in att.channels().items()}
+    face = _shift_ref(att.face, dx, dy) if isinstance(att.face, Pose3) else att.face
+    return attrs.evolve(att, face=face, **channels)
 
 
 def _shift_step(step: StepDef | GoToStepDef | AttentionStepDef, dx: float, dy: float) -> StepDef | GoToStepDef | AttentionStepDef:
@@ -379,7 +423,7 @@ def shift_agent_type(agent_type: AgentType, dx: float, dy: float) -> AgentType:
     if dx == 0.0 and dy == 0.0:
         return agent_type
     sequences = {
-        name: attrs.evolve(seq, steps={k: _shift_step(v, dx, dy) for k, v in seq.steps.items()})
+        name: attrs.evolve(seq, steps={k: _shift_step(v, dx, dy) for k, v in seq.steps.items()}, attention=_shift_attention(seq.attention, dx, dy))
         for name, seq in agent_type.sequences.items()
     }
     return attrs.evolve(agent_type, sequences=sequences)

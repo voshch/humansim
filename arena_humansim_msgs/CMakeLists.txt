@@ -10,6 +10,7 @@ find_package(std_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/AgentState.msg"
   "msg/AgentStates.msg"
+  "msg/Gesture.msg"
   "msg/AgentTemplate.msg"
   "msg/FlowConfig.msg"
   "msg/HighLevelCommand.msg"

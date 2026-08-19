@@ -23,6 +23,5 @@ uint8 kind 0                 # KIND_HUMAN | KIND_ROBOT
 string policy                # registered local planner name; empty = teleport-only
 string policy_params         # opaque JSON blob for planner
 
-string gesture               # opaque gesture kind, empty = none
-geometry_msgs/Point gesture_at # gesture target, world frame
-string gesture_opts          # JSON gesture options ({"hand": "auto|left|right"}), empty = none
+string handedness            # l | r, empty = right
+Gesture[] gestures           # active attention channels

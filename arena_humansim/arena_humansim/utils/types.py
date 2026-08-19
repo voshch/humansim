@@ -260,11 +260,11 @@ class WaypointMovement:
 
 @attrs.frozen
 class GestureIntent:
-    kind: str
+    slot: str
     x: float
     y: float
     z: float
-    hand: str = "auto"
+    opts: dict[str, str] = attrs.Factory(dict)
 
 
 @attrs.define
@@ -273,7 +273,7 @@ class BehaviorTreeMovement:
     last_outcome: int | None = None
     interaction_id: int | None = None
     heading_goal: float | None = None
-    gesture: GestureIntent | None = None
+    gestures: tuple[GestureIntent, ...] = ()
 
 
 class ShapeType(enum.Enum):

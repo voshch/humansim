@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from arena_humansim.core.agents.types import AttentionDef, AttentionStepDef, GoToStepDef, Pose3, RelativeRef, RobotRef, StepDef
+from arena_humansim.core.agents.types import AttentionDef, AttentionStepDef, ChannelDef, GoToStepDef, Pose3, RelativeRef, RobotRef, StepDef
 from arena_humansim.utils.scenario import _structure_manual
 
 
@@ -266,46 +266,76 @@ def _step(fields: dict) -> StepDef | GoToStepDef | AttentionStepDef:
 
 
 def test_attention_step_structures() -> None:
-    step = _step({"kind": "attention", "attention": {"gesture": "point", "at": "bench", "hand": "left", "face": "auto", "hold": "keep", "dwell": 0.5}, "duration": {"mean": 1.5}})
+    step = _step({"kind": "attention", "attention": {"point": {"at": "bench", "dwell": 0.5, "hold": "keep"}, "face": "auto"}, "duration": {"mean": 1.5}})
     assert isinstance(step, AttentionStepDef)
-    assert step.attention == AttentionDef(gesture="point", at="bench", hand="left", face=None, hold="keep", dwell=0.5)
+    assert step.attention == AttentionDef(point=ChannelDef(at=("bench",), dwell=0.5, hold="keep"), face=None, required=True)
     assert step.duration is not None
     assert step.duration.mean == 1.5
 
 
 def test_attention_step_dispatch_without_kind() -> None:
-    step = _step({"attention": {"gesture": "point", "at": "bench"}, "duration": 2.0, "patience": 5.0, "on_failure": "skip"})
+    step = _step({"attention": {"gaze": "bench"}, "duration": 2.0, "patience": 5.0, "on_failure": "skip"})
     assert isinstance(step, AttentionStepDef)
     assert step.on_failure == "skip"
 
 
-def test_attention_step_defaults() -> None:
-    step = _step({"attention": {"gesture": "point", "at": "bench"}})
+def test_attention_channel_defaults_and_shorthand() -> None:
+    step = _step({"attention": {"point": "bench"}})
     assert isinstance(step, AttentionStepDef)
-    assert step.attention == AttentionDef(gesture="point", at="bench")
-    assert step.attention.hand == "auto"
+    ch = step.attention.point
+    assert ch == ChannelDef(at=("bench",))
+    assert (ch.dwell, ch.advance, ch.hold, ch.at_z) == (1.0, "dwell", "release", None)
     assert step.attention.face is None
-    assert step.attention.hold == "release"
-    assert step.attention.dwell == 1.0
+    assert step.attention.required is True
+    assert step.attention.gaze is None
 
 
-def test_attention_on_wait_step_stays_step_def() -> None:
-    step = _step({"duration": 2.0, "interaction": "TALK_TO", "attention": {"gesture": "point", "at": "partner"}})
+def test_attention_channel_list_and_options() -> None:
+    step = _step({"attention": {"gaze": ["partner", 3, {"x": 0, "y": 0, "z": 0}], "point_l": {"at": ["a", "b"], "advance": "unreachable", "at_z": 1.4}}, "duration": 2.0})
+    assert isinstance(step, AttentionStepDef)
+    assert step.attention.gaze == ChannelDef(at=("partner", 3, Pose3(0.0, 0.0, 0.0)))
+    assert step.attention.point_l == ChannelDef(at=("a", "b"), advance="unreachable", at_z=1.4)
+    assert step.attention.point is None
+    assert step.attention.point_r is None
+    assert step.attention.face_channel() == "point_l"
+
+
+def test_attention_rider_not_required_by_default() -> None:
+    step = _step({"duration": 2.0, "interaction": "TALK_TO", "attention": {"gaze": "partner"}})
     assert isinstance(step, StepDef)
-    assert step.attention == AttentionDef(gesture="point", at="partner")
+    assert step.attention == AttentionDef(gaze=ChannelDef(at=("partner",)))
+    assert step.attention.required is False
+    step = _step({"duration": 2.0, "attention": {"gaze": "partner", "required": True}, "interaction": "TALK_TO"})
+    assert isinstance(step, StepDef)
+    assert step.attention.required is True
 
 
 def test_attention_on_cancel_step() -> None:
-    step = _step({"cancel": True, "attention": {"gesture": "wave", "at": "partner"}})
+    step = _step({"cancel": True, "attention": {"point_r": "partner"}})
     assert isinstance(step, StepDef)
     assert step.cancel is True
     assert step.attention is not None
 
 
 def test_attention_on_go_to_step() -> None:
-    step = _step({"kind": "go_to", "target_pose": {"x": 1.0, "y": 2.0}, "attention": {"gesture": "point", "at": ["partner", "ped_1"], "at_z": 1.4, "face": True}})
+    step = _step({"kind": "go_to", "target_pose": {"x": 1.0, "y": 2.0}, "attention": {"point": {"at": ["partner", "ped_1"], "at_z": 1.4}, "face": True}})
     assert isinstance(step, GoToStepDef)
-    assert step.attention == AttentionDef(gesture="point", at=("partner", "ped_1"), at_z=1.4, face=True)
+    assert step.attention == AttentionDef(point=ChannelDef(at=("partner", "ped_1"), at_z=1.4), face=True)
+
+
+def test_sequence_attention_rider() -> None:
+    data = _minimal(
+        {
+            "agent_types": {
+                "walker": {
+                    "mode": "behavior_tree",
+                    "sequences": {"default": {"attention": {"gaze": {"at": "robot:bot", "hold": "keep"}, "face": "bench_1"}, "steps": {"wait": {"duration": 1.0}}}},
+                }
+            },
+        }
+    )
+    seq = _structure_manual(data).agent_types["walker"].sequences["default"]
+    assert seq.attention == AttentionDef(gaze=ChannelDef(at=(RobotRef("bot"),), hold="keep"), face="bench_1")
 
 
 def test_go_to_step_unknown_field_raises() -> None:
@@ -329,44 +359,61 @@ def test_go_to_step_unknown_field_raises() -> None:
     ],
 )
 def test_attention_ref_kinds(raw: object, expected: object) -> None:
-    step = _step({"attention": {"gesture": "point", "at": raw}})
+    step = _step({"attention": {"gaze": raw}})
     assert isinstance(step, AttentionStepDef)
-    assert step.attention.at == expected
+    assert step.attention.gaze == ChannelDef(at=(expected,))
 
 
-def test_attention_at_list_structures_each_ref() -> None:
-    step = _step({"attention": {"gesture": "point", "at": ["partner", 3, {"x": 0, "y": 0, "z": 0}]}})
+@pytest.mark.parametrize(
+    ("face", "expected"),
+    [(True, True), ("true", True), (False, False), ("false", False), ("auto", None), (None, None), ("bench_1", "bench_1"), ({"x": 1, "y": 2, "z": 3}, Pose3(1.0, 2.0, 3.0)), (4, 4)],
+)
+def test_attention_face_forms(face: object, expected: object) -> None:
+    step = _step({"attention": {"gaze": "bench", "face": face}})
     assert isinstance(step, AttentionStepDef)
-    assert step.attention.at == ("partner", 3, Pose3(0.0, 0.0, 0.0))
+    assert step.attention.face == expected
 
 
 @pytest.mark.parametrize(
     ("att", "match"),
     [
-        ({"gesture": "", "at": "bench"}, "gesture"),
-        ({"gesture": 3, "at": "bench"}, "gesture"),
-        ({"gesture": "point"}, "at"),
-        ({"gesture": "point", "at": []}, "must not be empty"),
-        ({"gesture": "point", "at": True}, "bool"),
-        ({"gesture": "point", "at": ""}, "non-empty"),
-        ({"gesture": "point", "at": "robot:"}, "robot:<name>"),
-        ({"gesture": "point", "at": {"x": 1.0, "y": 2.0}}, "x, y, z"),
-        ({"gesture": "point", "at": {"azimuth": 1.0}}, "azimuth"),
-        ({"gesture": "point", "at": {"azimuth": "a", "elevation": 0}}, "number"),
-        ({"gesture": "point", "at": {"azimuth": 0, "elevation": 0, "distance": 0}}, "distance"),
-        ({"gesture": "point", "at": 1.5}, "ref must be"),
-        ({"gesture": "point", "at": "bench", "hand": "both"}, "hand"),
-        ({"gesture": "point", "at": "bench", "face": "maybe"}, "face"),
-        ({"gesture": "point", "at": "bench", "hold": "forever"}, "hold"),
-        ({"gesture": "point", "at": "bench", "dwell": 0}, "dwell"),
-        ({"gesture": "point", "at": "bench", "dwell": "x"}, "dwell"),
-        ({"gesture": "point", "at": "bench", "at_z": "high"}, "at_z"),
-        ({"gesture": "point", "at": {"x": 1.0, "y": 2.0, "z": 3.0}, "at_z": 0.5}, "at_z"),
-        ({"gesture": "point", "at": {"azimuth": 0, "elevation": 0}, "at_z": 0.5}, "at_z"),
-        ({"gesture": "point", "at": ["bench", {"azimuth": 0, "elevation": 0}], "at_z": 0.5}, "at_z"),
-        ({"gesture": "point", "at": {"azimuth": 0, "elevation": 0}, "face": True}, "face: true"),
-        ({"gesture": "point", "at": ["bench", {"azimuth": 0, "elevation": 0}], "face": "true"}, "face: true"),
-        ({"gesture": "point", "at": "bench", "release": False}, "unknown attention fields"),
+        ({}, "at least one channel"),
+        ({"face": True}, "at least one channel"),
+        ({"gesture": "point", "at": "bench"}, "unknown attention fields"),
+        ({"gaze": "bench", "hand": "left"}, "unknown attention fields"),
+        ({"gaze": "bench", "hold": "keep"}, "unknown attention fields"),
+        ({"gaze": "bench", "dwell": 2}, "unknown attention fields"),
+        ({"gaze": "bench", "at": "bench"}, "unknown attention fields"),
+        ({"point": "a", "point_l": "b"}, "exactly one arm channel"),
+        ({"point_r": "a", "point_l": "b"}, "exactly one arm channel"),
+        ({"gaze": {"at": "bench", "hand": "left"}}, "unknown attention gaze fields"),
+        ({"gaze": {"dwell": 1.0}}, "requires 'at'"),
+        ({"gaze": []}, "must not be empty"),
+        ({"gaze": {"at": []}}, "must not be empty"),
+        ({"gaze": True}, "bool"),
+        ({"gaze": ""}, "non-empty"),
+        ({"gaze": "robot:"}, "robot:<name>"),
+        ({"gaze": {"x": 1.0, "y": 2.0}}, "x, y, z"),
+        ({"gaze": {"azimuth": 1.0}}, "azimuth"),
+        ({"gaze": {"azimuth": "a", "elevation": 0}}, "number"),
+        ({"gaze": {"azimuth": 0, "elevation": 0, "distance": 0}}, "distance"),
+        ({"gaze": 1.5}, "ref must be"),
+        ({"gaze": "bench", "face": 1.5}, "face"),
+        ({"gaze": "bench", "face": ""}, "face"),
+        ({"gaze": "bench", "face": {"azimuth": 0, "elevation": 0}}, "never drives face"),
+        ({"gaze": {"at": "bench", "hold": "forever"}}, "hold"),
+        ({"gaze": {"at": "bench", "advance": "never"}}, "advance"),
+        ({"gaze": {"at": "bench", "dwell": 0}}, "dwell"),
+        ({"gaze": {"at": "bench", "dwell": "x"}}, "dwell"),
+        ({"gaze": {"at": "bench", "at_z": "high"}}, "at_z"),
+        ({"gaze": {"at": {"x": 1.0, "y": 2.0, "z": 3.0}, "at_z": 0.5}}, "at_z"),
+        ({"gaze": {"at": {"azimuth": 0, "elevation": 0}, "at_z": 0.5}}, "at_z"),
+        ({"gaze": {"at": ["bench", {"azimuth": 0, "elevation": 0}], "at_z": 0.5}}, "at_z"),
+        ({"gaze": {"azimuth": 0, "elevation": 0}, "face": True}, "face: true"),
+        ({"gaze": "bench", "point": [{"azimuth": 0, "elevation": 0}, "bench"], "face": "true"}, "face: true"),
+        ({"gaze": "bench", "required": "yes"}, "required"),
+        ({"gaze": "bench", "required": False}, "always required"),
+        ({"gaze": {"at": ["a", "b"], "advance": "unreachable"}}, "needs 'duration' or 'patience'"),
     ],
 )
 def test_attention_validation(att: dict, match: str) -> None:
@@ -374,41 +421,45 @@ def test_attention_validation(att: dict, match: str) -> None:
         _step({"attention": att})
 
 
+def test_attention_face_true_allows_relative_later_entries() -> None:
+    step = _step({"attention": {"point": ["bench", {"azimuth": 0, "elevation": 0}], "face": True}})
+    assert isinstance(step, AttentionStepDef)
+    assert step.attention.face is True
+
+
+def test_attention_cycling_bare_step_with_duration_or_patience() -> None:
+    assert isinstance(_step({"attention": {"gaze": {"at": ["a", "b"], "advance": "unreachable"}}, "duration": 2.0}), AttentionStepDef)
+    assert isinstance(_step({"attention": {"gaze": {"at": ["a", "b"], "advance": "unreachable"}}, "patience": 2.0}), AttentionStepDef)
+
+
+def test_attention_rider_accepts_cycling_and_required_false() -> None:
+    step = _step({"duration": 2.0, "attention": {"gaze": {"at": ["a", "b"], "advance": "unreachable"}, "required": False}, "interaction": "TALK_TO"})
+    assert isinstance(step, StepDef)
+
+
 def test_attention_not_a_mapping_raises() -> None:
     with pytest.raises(ValueError, match="mapping"):
         _step({"attention": "point"})
 
 
-def test_attention_none_gesture_without_at() -> None:
-    step = _step({"attention": {"gesture": "none"}})
-    assert isinstance(step, AttentionStepDef)
-    assert step.attention.at is None
-
-
-def test_attention_face_forms() -> None:
-    assert _step({"attention": {"gesture": "point", "at": "bench", "face": True}}).attention.face is True
-    assert _step({"attention": {"gesture": "point", "at": "bench", "face": "false"}}).attention.face is False
-    assert _step({"attention": {"gesture": "point", "at": "bench", "face": "auto"}}).attention.face is None
-
-
 def test_attention_at_z_numeric_with_entity_ref() -> None:
-    assert _step({"attention": {"gesture": "point", "at": "bench", "at_z": 1}}).attention.at_z == 1.0
-    assert _step({"attention": {"gesture": "point", "at": ["partner", 3], "at_z": 1.5}}).attention.at_z == 1.5
+    assert _step({"attention": {"gaze": {"at": "bench", "at_z": 1}}}).attention.gaze.at_z == 1.0
+    assert _step({"attention": {"gaze": {"at": ["partner", 3], "at_z": 1.5}}}).attention.gaze.at_z == 1.5
 
 
 def test_attention_step_unknown_field_raises() -> None:
     with pytest.raises(ValueError, match="unknown attention step fields"):
-        _step({"kind": "attention", "attention": {"gesture": "point", "at": "bench"}, "target": "bench"})
+        _step({"kind": "attention", "attention": {"gaze": "bench"}, "target": "bench"})
 
 
 def test_attention_with_step_only_fields_names_them() -> None:
     with pytest.raises(ValueError, match=r"step has attention plus interaction-only fields \['offer', 'until'\], add kind or interaction"):
-        _step({"attention": {"gesture": "point", "at": "bench"}, "offer": True, "until": "x"})
+        _step({"attention": {"gaze": "bench"}, "offer": True, "until": "x"})
 
 
 def test_attention_on_autonomous_step_raises() -> None:
     with pytest.raises(ValueError, match="not supported on 'autonomous: true' steps"):
-        _step({"autonomous": True, "attention": {"gesture": "point", "at": "bench"}})
+        _step({"autonomous": True, "attention": {"gaze": "bench"}})
 
 
 def test_attention_kind_requires_block() -> None:
@@ -422,7 +473,7 @@ def test_attention_in_actions_raises() -> None:
             "agent_types": {
                 "walker": {
                     "mode": "behavior_tree",
-                    "actions": {"show": {"attention": {"gesture": "point", "at": "bench"}}},
+                    "actions": {"show": {"attention": {"gaze": "bench"}}},
                 }
             },
         }

@@ -13,6 +13,7 @@ import numpy as np
 import rclpy
 from arena_humansim_msgs.msg import AgentState as AgentStateMsg
 from arena_humansim_msgs.msg import AgentStates as AgentStatesMsg
+from arena_humansim_msgs.msg import Gesture as GestureMsg
 from arena_humansim_msgs.msg import ObstacleConfig as ObstacleConfigMsg
 from arena_humansim_msgs.msg import Shape as ShapeMsg
 from arena_humansim_msgs.msg import SinkConfig as SinkConfigMsg
@@ -61,7 +62,7 @@ from arena_humansim.core.agents import (
     create_agent,
 )
 from arena_humansim.core.agents.loader import resolve_agent_type_name
-from arena_humansim.core.agents.types import shift_agent_type
+from arena_humansim.core.agents.types import ATTENTION_KEYWORDS, shift_agent_type
 from arena_humansim.core.behavior.compiler import BehaviorTreeFactory
 from arena_humansim.core.despawn_monitor import DespawnMonitor
 from arena_humansim.core.interaction_kinds import InteractionType
@@ -88,6 +89,7 @@ from arena_humansim.utils.types import (
     BehaviorTreeMovement,
     BeliefState,
     CommandType,
+    GestureIntent,
     HighLevelCommand,
     InteractionOutcome,
     Pose2D,
@@ -185,6 +187,14 @@ def arrival_damp_step(pool: AgentPool, dt: float, tau_brake: float) -> None:
         return
     decay = float(np.exp(-dt / tau_brake))
     pool.vel[:n] = np.where(latched[:, None], pool.vel[:n] * decay, pool.vel[:n])
+
+
+def _gesture_msg(intent: GestureIntent) -> GestureMsg:
+    g = GestureMsg()
+    g.slot = intent.slot
+    g.at.x, g.at.y, g.at.z = intent.x, intent.y, intent.z
+    g.opts = json.dumps(intent.opts) if intent.opts else ""
+    return g
 
 
 class AgentManager(Node):
@@ -843,6 +853,8 @@ class AgentManager(Node):
         overrides = {}
         if agent_msg.radius > 0.0:
             overrides["agent_radius"] = agent_msg.radius
+        if agent_msg.handedness in ("l", "r"):
+            overrides["handedness"] = agent_msg.handedness
         vel_val = agent_msg.desired_velocity
         if vel_val > 0.0:
             overrides["desired_velocity"] = vel_val
@@ -1885,16 +1897,10 @@ class AgentManager(Node):
             a.policy = self._policy_names[pidx] if 0 <= pidx < len(self._policy_names) else ""
             a.name = names.get(a.agent_id, "")
             agent = self._agents.get(a.agent_id)
+            a.handedness = agent.params.handedness if agent is not None else ""
             mv = agent.movement if agent is not None else None
-            intent = mv.gesture if isinstance(mv, BehaviorTreeMovement) else None
-            if intent is None:
-                a.gesture = ""
-                a.gesture_at.x = a.gesture_at.y = a.gesture_at.z = 0.0
-                a.gesture_opts = ""
-            else:
-                a.gesture = intent.kind
-                a.gesture_at.x, a.gesture_at.y, a.gesture_at.z = intent.x, intent.y, intent.z
-                a.gesture_opts = json.dumps({"hand": intent.hand})
+            intents = mv.gestures if isinstance(mv, BehaviorTreeMovement) else ()
+            a.gestures = [_gesture_msg(g) for g in intents]
         return msg
 
     def _spawn_agents_callback(
@@ -1903,6 +1909,13 @@ class AgentManager(Node):
         response: SpawnAgents.Response,
     ) -> SpawnAgents.Response:
         spawned_ids = []
+        reserved = [m.name for m in request.agents if m.name in ATTENTION_KEYWORDS]
+        bad_hands = [m.handedness for m in request.agents if m.handedness not in ("", "l", "r")]
+        if reserved or bad_hands:
+            response.success = False
+            response.message = f"agent names {reserved} are reserved attention keywords {list(ATTENTION_KEYWORDS)}" if reserved else f"handedness must be 'l' or 'r', got {bad_hands}"
+            self._logger.error(response.message)
+            return response
         for agent_msg in request.agents:
             aid = agent_msg.agent_id
             if aid == 0:

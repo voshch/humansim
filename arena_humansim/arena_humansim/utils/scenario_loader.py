@@ -4,11 +4,14 @@ import attrs
 import cattrs
 
 from arena_humansim.core.agents.types import (
+    ARM_CHANNELS,
+    CHANNEL_SLOTS,
     ActionDef,
     AgentType,
     AttentionDef,
     AttentionRef,
     AttentionStepDef,
+    ChannelDef,
     GoToStepDef,
     NeedCondition,
     NeedDist,
@@ -81,8 +84,10 @@ converter.register_structure_hook(ActionDef, _structure_action_def)
 
 _STEP_KINDS = ("object_interact", "go_to", "attention")
 
-_HANDS = ("auto", "left", "right")
+_ADVANCES = ("dwell", "unreachable")
 _HOLDS = ("release", "keep")
+_CHANNEL_KEYS = ("at", "dwell", "advance", "hold", "at_z")
+_BLOCK_KEYS = (*CHANNEL_SLOTS, "face", "required")
 
 
 def _structure_attention_ref(val: object) -> AttentionRef:
@@ -117,7 +122,46 @@ def _structure_attention_ref(val: object) -> AttentionRef:
     raise ValueError(f"attention 'at' ref must be a keyword, object id, agent name, robot:<name>, agent id, {{x, y, z}} or {{azimuth, elevation}}, got {val!r}")
 
 
-def _structure_face(val: object) -> bool | None:
+def _structure_targets(val: object, where: str) -> tuple[AttentionRef, ...]:
+    if isinstance(val, (list, tuple)):
+        if not val:
+            raise ValueError(f"attention {where} 'at' list must not be empty")
+        return tuple(_structure_attention_ref(r) for r in val)
+    return (_structure_attention_ref(val),)
+
+
+def _structure_channel(name: str, val: object) -> ChannelDef:
+    if isinstance(val, ChannelDef):
+        return val
+    if not isinstance(val, dict) or "at" not in val:
+        if isinstance(val, dict) and set(val) & set(_CHANNEL_KEYS):
+            raise ValueError(f"attention {name} mapping requires 'at'")
+        return ChannelDef(at=_structure_targets(val, name))
+    d = dict(val)
+    unknown = set(d) - set(_CHANNEL_KEYS)
+    if unknown:
+        raise ValueError(f"unknown attention {name} fields: {sorted(unknown)}")
+    refs = _structure_targets(d["at"], name)
+    dwell = d.get("dwell", 1.0)
+    if isinstance(dwell, bool) or not isinstance(dwell, (int, float)) or dwell <= 0:
+        raise ValueError(f"attention {name} 'dwell' must be a number > 0, got {dwell!r}")
+    advance = d.get("advance", "dwell")
+    if advance not in _ADVANCES:
+        raise ValueError(f"attention {name} 'advance' must be one of {_ADVANCES}, got {advance!r}")
+    hold = d.get("hold", "release")
+    if hold not in _HOLDS:
+        raise ValueError(f"attention {name} 'hold' must be one of {_HOLDS}, got {hold!r}")
+    at_z = d.get("at_z")
+    if at_z is not None:
+        if isinstance(at_z, bool) or not isinstance(at_z, (int, float)):
+            raise ValueError(f"attention {name} 'at_z' must be a number, got {at_z!r}")
+        if any(isinstance(r, (Pose3, RelativeRef)) for r in refs):
+            raise ValueError(f"attention {name} 'at_z' is only valid with entity refs, not literal or relative ones")
+        at_z = float(at_z)
+    return ChannelDef(at=refs, dwell=float(dwell), advance=advance, hold=hold, at_z=at_z)
+
+
+def _structure_face(val: object) -> bool | AttentionRef | None:
     if val is None or val == "auto":
         return None
     if isinstance(val, bool):
@@ -126,7 +170,13 @@ def _structure_face(val: object) -> bool | None:
         return True
     if val == "false":
         return False
-    raise ValueError(f"attention 'face' must be auto | true | false, got {val!r}")
+    try:
+        ref = _structure_attention_ref(val)
+    except ValueError:
+        raise ValueError(f"attention 'face' must be auto | true | false | <ref>, got {val!r}") from None
+    if isinstance(ref, RelativeRef):
+        raise ValueError("attention 'face' ref must not be relative, {azimuth, elevation} never drives face")
+    return ref
 
 
 def _structure_attention_def(val: object) -> AttentionDef:
@@ -135,46 +185,35 @@ def _structure_attention_def(val: object) -> AttentionDef:
     if not isinstance(val, dict):
         raise ValueError(f"'attention' must be a mapping, got {type(val).__name__}")
     d = dict(val)
-    known = {f.name for f in attrs.fields(AttentionDef)}
-    unknown = set(d) - known
+    unknown = set(d) - set(_BLOCK_KEYS)
     if unknown:
         raise ValueError(f"unknown attention fields: {sorted(unknown)}")
-    gesture = d.get("gesture")
-    if not isinstance(gesture, str) or not gesture:
-        raise ValueError("attention requires a non-empty 'gesture: <str>' ('none' clears)")
-    at_raw = d.get("at")
-    at: AttentionRef | tuple[AttentionRef, ...] | None
-    if at_raw is None:
-        if gesture != "none":
-            raise ValueError("attention requires 'at: <ref | [refs]>' unless gesture is 'none'")
-        at = None
-    elif isinstance(at_raw, (list, tuple)):
-        if not at_raw:
-            raise ValueError("attention 'at' list must not be empty")
-        at = tuple(_structure_attention_ref(r) for r in at_raw)
-    else:
-        at = _structure_attention_ref(at_raw)
-    refs = at if isinstance(at, tuple) else () if at is None else (at,)
-    hand = d.get("hand", "auto")
-    if hand not in _HANDS:
-        raise ValueError(f"attention 'hand' must be one of {_HANDS}, got {hand!r}")
+    channels = {name: _structure_channel(name, d[name]) for name in CHANNEL_SLOTS if d.get(name) is not None}
+    if not channels:
+        raise ValueError(f"attention requires at least one channel: {list(CHANNEL_SLOTS)}")
+    arms = [name for name in ARM_CHANNELS if name in channels]
+    if len(arms) > 1:
+        raise ValueError(f"attention takes exactly one arm channel (point | point_l | point_r), got {arms}")
     face = _structure_face(d.get("face"))
-    hold = d.get("hold", "release")
-    if hold not in _HOLDS:
-        raise ValueError(f"attention 'hold' must be one of {_HOLDS}, got {hold!r}")
-    dwell = d.get("dwell", 1.0)
-    if isinstance(dwell, bool) or not isinstance(dwell, (int, float)) or dwell <= 0:
-        raise ValueError(f"attention 'dwell' must be a number > 0, got {dwell!r}")
-    if face is True and any(isinstance(r, RelativeRef) for r in refs):
-        raise ValueError("attention 'face: true' is not valid with a relative {azimuth, elevation} ref")
-    at_z = d.get("at_z")
-    if at_z is not None:
-        if isinstance(at_z, bool) or not isinstance(at_z, (int, float)):
-            raise ValueError(f"attention 'at_z' must be a number, got {at_z!r}")
-        if not refs or any(isinstance(r, (Pose3, RelativeRef)) for r in refs):
-            raise ValueError("attention 'at_z' is only valid with entity refs, not literal or relative ones")
-        at_z = float(at_z)
-    return AttentionDef(gesture=gesture, at=at, hand=hand, face=face, hold=hold, dwell=float(dwell), at_z=at_z)
+    required = d.get("required", False)
+    if not isinstance(required, bool):
+        raise ValueError(f"attention 'required' must be a bool, got {required!r}")
+    att = AttentionDef(face=face, required=required, **channels)
+    if face is True:
+        winner = att.face_channel()
+        assert winner is not None
+        if isinstance(channels[winner].at[0], RelativeRef):
+            raise ValueError(f"attention 'face: true' is not valid when the first entry of {winner!r} is a relative {{azimuth, elevation}} ref")
+    return att
+
+
+def _check_bare_attention(att: AttentionDef, raw: dict, timed: bool) -> None:
+    if raw.get("required") is False:
+        raise ValueError("bare attention steps are always required, drop 'required: false'")
+    if not timed:
+        cycling = [name for name, ch in att.channels().items() if ch.advance == "unreachable"]
+        if cycling:
+            raise ValueError(f"bare attention step with cycling channel(s) {cycling} needs 'duration' or 'patience'")
 
 
 def _structure_go_to_step_def(val: object, _: type) -> GoToStepDef:
@@ -214,7 +253,10 @@ def _structure_attention_step_def(val: object, _: type) -> AttentionStepDef:
     explicit_kind = d.pop("kind", None) is not None
     if "attention" not in d:
         raise ValueError("attention step requires an 'attention:' block")
-    d["attention"] = _structure_attention_def(d["attention"])
+    raw_att = d["attention"]
+    att = _structure_attention_def(raw_att)
+    _check_bare_attention(att, raw_att if isinstance(raw_att, dict) else {}, d.get("duration") is not None or d.get("patience") is not None)
+    d["attention"] = attrs.evolve(att, required=True)
     known = {f.name for f in attrs.fields(AttentionStepDef)}
     unknown = set(d) - known
     if unknown:
@@ -356,6 +398,8 @@ def _structure_sequence_def(val: object, _: type) -> SequenceDef:
         d["transitions"] = tuple(converter.structure(t, TransitionDef) for t in d["transitions"])
     else:
         d["transitions"] = ()
+    if d.get("attention") is not None:
+        d["attention"] = _structure_attention_def(d["attention"])
     return SequenceDef(**d)
 
 

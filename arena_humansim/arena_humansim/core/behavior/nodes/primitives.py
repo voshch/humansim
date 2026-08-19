@@ -21,19 +21,6 @@ class ClearOutcomeNode(py_trees.behaviour.Behaviour):
         return py_trees.common.Status.SUCCESS
 
 
-class ClearGestureNode(py_trees.behaviour.Behaviour):
-    def __init__(self, name: str, agent: BaseAgent) -> None:
-        super().__init__(name)
-        self._agent = agent
-
-    def update(self) -> py_trees.common.Status:
-        mv = self._agent.movement
-        if isinstance(mv, BehaviorTreeMovement):
-            mv.gesture = None
-            mv.heading_goal = None
-        return py_trees.common.Status.SUCCESS
-
-
 class PatienceWatchdogNode(py_trees.behaviour.Behaviour):
     def __init__(
         self,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 
 import attrs
 import numpy as np
@@ -8,7 +8,7 @@ import py_trees
 from rclpy.logging import get_logger
 
 from arena_humansim.core.agents import AgentType, BaseAgent, ParamDist
-from arena_humansim.core.agents.types import ActionDef, AttentionDef, AttentionStepDef, GoToStepDef, StepDef
+from arena_humansim.core.agents.types import ActionDef, AttentionDef, AttentionStepDef, GoToStepDef, SequenceDef, StepDef
 from arena_humansim.core.interaction_kinds import InteractionType, is_object_bound_name
 from arena_humansim.core.interaction_manager import InteractionManager
 from arena_humansim.core.pool import AgentPool
@@ -25,21 +25,42 @@ from .nodes import (
     AutonomousNode,
     BlockNode,
     CancelNode,
-    ClearGestureNode,
     ClearOutcomeNode,
     GoToNode,
     HoldNode,
     NeedsDecayNode,
     PatienceWatchdogNode,
     ResolveObjectNode,
+    RiderStep,
     SatisfyNode,
     SeekNode,
+    SequenceRiderNode,
     SequenceStateMachine,
 )
 from .step_context import StepContext
 
 AgentLookup = Callable[[int], BaseAgent | None]
 NameLookup = Callable[[str, int | None], int | None]
+Walking = Callable[[], bool]
+
+_RUNNING = py_trees.common.Status.RUNNING
+
+
+def _walking(nodes: Callable[[], Iterable[py_trees.behaviour.Behaviour]]) -> Walking:
+    def walking() -> bool:
+        return any(isinstance(n, (GoToNode, BlockNode)) and n.status == _RUNNING for n in nodes())
+
+    return walking
+
+
+class _StepParallel(py_trees.composites.Parallel):
+    """Parallel that also stops its still-running children (watchdog, rider) when the step ends."""
+
+    def stop(self, new_status: py_trees.common.Status = py_trees.common.Status.INVALID) -> None:
+        for child in self.children:
+            if child.status == _RUNNING:
+                child.stop(py_trees.common.Status.INVALID)
+        super().stop(new_status)
 
 
 @attrs.frozen
@@ -57,7 +78,7 @@ def _wiring(node_name: str, world: WorldKnowledge, agent_lookup: AgentLookup | N
     return _AttentionWiring(world=world, agent_lookup=agent_lookup, name_lookup=name_lookup, rng=rng, dt=dt)
 
 
-def _attention_node(node_name: str, agent: BaseAgent, attention: AttentionDef, w: _AttentionWiring, ctx: StepContext, bare: bool = False, idle: bool = False, duration: ParamDist | None = None) -> AttentionNode:
+def _attention_node(node_name: str, agent: BaseAgent, attention: AttentionDef, w: _AttentionWiring, ctx: StepContext, bare: bool = False, duration: ParamDist | None = None, walking: Walking | None = None) -> AttentionNode:
     return AttentionNode(
         name=f"{node_name}/attention",
         agent=agent,
@@ -69,23 +90,26 @@ def _attention_node(node_name: str, agent: BaseAgent, attention: AttentionDef, w
         dt=w.dt,
         ctx=ctx,
         bare=bare,
-        idle=idle,
         duration=duration,
+        walking=walking,
     )
 
 
-def _head(node_name: str, agent: BaseAgent, attention: AttentionDef | None) -> list[py_trees.behaviour.Behaviour]:
-    # Steps with attention retarget the previous intent instead of clearing it.
-    children: list[py_trees.behaviour.Behaviour] = [ClearOutcomeNode(name=f"{node_name}/clear_outcome", agent=agent)]
+def _head(node_name: str, agent: BaseAgent) -> list[py_trees.behaviour.Behaviour]:
+    return [ClearOutcomeNode(name=f"{node_name}/clear_outcome", agent=agent)]
+
+
+def _rider(node_name: str, agent: BaseAgent, attention: AttentionDef | None, w: _AttentionWiring | None, ctx: StepContext, children: list[py_trees.behaviour.Behaviour]) -> AttentionNode | None:
     if attention is None:
-        children.append(ClearGestureNode(name=f"{node_name}/clear_gesture", agent=agent))
-    return children
+        return None
+    assert w is not None
+    return _attention_node(node_name, agent, attention, w, ctx, walking=_walking(lambda: children))
 
 
 def _watched(node_name: str, watchdog: py_trees.behaviour.Behaviour, sequence_children: list[py_trees.behaviour.Behaviour], attention: AttentionNode | None = None) -> py_trees.composites.Parallel:
     # Watchdog never returns SUCCESS, so Parallel(SuccessOnOne) status tracks the sibling Sequence;
     # a watchdog FAILURE still propagates because Parallel returns FAILURE on any child FAILURE.
-    # A rider AttentionNode never returns SUCCESS or FAILURE either.
+    # A rider AttentionNode never returns SUCCESS and only FAILS when required.
     inner = py_trees.composites.Sequence(
         name=f"{node_name}/sequence",
         memory=True,
@@ -94,7 +118,7 @@ def _watched(node_name: str, watchdog: py_trees.behaviour.Behaviour, sequence_ch
     children: list[py_trees.behaviour.Behaviour] = [watchdog, inner]
     if attention is not None:
         children.append(attention)
-    return py_trees.composites.Parallel(
+    return _StepParallel(
         name=node_name,
         policy=py_trees.common.ParallelPolicy.SuccessOnOne(),
         children=children,
@@ -121,7 +145,7 @@ def _expand_go_to_step(
         rng=rng,
         dt=dt,
     )
-    children = _head(node_name, agent, step.attention)
+    children = _head(node_name, agent)
     if step.target is not None:
         children.extend(
             [
@@ -141,10 +165,8 @@ def _expand_go_to_step(
         children.append(HoldNode(name=f"{node_name}/hold", agent=agent, duration_source=step.duration, rng=rng, dt=dt, ctx=ctx))
     if step.satisfies:
         children.append(SatisfyNode(name=f"{node_name}/satisfy", agent=agent, satisfies=step.satisfies))
-    rider = None
-    if step.attention is not None:
-        rider = _attention_node(node_name, agent, step.attention, _wiring(node_name, world, agent_lookup, name_lookup, rng, dt), ctx)
-    return _watched(node_name, watchdog, children, rider)
+    w = _wiring(node_name, world, agent_lookup, name_lookup, rng, dt) if step.attention is not None else None
+    return _watched(node_name, watchdog, children, _rider(node_name, agent, step.attention, w, ctx, children))
 
 
 def _expand_interaction_step(
@@ -167,7 +189,7 @@ def _expand_interaction_step(
         rng=rng,
         dt=dt,
     )
-    children = _head(node_name, agent, step.attention)
+    children = _head(node_name, agent)
     object_bound = is_object_bound_name(step.interaction) and step.target is not None
     if object_bound:
         children.extend(
@@ -206,10 +228,8 @@ def _expand_interaction_step(
     )
     if step.satisfies:
         children.append(SatisfyNode(name=f"{node_name}/satisfy", agent=agent, satisfies=step.satisfies))
-    rider = None
-    if step.attention is not None:
-        rider = _attention_node(node_name, agent, step.attention, _wiring(node_name, world, agent_lookup, name_lookup, rng, dt), ctx)
-    return _watched(node_name, watchdog, children, rider)
+    w = _wiring(node_name, world, agent_lookup, name_lookup, rng, dt) if step.attention is not None else None
+    return _watched(node_name, watchdog, children, _rider(node_name, agent, step.attention, w, ctx, children))
 
 
 def _expand_pure_wait_step(
@@ -231,14 +251,12 @@ def _expand_pure_wait_step(
         rng=rng,
         dt=dt,
     )
-    children = _head(node_name, agent, step.attention)
+    children = _head(node_name, agent)
     children.append(HoldNode(name=f"{node_name}/hold", agent=agent, duration_source=step.duration, rng=rng, dt=dt, ctx=ctx))
     if step.satisfies:
         children.append(SatisfyNode(name=f"{node_name}/satisfy", agent=agent, satisfies=step.satisfies))
-    rider = None
-    if step.attention is not None:
-        rider = _attention_node(node_name, agent, step.attention, _wiring(node_name, world, agent_lookup, name_lookup, rng, dt), ctx, idle=True)
-    return _watched(node_name, watchdog, children, rider)
+    w = _wiring(node_name, world, agent_lookup, name_lookup, rng, dt) if step.attention is not None else None
+    return _watched(node_name, watchdog, children, _rider(node_name, agent, step.attention, w, ctx, children))
 
 
 def _expand_cancel_step(
@@ -258,14 +276,12 @@ def _expand_cancel_step(
         rng=rng,
         dt=dt,
     )
-    children = _head(node_name, agent, step.attention)
+    children = _head(node_name, agent)
     children.append(CancelNode(name=f"{node_name}/cancel", agent=agent, im=im))
     if step.satisfies:
         children.append(SatisfyNode(name=f"{node_name}/satisfy", agent=agent, satisfies=step.satisfies))
-    rider = None
-    if step.attention is not None:
-        rider = _attention_node(node_name, agent, step.attention, _wiring(node_name, world, agent_lookup, name_lookup, rng, dt), StepContext(im=im))
-    return _watched(node_name, watchdog, children, rider)
+    w = _wiring(node_name, world, agent_lookup, name_lookup, rng, dt) if step.attention is not None else None
+    return _watched(node_name, watchdog, children, _rider(node_name, agent, step.attention, w, StepContext(im=im), children))
 
 
 def _expand_block_step(
@@ -288,7 +304,7 @@ def _expand_block_step(
         rng=rng,
         dt=dt,
     )
-    children = _head(node_name, agent, step.attention)
+    children = _head(node_name, agent)
     children.append(
         BlockNode(
             name=f"{node_name}/block",
@@ -302,10 +318,8 @@ def _expand_block_step(
     )
     if step.satisfies:
         children.append(SatisfyNode(name=f"{node_name}/satisfy", agent=agent, satisfies=step.satisfies))
-    rider = None
-    if step.attention is not None:
-        rider = _attention_node(node_name, agent, step.attention, _wiring(node_name, world, agent_lookup, name_lookup, rng, dt), ctx)
-    return _watched(node_name, watchdog, children, rider)
+    w = _wiring(node_name, world, agent_lookup, name_lookup, rng, dt) if step.attention is not None else None
+    return _watched(node_name, watchdog, children, _rider(node_name, agent, step.attention, w, ctx, children))
 
 
 def _expand_attention_step(
@@ -355,23 +369,16 @@ class _StepRecipe:
         if step.autonomous:
             if step.attention is not None:
                 raise ValueError(f"{self.node_name}: attention is not supported on autonomous steps")
-            return py_trees.composites.Sequence(
+            return AutonomousNode(
                 name=self.node_name,
-                memory=True,
-                children=[
-                    ClearGestureNode(name=f"{self.node_name}/clear_gesture", agent=agent),
-                    AutonomousNode(
-                        name=f"{self.node_name}/autonomous",
-                        step_def=step,
-                        agent=agent,
-                        action_defs=dict(self.action_defs),
-                        utility_weights=dict(self.utility_weights),
-                        world=world,
-                        event_bus=event_bus,
-                        rng=rng,
-                        dt=dt,
-                    ),
-                ],
+                step_def=step,
+                agent=agent,
+                action_defs=dict(self.action_defs),
+                utility_weights=dict(self.utility_weights),
+                world=world,
+                event_bus=event_bus,
+                rng=rng,
+                dt=dt,
             )
         if step.cancel:
             return _expand_cancel_step(self.node_name, step, agent, rng, dt, world, im=im, agent_lookup=agent_lookup, name_lookup=name_lookup)
@@ -382,6 +389,35 @@ class _StepRecipe:
         if step.interaction is not None:
             return _expand_interaction_step(self.node_name, step, agent, world, rng, dt, is_bound_lookup=is_bound_lookup, im=im, agent_lookup=agent_lookup, name_lookup=name_lookup)
         return _expand_pure_wait_step(self.node_name, step, agent, rng, dt, world, is_bound_lookup=is_bound_lookup, im=im, agent_lookup=agent_lookup, name_lookup=name_lookup)
+
+
+def _ride(
+    seq_name: str,
+    seq_def: SequenceDef,
+    steps: py_trees.behaviour.Behaviour,
+    children: list[py_trees.behaviour.Behaviour],
+    recipes: list[_StepRecipe],
+    agent: BaseAgent,
+    world: WorldKnowledge,
+    rng: np.random.Generator,
+    dt: float,
+    is_bound_lookup: IsBoundLookup | None,
+    im: InteractionManager | None,
+    agent_lookup: AgentLookup | None,
+    name_lookup: NameLookup | None,
+) -> py_trees.behaviour.Behaviour:
+    """Wrap the compiled steps with the sequence-level attention rider when the sequence declares one."""
+    if seq_def.attention is None:
+        return steps
+    w = _wiring(seq_name, world, agent_lookup, name_lookup, rng, dt)
+    ctx = StepContext(is_bound_lookup=is_bound_lookup, im=im)
+    infos = [RiderStep(own_attention=r.step_def.attention is not None, autonomous=r.autonomous, walking=_walking(child.iterate)) for r, child in zip(recipes, children, strict=True)]
+    return SequenceRiderNode(
+        name=f"{seq_name}/rider",
+        steps=steps,
+        step_infos=infos,
+        make_rider=lambda walking: _attention_node(seq_name, agent, seq_def.attention, w, ctx, walking=walking),
+    )
 
 
 class BehaviorTreeFactory:
@@ -431,14 +467,16 @@ class BehaviorTreeFactory:
         compiled_sequences: dict[str, py_trees.behaviour.Behaviour] = {}
         for seq_name, recipes in self._seq_recipes.items():
             children = [r.build(agent, world, event_bus, rng, dt, agent_lookup, pool, is_bound_lookup, im, name_lookup) for r in recipes]
+            steps: py_trees.behaviour.Behaviour
             if len(children) == 1:
-                compiled_sequences[seq_name] = children[0]
+                steps = children[0]
             else:
-                compiled_sequences[seq_name] = py_trees.composites.Sequence(
+                steps = py_trees.composites.Sequence(
                     name=seq_name,
                     memory=True,
                     children=children,
                 )
+            compiled_sequences[seq_name] = _ride(seq_name, self._sequence_defs[seq_name], steps, children, recipes, agent, world, rng, dt, is_bound_lookup, im, agent_lookup, name_lookup)
 
         state_machine = SequenceStateMachine(
             name=self._sm_name,
