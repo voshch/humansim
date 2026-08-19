@@ -27,6 +27,11 @@ class InteractionType(enum.IntEnum):
     WAVE_AT = 7
     BLOCK = 8
     SERVICE = 9
+    FALL = 10
+    HUG = 11
+    JUMP = 12
+    POINT = 13
+    SHAKE_HAND = 14
 
     @property
     def kind(self) -> InteractionKind:
@@ -252,6 +257,46 @@ def _registry() -> dict[InteractionType, InteractionKind]:
             handle=_TAG_HANDLE,
             contract_defaults=ContractDefaults(min_participants=1, max_participants=-1, queueable=True, access=AccessKind.FIFO),
             formation_default=_fs("f_formation", AnchorKind.PROVIDER),
+            allows_offer=True,
+            interaction_radius=3.0,
+        ),
+        InteractionType.FALL: InteractionKind(
+            label="FALL",
+            handle=_TAG_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=1, max_participants=-1, queueable=True, access=AccessKind.FIFO),
+            formation_default=_fs("f_formation", AnchorKind.PROVIDER),
+            allows_offer=True,
+            interaction_radius=3.0,
+        ),
+        InteractionType.HUG: InteractionKind(
+            label="HUG",
+            handle=_SYMMETRIC_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=2, max_participants=2, queueable=True, access=AccessKind.FIFO),
+            formation_default=_fs("dyad", AnchorKind.CENTROID),
+            allows_offer=True,
+            interaction_radius=3.0,
+        ),
+        InteractionType.JUMP: InteractionKind(
+            label="JUMP",
+            handle=_SYMMETRIC_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=1, max_participants=1, queueable=True, access=AccessKind.FIFO),
+            formation_default=_fs("dyad", AnchorKind.CENTROID),
+            allows_offer=True,
+            interaction_radius=3.0,
+        ),
+        InteractionType.POINT: InteractionKind(
+            label="POINT",
+            handle=_SYMMETRIC_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=1, max_participants=1, queueable=True, access=AccessKind.FIFO),
+            formation_default=_fs("dyad", AnchorKind.CENTROID),
+            allows_offer=True,
+            interaction_radius=3.0,
+        ),
+        InteractionType.SHAKE_HAND: InteractionKind(
+            label="SHAKE_HAND",
+            handle=_SYMMETRIC_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=2, max_participants=2, queueable=True, access=AccessKind.FIFO),
+            formation_default=_fs("dyad", AnchorKind.CENTROID),
             allows_offer=True,
             interaction_radius=3.0,
         ),

@@ -61,6 +61,7 @@ from arena_humansim.core.agents import (
 )
 from arena_humansim.core.agents.loader import resolve_agent_type_name
 from arena_humansim.core.agents.types import shift_agent_type
+from arena_humansim.core.animation_kinds import get_animation_for_agent
 from arena_humansim.core.behavior.compiler import BehaviorTreeFactory
 from arena_humansim.core.despawn_monitor import DespawnMonitor
 from arena_humansim.core.interaction_kinds import InteractionType
@@ -1834,6 +1835,9 @@ class AgentManager(Node):
         n = pool.n
         for idx in range(n):
             agent_id = int(pool.agent_ids[idx])
+            agent = self._agents.get(agent_id)
+            if agent is None:
+                continue
 
             # Find if this agent is in an active interaction
             active_interaction_type = None
@@ -1846,31 +1850,9 @@ class AgentManager(Node):
                             active_interaction_type = interaction.type
                             break
 
-            if active_interaction_type is not None:
-                if active_interaction_type in (InteractionType.SIT_ON, InteractionType.LIE_ON):
-                    pool.animation_state[idx] = 11  # SIT
-                elif active_interaction_type in (InteractionType.TALK_TO, InteractionType.GROUP_CONVERSATION):
-                    pool.animation_state[idx] = 12  # TALK
-                elif active_interaction_type == InteractionType.WAVE_AT:
-                    pool.animation_state[idx] = 13  # WAVE
-                else:
-                    # Fallback to speed-based if interaction doesn't map to a specific animation
-                    speed = math.hypot(float(pool.vel[idx, 0]), float(pool.vel[idx, 1]))
-                    if speed > 1.5:
-                        pool.animation_state[idx] = 2  # RUNNING
-                    elif speed > 0.05:
-                        pool.animation_state[idx] = 1  # WALKING
-                    else:
-                        pool.animation_state[idx] = 0  # IDLE
-            else:
-                # No active interaction, use speed-based fallback
-                speed = math.hypot(float(pool.vel[idx, 0]), float(pool.vel[idx, 1]))
-                if speed > 1.5:
-                    pool.animation_state[idx] = 2  # RUNNING
-                elif speed > 0.05:
-                    pool.animation_state[idx] = 1  # WALKING
-                else:
-                    pool.animation_state[idx] = 0  # IDLE
+            speed = math.hypot(float(pool.vel[idx, 0]), float(pool.vel[idx, 1]))
+            has_goal = bool(pool.has_goal[idx])
+            pool.animation_state[idx] = get_animation_for_agent(agent, active_interaction_type, speed, has_goal)
 
     def _build_agent_states_msg(self) -> AgentStatesMsg:
         pool = self._pool
