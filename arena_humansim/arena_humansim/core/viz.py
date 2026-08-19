@@ -10,6 +10,9 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import ColorRGBA
 from visualization_msgs.msg import Marker, MarkerArray
 
+from arena_humansim.core.interaction_kinds import InteractionType
+from arena_humansim.utils.types import CommandType
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -157,20 +160,6 @@ def _shape_outline(pose: Pose2D, shape: Shape) -> list[tuple[float, float]]:
         pts.append(pts[0])
         return pts
     return []
-
-
-_CMD_NAMES = {0: "NAV", 1: "STOP", 2: "SEEK"}
-_ITYPE_NAMES = {
-    0: "TALK",
-    1: "GROUP",
-    2: "SIT",
-    3: "LIE",
-    4: "USE",
-    5: "QUEUE",
-    6: "WAVE",
-    7: "BLOCK",
-    8: "SERVICE",
-}
 
 
 class MarkerView:
@@ -377,9 +366,7 @@ def publish_behavior(
                 m.color = _C_CMD
             m.pose.position.x, m.pose.position.y, m.pose.position.z = x, y, 0.9
             m.scale.z = 0.2
-            label = _CMD_NAMES.get(cmd.type, str(cmd.type))
-            if aid in in_interaction and cmd.type == 0:
-                label = "INTR"
+            label = "INTR" if aid in in_interaction and cmd.type == CommandType.NAVIGATE else CommandType(cmd.type).name
             m.text = label
         if agent.needs is not None:
             for i, (name, need) in enumerate(agent.needs.needs.items()):
@@ -429,8 +416,7 @@ def publish_interaction(pub: MarkerPublisher, agents: Iterable[BaseAgent], inter
         if live:
             cx = sum(amap[p].state.pose.x for p in live) / len(live)
             cy = sum(amap[p].state.pose.y for p in live) / len(live)
-            itype = _ITYPE_NAMES.get(inter.type, str(inter.type))
-            lbl = f"{itype} [{len(parts)}p"
+            lbl = f"{InteractionType(inter.type).kind.label} [{len(parts)}p"
             if inter.contract.queue:
                 lbl += f" +{len(inter.contract.queue)}q"
             lbl += "]"
