@@ -941,7 +941,7 @@ class AgentManager(Node):
             world=self._world_knowledge,
             event_bus=self._event_bus,
             rng=self._rng.get_agent_substream(aid, "behavior"),
-            dt=self._dt,
+            dt=self._dt * self._bt_tick_interval,
             agent_lookup=lambda aid: self._agents.get(aid),
             pool=self._pool,
             is_bound_lookup=self._interaction_manager.is_bound,
