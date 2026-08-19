@@ -20,6 +20,7 @@ string agent_type            # empty = use global default
 arena_humansim_msgs/Waypoints waypoints
 
 uint8 kind 0                 # KIND_HUMAN | KIND_ROBOT
+uint8 animation_state 0
 string policy                # registered local planner name; empty = teleport-only
 string policy_params         # opaque JSON blob for planner
 

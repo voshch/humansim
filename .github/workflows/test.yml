@@ -33,6 +33,7 @@ jobs:
         run: |
           source /opt/ros/jazzy/setup.bash
           source install/setup.bash
+          pip install --break-system-packages --ignore-installed numpy
           pip install --break-system-packages -e 'src/arena_humansim/arena_humansim[test]'
 
       - name: Run pytest

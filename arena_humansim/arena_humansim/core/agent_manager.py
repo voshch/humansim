@@ -63,6 +63,7 @@ from arena_humansim.core.agents import (
 )
 from arena_humansim.core.agents.loader import resolve_agent_type_name
 from arena_humansim.core.agents.types import ATTENTION_KEYWORDS, shift_agent_type
+from arena_humansim.core.animation_kinds import locomotion_states
 from arena_humansim.core.behavior.compiler import BehaviorTreeFactory
 from arena_humansim.core.despawn_monitor import DespawnMonitor
 from arena_humansim.core.interaction_kinds import InteractionType
@@ -1292,6 +1293,7 @@ class AgentManager(Node):
 
         t0 = time.perf_counter()
         self._advance_waypoints(agents, pool)
+        self._update_animation_states()
         msg = self._build_agent_states_msg()
         self._agent_states_pub.publish(msg)
 
@@ -1860,6 +1862,11 @@ class AgentManager(Node):
             pool.vel[idx, 1] = entity.vel[1]
             pool.prev_vel[idx] = pool.vel[idx]
 
+    def _update_animation_states(self) -> None:
+        pool = self._pool
+        n = pool.n
+        pool.animation_state[:n] = locomotion_states(pool.vel[:n], pool.has_goal[:n], pool.desired_vel[:n])
+
     def _build_agent_states_msg(self) -> AgentStatesMsg:
         pool = self._pool
         n = pool.n
@@ -1893,6 +1900,7 @@ class AgentManager(Node):
             a.desired_velocity = float(pool.desired_vel[i])
             a.radius = float(pool.agent_radius[i])
             a.kind = int(pool.kind[i])
+            a.animation_state = int(pool.animation_state[i])
             pidx = int(pool.policy_idx[i])
             a.policy = self._policy_names[pidx] if 0 <= pidx < len(self._policy_names) else ""
             a.name = names.get(a.agent_id, "")

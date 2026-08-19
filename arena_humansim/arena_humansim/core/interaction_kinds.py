@@ -92,6 +92,7 @@ class ContractDefaults:
 
 @attrs.frozen
 class InteractionKind:
+    label: str
     handle: HandleSpec
     contract_defaults: ContractDefaults
     formation_default: FormationSpec | None = None
@@ -197,48 +198,57 @@ _TAG_HANDLE = HandleSpec(kind=HandleKind.TAG, state_key="service_tag", strategy=
 def _registry() -> dict[InteractionType, InteractionKind]:
     return {
         InteractionType.TALK_TO: InteractionKind(
+            label="TALK",
             handle=_SYMMETRIC_HANDLE,
             contract_defaults=ContractDefaults(min_participants=2, max_participants=2, queueable=False),
             formation_default=_fs("dyad", AnchorKind.CENTROID),
             interaction_radius=2.0,
         ),
         InteractionType.GROUP_CONVERSATION: InteractionKind(
+            label="GROUP",
             handle=_SYMMETRIC_HANDLE,
             contract_defaults=ContractDefaults(min_participants=2, max_participants=-1, queueable=False),
             formation_default=_fs("f_formation", AnchorKind.CENTROID),
             interaction_radius=3.0,
         ),
         InteractionType.SIT_ON: InteractionKind(
+            label="SIT",
             handle=_OBJECT_HANDLE,
             contract_defaults=ContractDefaults(min_participants=1, max_participants=1, queueable=True, access=AccessKind.FIFO),
             formation_default=_fs("cluster", AnchorKind.OBJECT),
         ),
         InteractionType.LIE_ON: InteractionKind(
+            label="LIE",
             handle=_OBJECT_HANDLE,
             contract_defaults=ContractDefaults(min_participants=1, max_participants=1, queueable=True, access=AccessKind.FIFO),
             formation_default=_fs("cluster", AnchorKind.OBJECT),
         ),
         InteractionType.USE: InteractionKind(
+            label="USE",
             handle=_OBJECT_HANDLE,
             contract_defaults=ContractDefaults(min_participants=1, max_participants=1, queueable=True, access=AccessKind.FIFO),
             formation_default=None,
         ),
         InteractionType.QUEUE_USE: InteractionKind(
+            label="QUEUE",
             handle=_OBJECT_HANDLE,
             contract_defaults=ContractDefaults(min_participants=1, max_participants=1, queueable=True, access=AccessKind.FIFO),
             formation_default=_fs("line", AnchorKind.OBJECT, {"base_step": 1.0}),
         ),
         InteractionType.WAVE_AT: InteractionKind(
+            label="WAVE",
             handle=_SYMMETRIC_HANDLE,
             contract_defaults=ContractDefaults(min_participants=2, max_participants=2, queueable=False),
             formation_default=None,
         ),
         InteractionType.BLOCK: InteractionKind(
+            label="BLOCK",
             handle=_AGENT_HANDLE,
             contract_defaults=ContractDefaults(min_participants=1, max_participants=2, queueable=False),
             formation_default=None,
         ),
         InteractionType.SERVICE: InteractionKind(
+            label="SERVICE",
             handle=_TAG_HANDLE,
             contract_defaults=ContractDefaults(min_participants=1, max_participants=-1, queueable=True, access=AccessKind.FIFO),
             formation_default=_fs("f_formation", AnchorKind.PROVIDER),
