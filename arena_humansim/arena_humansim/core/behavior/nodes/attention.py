@@ -8,7 +8,7 @@ import numpy as np
 import py_trees
 
 from arena_humansim.core.agents import BaseAgent, ParamDist
-from arena_humansim.core.agents.types import ATTENTION_KEYWORDS, CHANNEL_SLOTS, AttentionDef, AttentionRef, ChannelDef, Pose3, RelativeRef, RobotRef
+from arena_humansim.core.agents.types import ATTENTION_KEYWORDS, CHANNEL_SLOTS, CLIP_SLOT, AttentionDef, AttentionRef, ChannelDef, Pose3, RelativeRef, RobotRef
 from arena_humansim.core.behavior.nodes.helpers import _bt_logger, _nav_command, _sample_param_dist
 from arena_humansim.core.behavior.reach import MIN_RESIDENCE_S, reachable
 from arena_humansim.core.behavior.step_context import StepContext
@@ -227,12 +227,11 @@ class _Channel:
     def raise_at(self, entry: _Entry, handedness: str) -> None:
         assert entry.xyz is not None
         self.shown = True
-        opts = {"dominant": handedness} if self.name == "point" else {}
-        self.published = GestureIntent(self.slot, entry.xyz[0], entry.xyz[1], entry.xyz[2], opts)
+        self.published = GestureIntent(self.slot, entry.xyz[0], entry.xyz[1], entry.xyz[2], hand=handedness if self.name == "point" else "")
 
 
 class AttentionNode(py_trees.behaviour.Behaviour):
-    """Drive every channel of one attention block: resolve refs, walk lists, gate on reach, face when allowed, publish mv.gestures. Bare mode halts and owns the step, rider mode never finishes."""
+    """Drive every channel of one attention block: resolve refs, walk lists, gate on reach, face when allowed, publish mv.gestures (plus the body clip, if any). Bare mode halts and owns the step, rider mode never finishes."""
 
     def __init__(
         self,
@@ -261,7 +260,9 @@ class AttentionNode(py_trees.behaviour.Behaviour):
         self._walking = walking
         self._resolver = _Resolver(agent, world, agent_lookup, name_lookup, ctx)
         self._channels = [_Channel(cname, cdef) for cname, cdef in attention.channels().items()]
-        self._slots = {ch.slot for ch in self._channels}
+        self._clip = attention.clip
+        self._clip_published: GestureIntent | None = None
+        self._slots = {ch.slot for ch in self._channels} | ({CLIP_SLOT} if self._clip is not None else set())
         self._face_name = attention.face_channel()
         self._duration: float | None = None
         self._elapsed = 0.0
@@ -274,6 +275,7 @@ class AttentionNode(py_trees.behaviour.Behaviour):
         self._resolver.reset()
         for ch in self._channels:
             ch.reset()
+        self._clip_published = None
         self._duration = _sample_param_dist(self._duration_source, self._rng) if self._duration_source is not None else None
         self._elapsed = 0.0
         self._face_elapsed = 0.0
@@ -409,11 +411,26 @@ class AttentionNode(py_trees.behaviour.Behaviour):
                 ch.raise_at(entry, self._agent.params.handedness)
                 return
 
+    def _step_clip(self) -> None:
+        clip = self._clip
+        if clip is None:
+            return
+        if clip.when == "bound" and not self._bound():
+            self._clip_published = None
+        elif self._clip_published is None:
+            self._clip_published = GestureIntent(CLIP_SLOT, clip=clip.name)
+
+    def _published(self) -> list[GestureIntent]:
+        out = [ch.published for ch in self._channels if ch.published is not None]
+        if self._clip_published is not None:
+            out.append(self._clip_published)
+        return out
+
     def _publish(self, mv: BehaviorTreeMovement | None) -> None:
         if mv is None:
             return
         others = tuple(g for g in mv.gestures if g.slot not in self._slots)
-        mv.gestures = others + tuple(ch.published for ch in self._channels if ch.published is not None)
+        mv.gestures = others + tuple(self._published())
 
     def _finish(self) -> py_trees.common.Status:
         if not self._bare:
@@ -442,6 +459,7 @@ class AttentionNode(py_trees.behaviour.Behaviour):
                 self._step_dwell(ch, heading)
             else:
                 self._step_unreachable(ch, heading, in_flight)
+        self._step_clip()
         self._publish(mv)
         return self._finish()
 
@@ -450,10 +468,11 @@ class AttentionNode(py_trees.behaviour.Behaviour):
         mv = self._bt_mv()
         if mv is not None:
             mv.heading_goal = None
-            mine = [ch.published for ch in self._channels if ch.published is not None]
+            mine = self._published()
             mv.gestures = tuple(g for g in mv.gestures if not any(g is m for m in mine))
         for ch in self._channels:
             ch.lower()
+        self._clip_published = None
 
     def terminate(self, new_status: py_trees.common.Status) -> None:
         del new_status
@@ -462,6 +481,8 @@ class AttentionNode(py_trees.behaviour.Behaviour):
             return
         mv.heading_goal = None
         released = [ch.published for ch in self._channels if ch.published is not None and ch.cdef.hold == "release"]
+        if self._clip_published is not None:
+            released.append(self._clip_published)
         mv.gestures = tuple(g for g in mv.gestures if not any(g is r for r in released))
 
 

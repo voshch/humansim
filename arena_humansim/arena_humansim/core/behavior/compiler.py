@@ -8,7 +8,7 @@ import py_trees
 from rclpy.logging import get_logger
 
 from arena_humansim.core.agents import AgentType, BaseAgent, ParamDist
-from arena_humansim.core.agents.types import ActionDef, AttentionDef, AttentionStepDef, GoToStepDef, SequenceDef, StepDef
+from arena_humansim.core.agents.types import ActionDef, AttentionDef, AttentionStepDef, ClipDef, GoToStepDef, SequenceDef, StepDef
 from arena_humansim.core.interaction_kinds import InteractionType, is_object_bound_name
 from arena_humansim.core.interaction_manager import InteractionManager
 from arena_humansim.core.pool import AgentPool
@@ -72,10 +72,10 @@ class _AttentionWiring:
     dt: float
 
 
-def _wiring(node_name: str, world: WorldKnowledge, agent_lookup: AgentLookup | None, name_lookup: NameLookup | None, rng: np.random.Generator, dt: float) -> _AttentionWiring:
-    if agent_lookup is None or name_lookup is None:
+def _wiring(node_name: str, world: WorldKnowledge, agent_lookup: AgentLookup | None, name_lookup: NameLookup | None, rng: np.random.Generator, dt: float, attention: AttentionDef | None = None) -> _AttentionWiring:
+    if (agent_lookup is None or name_lookup is None) and (attention is None or attention.channels()):
         raise ValueError(f"{node_name}: attention requires agent_lookup and name_lookup to be threaded into BehaviorTreeFactory.build")
-    return _AttentionWiring(world=world, agent_lookup=agent_lookup, name_lookup=name_lookup, rng=rng, dt=dt)
+    return _AttentionWiring(world=world, agent_lookup=agent_lookup or (lambda _id: None), name_lookup=name_lookup or (lambda _n, _k: None), rng=rng, dt=dt)
 
 
 def _attention_node(node_name: str, agent: BaseAgent, attention: AttentionDef, w: _AttentionWiring, ctx: StepContext, bare: bool = False, duration: ParamDist | None = None, walking: Walking | None = None) -> AttentionNode:
@@ -228,8 +228,16 @@ def _expand_interaction_step(
     )
     if step.satisfies:
         children.append(SatisfyNode(name=f"{node_name}/satisfy", agent=agent, satisfies=step.satisfies))
-    w = _wiring(node_name, world, agent_lookup, name_lookup, rng, dt) if step.attention is not None else None
-    return _watched(node_name, watchdog, children, _rider(node_name, agent, step.attention, w, ctx, children))
+    attention = _with_default_clip(step.attention, InteractionType[step.interaction].kind.clip)
+    w = _wiring(node_name, world, agent_lookup, name_lookup, rng, dt, attention) if attention is not None else None
+    return _watched(node_name, watchdog, children, _rider(node_name, agent, attention, w, ctx, children))
+
+
+def _with_default_clip(attention: AttentionDef | None, clip: str) -> AttentionDef | None:
+    """The interaction kind's clip plays while the agent is a participant, unless the author set one."""
+    if not clip or (attention is not None and attention.clip is not None):
+        return attention
+    return attrs.evolve(attention or AttentionDef(), clip=ClipDef(name=clip, when="bound"))
 
 
 def _expand_pure_wait_step(

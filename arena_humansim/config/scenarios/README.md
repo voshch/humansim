@@ -160,7 +160,7 @@ drop_B:    {cancel: true}
 
 ## Attention
 
-`attention:` is one block of channels. It rides on every step kind (`go_to`, interaction, wait, cancel, BLOCK), stands as a step of its own (`kind: attention`, or just `attention:` plus duration-ish fields and no interaction/target/cancel/autonomous keys), and rides on a whole sequence (`sequences.<seq>.attention`). A kind-less step that mixes `attention:` with interaction-only fields (`offer`, `formation_spec`, `until`, ...) is rejected by the loader, add `kind:` or `interaction:`. The engine has no skeleton: it publishes the active channels each tick as `AgentState.gestures` (`Gesture{slot, at, opts}`), the animation layer moves the body.
+`attention:` is one block of channels. It rides on every step kind (`go_to`, interaction, wait, cancel, BLOCK), stands as a step of its own (`kind: attention`, or just `attention:` plus duration-ish fields and no interaction/target/cancel/autonomous keys), and rides on a whole sequence (`sequences.<seq>.attention`). A kind-less step that mixes `attention:` with interaction-only fields (`offer`, `formation_spec`, `until`, ...) is rejected by the loader, add `kind:` or `interaction:`. The engine has no skeleton: it publishes the active channels each tick as `AgentState.gestures` (`Gesture{slot, at, clip, hand}`), the animation layer moves the body.
 
 ```yaml
 attention:
@@ -168,11 +168,14 @@ attention:
   point:   {at: [bench_1, bench_2], dwell: 1.5}      # one arm, side picked by the arena layer
   point_l: exit_door                                 # left arm, explicit
   point_r: exit_door                                 # right arm, explicit
+  clip:    wave_high                                 # body, a canned clip by name (or {name, when: always|bound})
   face: auto                                         # auto | true | false | <ref>
   required: false                                    # riders only, bare steps are always required
 ```
 
-At least one channel, and exactly one arm channel (`point` xor `point_l` xor `point_r`). Nothing is implicit: a body part without a channel stays idle. Slots on the wire: `gaze` -> `head`, `point` -> `arm` with `opts {"dominant": "l"|"r"}` from the ped's sampled handedness, `point_l`/`point_r` -> `arm_l`/`arm_r`.
+At least one channel (`clip` counts), and exactly one arm channel (`point` xor `point_l` xor `point_r`). Nothing is implicit: a body part without a channel stays idle. Slots on the wire: `gaze` -> `head`, `point` -> `arm` with `hand` from the ped's sampled handedness, `point_l`/`point_r` -> `arm_l`/`arm_r`, `clip` -> `body` with the clip name.
+
+`clip` names a clip of the animation layer, the engine never reads it. `when: bound` shows it only while the agent is a participant of an active interaction, which is how interaction kinds carry a default (`SIT_ON` -> `sit`, `WAVE_AT` -> `wave`, `TALK_TO` / `GROUP_CONVERSATION` -> `talk_with_arm_gesture`, see `InteractionKind.clip`); an authored `clip` on the step replaces the default. A bare step with only a `clip` needs `duration` or `patience`.
 
 A channel is either `<targets>` (shorthand for `{at: <targets>}`) or a mapping:
 
@@ -195,7 +198,7 @@ gaze: {at: [partner, bench_1], dwell: 1.0, advance: dwell, hold: release, at_z: 
 | `robot:<name>` | Agent name lookup restricted to robots. |
 | plain `str` | Object id, then agent name (peds and robots), then object type (nearest). Ids and names also match on their last `/` segment when unique, so `ped_3` finds `env_0/ped_3`. |
 | `int` | Agent id. |
-| `{x, y, z}` | Literal world point, shifted with the engine origin like go_to targets. |
+| `{x, y, z}` | Literal world point, in the frame the engine runs in (authored coordinates, the Arena adapter owns any env shift). |
 | `{azimuth, elevation[, distance]}` | Degrees relative to the agent's own pose and yaw, re-evaluated each tick, default distance 3.0 m. Never drives `face`. |
 
 `partner`, `partners`, `target` and `goal` are reserved: `SpawnAgents` rejects agents named like one. Entries are unresolved until resolved: retried every tick, never dropped, one warning. A bare step FAILS when a channel sits on an unresolved entry for `RESOLVE_TIMEOUT_S` (4 s). A rider with `required: false` (default) warns once, publishes nothing for that channel and keeps retrying, with `required: true` the host step FAILS after the same grace.

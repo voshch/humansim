@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from arena_humansim.core.agents.types import AttentionDef, AttentionStepDef, ChannelDef, GoToStepDef, Pose3, RelativeRef, RobotRef, StepDef
+from arena_humansim.core.agents.types import AttentionDef, AttentionStepDef, ChannelDef, ClipDef, GoToStepDef, Pose3, RelativeRef, RobotRef, StepDef
 from arena_humansim.utils.scenario import _structure_manual
 
 
@@ -414,6 +414,11 @@ def test_attention_face_forms(face: object, expected: object) -> None:
         ({"gaze": "bench", "required": "yes"}, "required"),
         ({"gaze": "bench", "required": False}, "always required"),
         ({"gaze": {"at": ["a", "b"], "advance": "unreachable"}}, "needs 'duration' or 'patience'"),
+        ({"clip": "wave"}, "only a clip"),
+        ({"clip": ""}, "non-empty 'name'"),
+        ({"clip": {"name": "wave", "when": "sometimes"}}, "when"),
+        ({"clip": {"name": "wave", "loop": True}}, "unknown attention clip fields"),
+        ({"clip": 3}, "clip name"),
     ],
 )
 def test_attention_validation(att: dict, match: str) -> None:
@@ -425,6 +430,16 @@ def test_attention_face_true_allows_relative_later_entries() -> None:
     step = _step({"attention": {"point": ["bench", {"azimuth": 0, "elevation": 0}], "face": True}})
     assert isinstance(step, AttentionStepDef)
     assert step.attention.face is True
+
+
+def test_attention_clip_forms() -> None:
+    step = _step({"attention": {"clip": "wave_high"}, "duration": 2.0})
+    assert isinstance(step, AttentionStepDef)
+    assert step.attention == AttentionDef(clip=ClipDef(name="wave_high"), required=True)
+    step = _step({"interaction": "WAVE_AT", "attention": {"clip": {"name": "wave", "when": "bound"}, "gaze": "partner"}})
+    assert isinstance(step, StepDef)
+    assert step.attention is not None and step.attention.clip == ClipDef(name="wave", when="bound")
+    assert step.attention.gaze == ChannelDef(at=("partner",))
 
 
 def test_attention_cycling_bare_step_with_duration_or_patience() -> None:

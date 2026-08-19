@@ -5,6 +5,7 @@ __all__ = [
     "AttentionRef",
     "AttentionStepDef",
     "ChannelDef",
+    "ClipDef",
     "GoToStepDef",
     "NeedCondition",
     "NeedDist",
@@ -21,7 +22,6 @@ __all__ = [
     "TransitionDef",
     "VarDef",
     "sample_agent_type",
-    "shift_agent_type",
 ]
 
 import math
@@ -127,7 +127,14 @@ class ChannelDef:
     at_z: float | None = None
 
 
+@attrs.frozen
+class ClipDef:
+    name: str
+    when: str = "always"  # always | bound (only while the agent is a participant of an active interaction)
+
+
 CHANNEL_SLOTS = {"gaze": "head", "point": "arm", "point_l": "arm_l", "point_r": "arm_r"}
+CLIP_SLOT = "body"
 ARM_CHANNELS = ("point", "point_r", "point_l")
 ATTENTION_KEYWORDS = ("partner", "partners", "target", "goal")
 
@@ -138,6 +145,7 @@ class AttentionDef:
     point: ChannelDef | None = None
     point_l: ChannelDef | None = None
     point_r: ChannelDef | None = None
+    clip: ClipDef | None = None
     face: bool | AttentionRef | None = None  # None = auto
     required: bool = False
 
@@ -388,42 +396,3 @@ def sample_agent_type(
         idle_gaze_rate_hz=idle_gaze_rate_hz,
         handedness=handedness,
     )
-
-
-def _shift_pose(pose: Pose2D | None, dx: float, dy: float) -> Pose2D | None:
-    return None if pose is None else Pose2D(x=pose.x + dx, y=pose.y + dy, theta=pose.theta)
-
-
-def _shift_ref(ref: AttentionRef, dx: float, dy: float) -> AttentionRef:
-    return Pose3(x=ref.x + dx, y=ref.y + dy, z=ref.z) if isinstance(ref, Pose3) else ref
-
-
-def _shift_attention(att: AttentionDef | None, dx: float, dy: float) -> AttentionDef | None:
-    if att is None:
-        return None
-    channels = {name: attrs.evolve(ch, at=tuple(_shift_ref(r, dx, dy) for r in ch.at)) for name, ch in att.channels().items()}
-    face = _shift_ref(att.face, dx, dy) if isinstance(att.face, Pose3) else att.face
-    return attrs.evolve(att, face=face, **channels)
-
-
-def _shift_step(step: StepDef | GoToStepDef | AttentionStepDef, dx: float, dy: float) -> StepDef | GoToStepDef | AttentionStepDef:
-    attention = _shift_attention(step.attention, dx, dy)
-    if isinstance(step, GoToStepDef):
-        return attrs.evolve(step, target_pose=_shift_pose(step.target_pose, dx, dy), attention=attention)
-    if isinstance(step, AttentionStepDef):
-        return attrs.evolve(step, attention=attention)
-    fs = step.formation_spec
-    if fs is not None and fs.anchor_pose is not None:
-        fs = attrs.evolve(fs, anchor_pose=_shift_pose(fs.anchor_pose, dx, dy))
-    return attrs.evolve(step, formation_spec=fs, attention=attention)
-
-
-def shift_agent_type(agent_type: AgentType, dx: float, dy: float) -> AgentType:
-    """Translate every authored map coordinate (go_to targets, attention points, formation anchors) by (dx, dy)."""
-    if dx == 0.0 and dy == 0.0:
-        return agent_type
-    sequences = {
-        name: attrs.evolve(seq, steps={k: _shift_step(v, dx, dy) for k, v in seq.steps.items()}, attention=_shift_attention(seq.attention, dx, dy))
-        for name, seq in agent_type.sequences.items()
-    }
-    return attrs.evolve(agent_type, sequences=sequences)

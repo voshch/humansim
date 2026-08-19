@@ -98,6 +98,7 @@ class InteractionKind:
     formation_default: FormationSpec | None = None
     allows_offer: bool = False
     interaction_radius: float = DISTANCE_TOLERANCE
+    clip: str = ""  # animation clip shown while a participant, authored attention.clip overrides
 
     @property
     def is_object_bound(self) -> bool:
@@ -203,6 +204,7 @@ def _registry() -> dict[InteractionType, InteractionKind]:
             contract_defaults=ContractDefaults(min_participants=2, max_participants=2, queueable=False),
             formation_default=_fs("dyad", AnchorKind.CENTROID),
             interaction_radius=2.0,
+            clip="talk_with_arm_gesture",
         ),
         InteractionType.GROUP_CONVERSATION: InteractionKind(
             label="GROUP",
@@ -210,12 +212,14 @@ def _registry() -> dict[InteractionType, InteractionKind]:
             contract_defaults=ContractDefaults(min_participants=2, max_participants=-1, queueable=False),
             formation_default=_fs("f_formation", AnchorKind.CENTROID),
             interaction_radius=3.0,
+            clip="talk_with_arm_gesture",
         ),
         InteractionType.SIT_ON: InteractionKind(
             label="SIT",
             handle=_OBJECT_HANDLE,
             contract_defaults=ContractDefaults(min_participants=1, max_participants=1, queueable=True, access=AccessKind.FIFO),
             formation_default=_fs("cluster", AnchorKind.OBJECT),
+            clip="sit",
         ),
         InteractionType.LIE_ON: InteractionKind(
             label="LIE",
@@ -240,6 +244,7 @@ def _registry() -> dict[InteractionType, InteractionKind]:
             handle=_SYMMETRIC_HANDLE,
             contract_defaults=ContractDefaults(min_participants=2, max_participants=2, queueable=False),
             formation_default=None,
+            clip="wave",
         ),
         InteractionType.BLOCK: InteractionKind(
             label="BLOCK",

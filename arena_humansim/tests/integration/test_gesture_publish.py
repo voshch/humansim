@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 
 import pytest
@@ -46,7 +45,7 @@ def test_agent_states_carry_name_handedness_and_gestures(manager_factory: Callab
     assert mgr._agents[ped].params.handedness in ("l", "r")
     assert mgr._agents[lefty].params.handedness == "l"
 
-    mv = BehaviorTreeMovement(gestures=(GestureIntent("arm", 1.0, 2.0, 3.0, {"dominant": "l"}), GestureIntent("head", 4.0, 5.0, 6.0, {})))
+    mv = BehaviorTreeMovement(gestures=(GestureIntent("arm", 1.0, 2.0, 3.0, hand="l"), GestureIntent("head", 4.0, 5.0, 6.0)))
     mgr._agents[ped].movement = mv
 
     by_id = {a.agent_id: a for a in mgr._build_agent_states_msg().agents}
@@ -55,9 +54,9 @@ def test_agent_states_carry_name_handedness_and_gestures(manager_factory: Callab
     assert [g.slot for g in by_id[ped].gestures] == ["arm", "head"]
     arm, head = by_id[ped].gestures
     assert (arm.at.x, arm.at.y, arm.at.z) == (1.0, 2.0, 3.0)
-    assert json.loads(arm.opts) == {"dominant": "l"}
+    assert arm.hand == "l"
     assert (head.at.x, head.at.y, head.at.z) == (4.0, 5.0, 6.0)
-    assert head.opts == ""
+    assert head.hand == "" and head.clip == ""
     assert by_id[bot].name == "bot"
     assert list(by_id[bot].gestures) == []
     assert by_id[lefty].name == ""

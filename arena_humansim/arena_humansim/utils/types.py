@@ -262,10 +262,11 @@ class WaypointMovement:
 @attrs.frozen
 class GestureIntent:
     slot: str
-    x: float
-    y: float
-    z: float
-    opts: dict[str, str] = attrs.Factory(dict)
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+    clip: str = ""  # body slot: animation clip name
+    hand: str = ""  # arm slot: dominant hand l | r, empty = default
 
 
 @attrs.define

@@ -12,7 +12,7 @@ pytest.importorskip("rclpy")
 py_trees = pytest.importorskip("py_trees")
 
 from arena_humansim.core.agents.base import BaseAgent
-from arena_humansim.core.agents.types import AttentionDef, ChannelDef, ParamDist, Pose3, RelativeRef, RobotRef
+from arena_humansim.core.agents.types import AttentionDef, ChannelDef, ClipDef, ParamDist, Pose3, RelativeRef, RobotRef
 from arena_humansim.core.behavior.nodes import AttentionNode
 from arena_humansim.core.behavior.nodes.attention import (
     FACE_ENTER_RAD,
@@ -87,11 +87,11 @@ def _att(**kw: object) -> AttentionDef:
 
 
 def _arm(x: float, y: float, z: float = GESTURE_Z_OBJECT, dominant: str = "r") -> GestureIntent:
-    return GestureIntent("arm", x, y, z, {"dominant": dominant})
+    return GestureIntent("arm", x, y, z, hand=dominant)
 
 
 def _head(x: float, y: float, z: float = GESTURE_Z_OBJECT) -> GestureIntent:
-    return GestureIntent("head", x, y, z, {})
+    return GestureIntent("head", x, y, z)
 
 
 def _slots(agent: BaseAgent) -> dict[str, GestureIntent]:
@@ -786,11 +786,11 @@ def test_explicit_arm_slots(agent_factory: Callable[..., BaseAgent], world: Worl
     agent = _bt_agent(agent_factory)
     node = _node(agent, _att(point_l="bench_1"), world, rng_np)
     assert _tick(node) == RUNNING
-    assert _mv(agent).gestures == (GestureIntent("arm_l", 5.0, 0.0, GESTURE_Z_OBJECT, {}),)
+    assert _mv(agent).gestures == (GestureIntent("arm_l", 5.0, 0.0, GESTURE_Z_OBJECT),)
     node.stop(py_trees.common.Status.INVALID)
     node = _node(agent, _att(point_r="bench_1"), world, rng_np)
     assert _tick(node) == RUNNING
-    assert _mv(agent).gestures == (GestureIntent("arm_r", 5.0, 0.0, GESTURE_Z_OBJECT, {}),)
+    assert _mv(agent).gestures == (GestureIntent("arm_r", 5.0, 0.0, GESTURE_Z_OBJECT),)
 
 
 def test_all_shown_channels_published(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
@@ -833,3 +833,48 @@ def test_suspend_lowers_and_resume_keeps_index(agent_factory: Callable[..., Base
     assert _mv(agent).gestures == (_arm(5.0, 0.0),)
     assert _tick(node) == RUNNING
     assert _mv(agent).gestures == (_arm(5.0, 2.0),)
+
+
+# clip
+
+
+def _clip(name: str, when: str = "always") -> ClipDef:
+    return ClipDef(name=name, when=when)
+
+
+def test_clip_publishes_body_slot_and_releases_on_terminate(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
+    agent = _bt_agent(agent_factory)
+    node = _node(agent, _att(point="bench_1", clip=_clip("wave"), face=False), world, rng_np)
+    assert _tick(node) == RUNNING
+    assert _slots(agent)["body"] == GestureIntent("body", clip="wave")
+    assert _slots(agent)["arm"] == _arm(5.0, 0.0)
+    node.suspend()
+    assert _mv(agent).gestures == ()
+    assert _tick(node) == RUNNING
+    assert "body" in _slots(agent)
+    node.stop(SUCCESS)
+    assert "body" not in _slots(agent)
+
+
+def test_bare_clip_only_halts_and_runs_for_duration(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
+    agent = _bt_agent(agent_factory)
+    node = _node(agent, _att(clip=_clip("sit")), world, rng_np, bare=True, duration=ParamDist(1.0))
+    assert _tick(node) == RUNNING
+    assert _mv(agent).gestures == (GestureIntent("body", clip="sit"),)
+    assert _mv(agent).command is not None and _mv(agent).command.desired_velocity == 0.0
+    assert _tick(node) == RUNNING
+    assert _tick(node) == SUCCESS
+
+
+def test_clip_when_bound_waits_for_the_interaction(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
+    agent = _bt_agent(agent_factory)
+    bound = {"v": False}
+    node = _node(agent, _att(clip=_clip("wave", when="bound")), world, rng_np, ctx=StepContext(is_bound_lookup=lambda _aid: bound["v"]))
+    assert _tick(node) == RUNNING
+    assert _mv(agent).gestures == ()
+    bound["v"] = True
+    assert _tick(node) == RUNNING
+    assert _mv(agent).gestures == (GestureIntent("body", clip="wave"),)
+    bound["v"] = False
+    assert _tick(node) == RUNNING
+    assert _mv(agent).gestures == ()

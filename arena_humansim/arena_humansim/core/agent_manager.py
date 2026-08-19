@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import math
 import time
 from collections import deque
@@ -43,11 +42,9 @@ from arena_humansim_msgs.srv import (
 from geometry_msgs.msg import Point32, Vector3
 from geometry_msgs.msg import Pose2D as Pose2DMsg
 from py_trees.trees import BehaviourTree
-from rcl_interfaces.msg import SetParametersResult
 from rclpy.clock import Clock as RclClock
 from rclpy.clock import ClockType
 from rclpy.node import Node
-from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from rosgraph_msgs.msg import Clock
 
@@ -62,7 +59,7 @@ from arena_humansim.core.agents import (
     create_agent,
 )
 from arena_humansim.core.agents.loader import resolve_agent_type_name
-from arena_humansim.core.agents.types import ATTENTION_KEYWORDS, shift_agent_type
+from arena_humansim.core.agents.types import ATTENTION_KEYWORDS
 from arena_humansim.core.animation_kinds import locomotion_states
 from arena_humansim.core.behavior.compiler import BehaviorTreeFactory
 from arena_humansim.core.despawn_monitor import DespawnMonitor
@@ -194,7 +191,8 @@ def _gesture_msg(intent: GestureIntent) -> GestureMsg:
     g = GestureMsg()
     g.slot = intent.slot
     g.at.x, g.at.y, g.at.z = intent.x, intent.y, intent.z
-    g.opts = json.dumps(intent.opts) if intent.opts else ""
+    g.clip = intent.clip
+    g.hand = intent.hand
     return g
 
 
@@ -237,7 +235,6 @@ class AgentManager(Node):
         self.declare_parameter("ticks", 0)
         self.declare_parameter("time", 0.0)
         self.declare_parameter("rtf", 1.0)
-        self.declare_parameter("origin", [0.0, 0.0])
         self.declare_parameter("subsystem_overrun_policy", "lag")
 
         seed = self.get_parameter("seed").value
@@ -261,8 +258,6 @@ class AgentManager(Node):
         if self._ticks_limit == 0 and time_limit > 0.0:
             self._ticks_limit = max(1, int(round(time_limit / self._dt)))
         self._rtf = float(self.get_parameter("rtf").value)
-        self._origin = self._read_origin(self.get_parameter("origin").value)
-        self.add_on_set_parameters_callback(self._on_set_parameters)
         self._subsystem_overrun_policy = str(self.get_parameter("subsystem_overrun_policy").value)
         self._force_local_planner = bool(self.get_parameter("force_local_planner").value)
         self._robot_policy_override = str(self.get_parameter("robot_policy").value)
@@ -915,23 +910,6 @@ class AgentManager(Node):
         hits = [a for n, a in candidates.items() if n.rsplit("/", 1)[-1] == name]
         return hits[0] if len(hits) == 1 else None
 
-    @staticmethod
-    def _read_origin(value: object) -> tuple[float, float]:
-        xy = tuple(float(v) for v in value)
-        if len(xy) != 2:
-            raise ValueError(f"origin must be [x, y], got {value!r}")
-        return xy[0], xy[1]
-
-    def _on_set_parameters(self, params: list[Parameter]) -> SetParametersResult:
-        for p in params:
-            if p.name != "origin":
-                continue
-            try:
-                self._origin = self._read_origin(p.value)
-            except (TypeError, ValueError) as e:
-                return SetParametersResult(successful=False, reason=str(e))
-        return SetParametersResult(successful=True)
-
     def _compile_behavior_tree(self, agent: BaseAgent) -> None:
         aid = agent.state.agent_id
         type_name = agent.params.name
@@ -941,12 +919,12 @@ class AgentManager(Node):
             return
 
         if agent_type.source_path is not None:
-            key = ("path", str(agent_type.source_path), self._origin)
+            key = ("path", str(agent_type.source_path))
         else:
-            key = ("content", id(agent_type), self._origin)
+            key = ("content", id(agent_type))
         factory = self._bt_factories.get(key)
         if factory is None:
-            factory = BehaviorTreeFactory(shift_agent_type(agent_type, *self._origin))
+            factory = BehaviorTreeFactory(agent_type)
             self._bt_factories[key] = factory
 
         bt = factory.build(

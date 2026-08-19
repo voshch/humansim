@@ -13,6 +13,7 @@ from arena_humansim.core.agents.types import (
     AttentionDef,
     AttentionStepDef,
     ChannelDef,
+    ClipDef,
     GoToStepDef,
     NeedDist,
     ParamDist,
@@ -159,7 +160,7 @@ def test_object_bound_interaction_shape(agent_factory: Callable[..., BaseAgent],
     agent = agent_factory(agent_id=3)
 
     root = _compiled_root(agent_type, agent, world, event_bus, rng_np)
-    _, inner = _assert_outer_shape(root, "default", "sit")
+    _, inner = _assert_outer_shape(root, "default", "sit", rider=True)
 
     child_types = [type(c) for c in inner.children]
     assert child_types == [ClearOutcomeNode, ResolveObjectNode, GoToNode, SeekNode, SatisfyNode]
@@ -183,7 +184,7 @@ def test_object_bound_interaction_no_satisfy(agent_factory: Callable[..., BaseAg
     agent = agent_factory(agent_id=4)
 
     root = _compiled_root(agent_type, agent, world, event_bus, rng_np)
-    _, inner = _assert_outer_shape(root, "default", "sit2")
+    _, inner = _assert_outer_shape(root, "default", "sit2", rider=True)
 
     assert [type(c) for c in inner.children] == [ClearOutcomeNode, ResolveObjectNode, GoToNode, SeekNode]
 
@@ -199,7 +200,7 @@ def test_non_object_interaction_has_no_resolve_or_goto(agent_factory: Callable[.
     agent = agent_factory(agent_id=20)
 
     root = _compiled_root(agent_type, agent, world, event_bus, rng_np)
-    _, inner = _assert_outer_shape(root, "default", "chat")
+    _, inner = _assert_outer_shape(root, "default", "chat", rider=True)
 
     assert [type(c) for c in inner.children] == [ClearOutcomeNode, SeekNode, SatisfyNode]
     assert [c.name for c in inner.children] == [
@@ -216,9 +217,22 @@ def test_non_object_interaction_minimal(agent_factory: Callable[..., BaseAgent],
     agent = agent_factory(agent_id=21)
 
     root = _compiled_root(agent_type, agent, world, event_bus, rng_np)
-    _, inner = _assert_outer_shape(root, "default", "chat2")
+    _, inner = _assert_outer_shape(root, "default", "chat2", rider=True)
 
     assert [type(c) for c in inner.children] == [ClearOutcomeNode, SeekNode]
+
+
+def test_interaction_default_clip_rider(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
+    def rider(step: StepDef) -> AttentionNode | None:
+        root = _compiled_root(_agent_type({"default": SequenceDef(steps={"s": step})}), agent_factory(agent_id=26), world, event_bus, rng_np)
+        last = root.children[-1]
+        return last if isinstance(last, AttentionNode) else None
+
+    sit = rider(StepDef(interaction="SIT_ON", target="chair"))
+    assert sit is not None and sit._att == AttentionDef(clip=ClipDef(name="sit", when="bound"))
+    wave = rider(StepDef(interaction="WAVE_AT", attention=AttentionDef(clip=ClipDef(name="wave_high"))))
+    assert wave is not None and wave._att == AttentionDef(clip=ClipDef(name="wave_high"))
+    assert rider(StepDef(interaction="SERVICE", target="water", offer=True)) is None
 
 
 def test_service_offer_has_no_resolve(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, event_bus: EventBus, rng_np: np.random.Generator) -> None:
