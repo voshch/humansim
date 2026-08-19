@@ -824,3 +824,40 @@ def test_service_max_participants_threads_from_spec() -> None:
     assert len(mgr2.interactions) == 1
     interaction2 = next(iter(mgr2.interactions.values()))
     assert interaction2.contract.max_participants == -1
+
+
+def test_reset_clears_the_type_index_not_just_the_dict():
+    """Regression: `interactions.clear()` alone left dangling ids in
+    `_interactions_by_type`, and the next symmetric seek dereferenced one and died with
+    `KeyError: <stale id>`, taking the node down. Reproduced by any scenario whose agents
+    actually form a GROUP_CONVERSATION and then survive an episode reset."""
+    from arena_humansim.core.interaction_manager import InteractionManager
+    from arena_humansim.utils.rng import RNG
+
+    im = InteractionManager(RNG(0))
+    im.interactions[7] = object()  # stand-in; reset must not care about the value
+    im._interactions_by_type.setdefault(1, set()).add(7)
+    im._agent_membership[3] = {7: 0}
+    im._interaction_by_object_type[("desk", 1)] = 7
+    im._formation_targets[3] = None
+    im._current_departed.add(3)
+
+    im.reset()
+
+    assert im.interactions == {}
+    assert im._interactions_by_type == {}, "stale type index is what caused the KeyError"
+    assert im._agent_membership == {}
+    assert im._interaction_by_object_type == {}
+    assert im._formation_targets == {}
+    assert im._current_departed == set()
+
+
+def test_reset_keeps_interaction_ids_monotonic():
+    """Ids stay unique across episodes so logs and recordings remain unambiguous."""
+    from arena_humansim.core.interaction_manager import InteractionManager
+    from arena_humansim.utils.rng import RNG
+
+    im = InteractionManager(RNG(0))
+    im.next_interaction_id = 12
+    im.reset()
+    assert im.next_interaction_id == 12

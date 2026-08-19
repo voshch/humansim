@@ -101,6 +101,26 @@ class InteractionManager(Loggable):
         agent = self._agent_lookup(agent_id)
         return agent.state.pose if agent is not None else None
 
+    def reset(self) -> None:
+        """Drop all interaction state, e.g. between episodes.
+
+        `interactions` is shadowed by several indices, and the scan helpers
+        (`_scan_symmetric`, `_scan_agent`) iterate an index and then dereference
+        `self.interactions[iid]` unguarded. Clearing the dict alone therefore leaves
+        dangling ids in `_interactions_by_type`, and the next symmetric seek dies with
+        `KeyError: <stale id>`, taking the node down. Callers must use this rather than
+        reaching for `interactions.clear()`.
+
+        `next_interaction_id` is deliberately left monotonic so ids stay unique across
+        episodes in logs and recordings.
+        """
+        self.interactions.clear()
+        self._agent_membership.clear()
+        self._interaction_by_object_type.clear()
+        self._interactions_by_type.clear()
+        self._formation_targets.clear()
+        self._current_departed.clear()
+
     def set_context(
         self,
         world_knowledge: WorldKnowledge | None = None,
