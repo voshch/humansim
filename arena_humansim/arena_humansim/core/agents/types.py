@@ -146,6 +146,7 @@ class AttentionDef:
     point_l: ChannelDef | None = None
     point_r: ChannelDef | None = None
     clip: ClipDef | None = None
+    posture: str = ""  # standing | seated | prone held for the step, empty = leave it to the interaction
     face: bool | AttentionRef | None = None  # None = auto
     required: bool = False
 

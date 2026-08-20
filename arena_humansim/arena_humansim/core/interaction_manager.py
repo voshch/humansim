@@ -227,7 +227,7 @@ class InteractionManager(Loggable):
         formation: Formation | None = interaction.contract.formation
         if formation is None:
             return
-        formation.on_join(agent_id)
+        formation.on_join(agent_id, participant=agent_id in interaction.participants)
 
     def _on_formation_leave(self, interaction: InteractionState, agent_id: int) -> None:
         formation: Formation | None = interaction.contract.formation
@@ -330,11 +330,14 @@ class InteractionManager(Loggable):
                 anchor = self._world_knowledge.object_pose(object_id)
                 if anchor is None:
                     continue
+                formation = interaction.contract.formation
                 for aid in interaction.participants:
                     pose = self._pose_lookup(aid)
                     if pose is None:
                         continue
-                    if pose_distance(pose, anchor) <= radius:
+                    # an explicit slot can lie further from the object origin than the radius, so drift is measured from it
+                    slot = formation.slot_of(aid) if formation is not None else None
+                    if pose_distance(pose, anchor if slot is None else slot) <= radius:
                         latched.add(aid)
                     elif aid in latched:
                         victims.append((aid, iid))
@@ -381,6 +384,33 @@ class InteractionManager(Loggable):
     def is_in_interaction(self, agent_id: int) -> bool:
         return any(role == MembershipRole.PARTICIPANT for role in self._agent_membership.get(agent_id, {}).values())
 
+    def posture_of(self, agent_id: int) -> str:
+        """Posture the agent's active interaction kind imposes, ``standing`` until it has arrived."""
+        for iid in self._iter_membership(agent_id, MembershipRole.PARTICIPANT):
+            interaction = self.interactions.get(iid)
+            if interaction is None or interaction.outcome != InteractionOutcome.ACTIVE:
+                continue
+            formation = interaction.contract.formation
+            if formation is not None and not formation.arrived(agent_id):
+                continue
+            return InteractionType(interaction.type).kind.posture
+        return "standing"
+
+    def parked(self) -> dict[int, Pose2D]:
+        """Agents held on an explicit seat by a posture-imposing interaction, and the seat pose."""
+        out: dict[int, Pose2D] = {}
+        for interaction in self.interactions.values():
+            if interaction.outcome != InteractionOutcome.ACTIVE or InteractionType(interaction.type).kind.posture == "standing":
+                continue
+            formation = interaction.contract.formation
+            if formation is None:
+                continue
+            for pid in interaction.participants:
+                seat = formation.seat_of(pid)
+                if seat is not None:
+                    out[pid] = seat
+        return out
+
     def is_in_queue(self, agent_id: int) -> bool:
         return any(role == MembershipRole.QUEUED for role in self._agent_membership.get(agent_id, {}).values())
 
@@ -423,6 +453,7 @@ class InteractionManager(Loggable):
                     self._maybe_activate(interaction)
                     for next_agent in promoted:
                         self._update_bt_movement(next_agent, interaction_id=interaction.id)
+                        self._on_formation_join(interaction, next_agent)
                 continue
 
             if not contract.queueable or not contract.queue:
@@ -434,6 +465,7 @@ class InteractionManager(Loggable):
                 self._add_membership(next_agent, interaction.id, MembershipRole.PARTICIPANT)
                 self._maybe_activate(interaction)
                 self._update_bt_movement(next_agent, interaction_id=interaction.id)
+                self._on_formation_join(interaction, next_agent)
 
     def _process_command(self, cmd: HighLevelCommand) -> None:
         ctype = cmd.type
@@ -672,8 +704,7 @@ class InteractionManager(Loggable):
         if spec.formation_spec is not None:
             interaction.state["formation_spec"] = spec.formation_spec
         contract.formation = self._resolve_formation(interaction)
-        if contract.formation is not None:
-            contract.formation.on_join(creator_id)
+        self._on_formation_join(interaction, creator_id)
 
         self._maybe_activate(interaction)
         self._update_bt_movement(creator_id, interaction_id=iid)
@@ -714,19 +745,39 @@ class InteractionManager(Loggable):
         if anchor is None:
             return None
 
+        params = dict(active_spec.params or {})
+        seats = self._object_seats(interaction.object_id, exclude=interaction.id)
+        if seats and active_spec.type == "cluster":
+            params["slot_poses"] = seats
         try:
             formation = Formation.create(
                 active_spec.type,
                 anchor=anchor,
                 agent_lookup=self._agent_lookup,
                 formation_scale=self._formation_scale,
-                **dict(active_spec.params or {}),
+                **params,
             )
         except (KeyError, TypeError) as e:
             self._logger.warning(f"Formation '{active_spec.type}' instantiation failed for interaction {interaction.id}: {e}")
             return None
         interaction.state["_active_formation_spec"] = active_spec
         return formation
+
+    def _object_seats(self, object_id: str | None, exclude: int) -> list[Pose2D]:
+        """Seats of the object that no other live interaction on it already holds."""
+        if object_id is None or self._world_knowledge is None:
+            return []
+        obj = self._world_knowledge.get(object_id)
+        if obj is None:
+            return []
+        claimed: list[Pose2D] = []
+        for iid, other in self.interactions.items():
+            if iid == exclude or other.object_id != object_id or other.outcome in _ENDED_OUTCOMES:
+                continue
+            formation = other.contract.formation
+            if formation is not None:
+                claimed.extend(formation.occupied_slots())
+        return [seat for seat in obj.seats if seat not in claimed]
 
     def _object_formation_spec(self, object_id: str | None) -> FormationSpec | None:
         if object_id is None or self._world_knowledge is None:
@@ -812,6 +863,7 @@ class InteractionManager(Loggable):
                 for next_agent in promoted:
                     self._add_membership(next_agent, iid, MembershipRole.PARTICIPANT)
                     self._update_bt_movement(next_agent, interaction_id=iid)
+                    self._on_formation_join(interaction, next_agent)
                 if interaction.participants:
                     active_id = interaction.participants[0]
                     stored = interaction.member_durations.get(active_id)

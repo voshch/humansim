@@ -187,6 +187,9 @@ def arrival_damp_step(pool: AgentPool, dt: float, tau_brake: float) -> None:
     pool.vel[:n] = np.where(latched[:, None], pool.vel[:n] * decay, pool.vel[:n])
 
 
+PRONE_RADIUS = 0.9  # half a body length, the disc a lying agent occupies
+
+
 def _gesture_msg(intent: GestureIntent) -> GestureMsg:
     g = GestureMsg()
     g.slot = intent.slot
@@ -377,6 +380,8 @@ class AgentManager(Node):
         self._external_timeout_ticks = max(1, int(round(_EXTERNAL_TIMEOUT_S / self._dt)))
         self._walls: dict[str, tuple[tuple[float, float], tuple[float, float]]] = {}
         self._obstacles: dict[str, ObstacleData] = {}
+        self._prone: set[int] = set()
+        self._parked_from: dict[int, tuple[float, float, float]] = {}
         self._marker_pub = MarkerPublisher(self) if self._publish_markers > 0 else None
         self._tick_count: int = 0
         self._sim_time_ns: int = 0
@@ -945,6 +950,8 @@ class AgentManager(Node):
 
     def _remove_agent(self, aid: int) -> None:
         self._agents.pop(aid, None)
+        self._prone.discard(aid)
+        self._parked_from.pop(aid, None)
         if aid in self._pool._id_to_idx:
             idx = self._pool._id_to_idx[aid]
             swapped_id = self._pool.swap_remove(aid)
@@ -1267,10 +1274,12 @@ class AgentManager(Node):
         corrected = self._collision.resolve(pool)
         if corrected:
             self._global_planner.invalidate_paths(corrected)
+        self._park_seated(pool)
         self._phase_end("collision", t0)
 
         t0 = time.perf_counter()
         self._advance_waypoints(agents, pool)
+        self._apply_postures(agents, pool)
         self._update_animation_states()
         msg = self._build_agent_states_msg()
         self._agent_states_pub.publish(msg)
@@ -1840,6 +1849,48 @@ class AgentManager(Node):
             pool.vel[idx, 1] = entity.vel[1]
             pool.prev_vel[idx] = pool.vel[idx]
 
+    def _park_seated(self, pool: AgentPool) -> None:
+        """Seated agents stay on their seat: furniture geometry and planning forces do not move them."""
+        parked = self._interaction_manager.parked()
+        for aid, seat in parked.items():
+            idx = pool._id_to_idx.get(aid)
+            if idx is None:
+                continue
+            # the pose it stopped at is outside the furniture by construction, collision put it there
+            self._parked_from.setdefault(aid, (float(pool.pos[idx, 0]), float(pool.pos[idx, 1]), float(pool.theta[idx])))
+            pool.pos[idx, 0] = seat.x
+            pool.pos[idx, 1] = seat.y
+            pool.theta[idx] = seat.theta
+            pool.vel[idx] = 0.0
+            pool.prev_vel[idx] = 0.0
+
+        for aid in [aid for aid in self._parked_from if aid not in parked]:
+            x, y, theta = self._parked_from.pop(aid)
+            idx = pool._id_to_idx.get(aid)
+            if idx is None:
+                continue
+            # released: the seat sits inside the object's collision box, which the resolver cannot push out of
+            pool.pos[idx, 0] = x
+            pool.pos[idx, 1] = y
+            pool.theta[idx] = theta
+            pool.vel[idx] = 0.0
+            pool.prev_vel[idx] = 0.0
+
+    def _apply_postures(self, agents: list[BaseAgent], pool: AgentPool) -> None:
+        """A prone agent (lying on something, or collapsed by an authored posture) occupies a body-length disc."""
+        for idx, agent in enumerate(agents):
+            mv = agent.movement
+            posture = mv.posture if isinstance(mv, BehaviorTreeMovement) and mv.posture else ""
+            if not posture:
+                posture = self._interaction_manager.posture_of(agent.state.agent_id)
+            aid = agent.state.agent_id
+            if posture == "prone":
+                self._prone.add(aid)
+                pool.agent_radius[idx] = PRONE_RADIUS
+            elif aid in self._prone:
+                self._prone.discard(aid)
+                pool.agent_radius[idx] = agent.params.agent_radius
+
     def _update_animation_states(self) -> None:
         pool = self._pool
         n = pool.n
@@ -1987,6 +2038,8 @@ class AgentManager(Node):
             self._behavior_trees.clear()
             self._agent_name_to_id.clear()
             self._external_entities.clear()
+            self._prone.clear()
+            self._parked_from.clear()
             self._despawn_monitor.clear()
             self._spawn_scheduler.reset_counts()
             self._interaction_manager.interactions.clear()
@@ -2020,6 +2073,8 @@ class AgentManager(Node):
         self._behavior_trees.clear()
         self._agent_name_to_id.clear()
         self._external_entities.clear()
+        self._prone.clear()
+        self._parked_from.clear()
         self._despawn_monitor.clear()
         self._spawn_scheduler.reset_counts()
         self._spawn_scheduler.clear_sources()
@@ -2397,6 +2452,7 @@ class AgentManager(Node):
                     satisfies=satisfies,
                     interaction_radius=interaction_radius,
                     formation=formation,
+                    seats=[Pose2D(x=float(s.x), y=float(s.y), theta=float(s.theta)) for s in info.seats],
                 )
             )
             added += 1

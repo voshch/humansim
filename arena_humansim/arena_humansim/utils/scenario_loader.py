@@ -26,7 +26,7 @@ from arena_humansim.core.agents.types import (
     VarDef,
     _as_paramdist,
 )
-from arena_humansim.core.interaction_kinds import HandleKind, InteractionType
+from arena_humansim.core.interaction_kinds import POSTURES, HandleKind, InteractionType
 from arena_humansim.utils.types import AnchorKind, FormationSpec, Pose2D, WaypointMode
 
 converter = cattrs.Converter()
@@ -88,7 +88,7 @@ _STEP_KINDS = ("object_interact", "go_to", "attention")
 _ADVANCES = ("dwell", "unreachable")
 _HOLDS = ("release", "keep")
 _CHANNEL_KEYS = ("at", "dwell", "advance", "hold", "at_z")
-_BLOCK_KEYS = (*CHANNEL_SLOTS, "clip", "face", "required")
+_BLOCK_KEYS = (*CHANNEL_SLOTS, "clip", "posture", "face", "required")
 _CLIP_WHEN = ("always", "bound")
 
 
@@ -211,8 +211,11 @@ def _structure_attention_def(val: object) -> AttentionDef:
         raise ValueError(f"unknown attention fields: {sorted(unknown)}")
     channels = {name: _structure_channel(name, d[name]) for name in CHANNEL_SLOTS if d.get(name) is not None}
     clip = _structure_clip(d["clip"]) if d.get("clip") is not None else None
-    if not channels and clip is None:
-        raise ValueError(f"attention requires at least one channel: {[*CHANNEL_SLOTS, 'clip']}")
+    posture = d.get("posture", "")
+    if posture not in ("", *POSTURES):
+        raise ValueError(f"attention 'posture' must be one of {POSTURES}, got {posture!r}")
+    if not channels and clip is None and not posture:
+        raise ValueError(f"attention requires at least one channel: {[*CHANNEL_SLOTS, 'clip', 'posture']}")
     arms = [name for name in ARM_CHANNELS if name in channels]
     if len(arms) > 1:
         raise ValueError(f"attention takes exactly one arm channel (point | point_l | point_r), got {arms}")
@@ -220,7 +223,7 @@ def _structure_attention_def(val: object) -> AttentionDef:
     required = d.get("required", False)
     if not isinstance(required, bool):
         raise ValueError(f"attention 'required' must be a bool, got {required!r}")
-    att = AttentionDef(face=face, required=required, clip=clip, **channels)
+    att = AttentionDef(face=face, required=required, clip=clip, posture=posture, **channels)
     if face is True:
         winner = att.face_channel()
         assert winner is not None
@@ -237,7 +240,7 @@ def _check_bare_attention(att: AttentionDef, raw: dict, timed: bool) -> None:
         if cycling:
             raise ValueError(f"bare attention step with cycling channel(s) {cycling} needs 'duration' or 'patience'")
         if not att.channels():
-            raise ValueError("bare attention step with only a clip needs 'duration' or 'patience'")
+            raise ValueError("bare attention step with only a clip or posture needs 'duration' or 'patience'")
 
 
 def _structure_go_to_step_def(val: object, _: type) -> GoToStepDef:

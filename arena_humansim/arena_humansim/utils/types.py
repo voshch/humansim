@@ -153,13 +153,19 @@ class AccessPolicy(Protocol):
 
 @runtime_checkable
 class Formation(Protocol):
-    def on_join(self, agent_id: int) -> None: ...
+    def on_join(self, agent_id: int, *, participant: bool = True) -> None: ...
 
     def on_leave(self, agent_id: int) -> None: ...
 
     def tick(self, dt: float) -> dict[int, Pose2D]: ...
 
     def arrived(self, agent_id: int) -> bool: ...
+
+    def slot_of(self, agent_id: int) -> Pose2D | None: ...
+
+    def seat_of(self, agent_id: int) -> Pose2D | None: ...
+
+    def occupied_slots(self) -> list[Pose2D]: ...
 
 
 @attrs.define
@@ -276,6 +282,7 @@ class BehaviorTreeMovement:
     interaction_id: int | None = None
     heading_goal: float | None = None
     gestures: tuple[GestureIntent, ...] = ()
+    posture: str = ""  # authored posture while a step holds one (standing | seated | prone), empty = none
 
 
 class ShapeType(enum.Enum):

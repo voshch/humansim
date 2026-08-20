@@ -878,3 +878,16 @@ def test_clip_when_bound_waits_for_the_interaction(agent_factory: Callable[..., 
     bound["v"] = False
     assert _tick(node) == RUNNING
     assert _mv(agent).gestures == ()
+
+
+def test_posture_held_for_the_step_and_dropped_after(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
+    agent = _bt_agent(agent_factory)
+    node = _node(agent, _att(clip=_clip("collapse_to_ground"), posture="prone"), world, rng_np, bare=True, duration=ParamDist(1.0))
+    assert _tick(node) == RUNNING
+    assert _mv(agent).posture == "prone"
+    node.suspend()
+    assert _mv(agent).posture == ""
+    assert _tick(node) == RUNNING
+    assert _mv(agent).posture == "prone"
+    node.stop(SUCCESS)
+    assert _mv(agent).posture == ""

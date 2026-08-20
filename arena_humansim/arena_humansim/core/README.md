@@ -54,7 +54,7 @@ Maintained in `_add_membership` / `_drop_membership` / `_create_interaction` / `
 
 `_tick_drift_eviction` runs every `update(dt)` immediately before `_tick_formations`. For each `ACTIVE` interaction it computes a per-participant proximity check and `stop(aid, iid, INTERRUPTED)`s any participant past the threshold:
 
-- **Object-bound** (`kind.is_object_bound`): distance from the participant to `WorldKnowledge.object_pose(interaction.object_id)`.
+- **Object-bound** (`kind.is_object_bound`): distance from the participant to its `Formation.slot_of(...)` when the formation assigns explicit slots, otherwise to `WorldKnowledge.object_pose(interaction.object_id)`. A seat can sit further from the object origin than the threshold, and the participant is pinned to it.
 - **Otherwise** (`NONE` / `TAG` / `AGENT`): distance from the participant to its nearest other participant. Skipped while the interaction has fewer than two locatable participants.
 
 Threshold is `kind.interaction_radius * cohesion_multiplier` (`InteractionManager.__init__`, default 1.2). Same radius as request-time proximity, scaled up slightly for engagement-bubble slack - an evicted agent is past the seek-match boundary by construction, so a re-seek on the next BT tick can't immediately rejoin without first walking back into range.
@@ -80,6 +80,8 @@ Each keyword is optional (sentinel `_UNSET`). It no-ops unless a field actually 
 1. Step-level `spec.formation_spec` (authored on the `SeekSpec` / scenario step).
 2. Object-level metadata - `WorldObject.formation` for `interaction.object_id`.
 3. Registry default - `InteractionType(...).kind.formation_default`.
+
+`WorldObject.seats` become the `slot_poses` of a `cluster` formation, so a sitter is placed on a seat rather than on a generated ring. Seats another live interaction on the same object already holds are filtered out, so a `SIT_ON` and a `LIE_ON` on one bench cannot pin two agents to the same pose. Only participants are given a seat: a queued member waits where it stopped and claims one on promotion.
 
 `_anchor_from_spec(spec, interaction)` dispatches on `AnchorKind`:
 

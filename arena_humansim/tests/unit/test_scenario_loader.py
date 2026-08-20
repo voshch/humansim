@@ -419,6 +419,8 @@ def test_attention_face_forms(face: object, expected: object) -> None:
         ({"clip": {"name": "wave", "when": "sometimes"}}, "when"),
         ({"clip": {"name": "wave", "loop": True}}, "unknown attention clip fields"),
         ({"clip": 3}, "clip name"),
+        ({"posture": "prone"}, "only a clip or posture"),
+        ({"gaze": "bench", "posture": "flying"}, "posture"),
     ],
 )
 def test_attention_validation(att: dict, match: str) -> None:
@@ -440,6 +442,12 @@ def test_attention_clip_forms() -> None:
     assert isinstance(step, StepDef)
     assert step.attention is not None and step.attention.clip == ClipDef(name="wave", when="bound")
     assert step.attention.gaze == ChannelDef(at=("partner",))
+
+
+def test_attention_posture_forms() -> None:
+    step = _step({"attention": {"clip": "collapse_to_ground", "posture": "prone"}, "duration": 3.0})
+    assert isinstance(step, AttentionStepDef)
+    assert step.attention.posture == "prone" and step.attention.clip == ClipDef(name="collapse_to_ground")
 
 
 def test_attention_cycling_bare_step_with_duration_or_patience() -> None:

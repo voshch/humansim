@@ -30,7 +30,7 @@ class DyadFormation(Formation):
         self._members: list[int] = []
         self._axis_yaw: float = 0.0
 
-    def on_join(self, agent_id: int) -> None:
+    def on_join(self, agent_id: int, *, participant: bool = True) -> None:
         if agent_id in self._members:
             return
         if len(self._members) >= 2:

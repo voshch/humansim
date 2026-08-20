@@ -288,3 +288,126 @@ def test_group_conversation_releases_formation_on_duration_expiry() -> None:
     _, targets, departed = mgr.update({}, dt=0.05)
     assert targets == {}
     assert departed == set()
+
+
+def test_object_seats_become_cluster_slots() -> None:
+    wk = WorldKnowledge()
+    seat = Pose2D(x=5.4, y=0.2, theta=1.5)
+    wk.add_object(WorldObject(object_id="chair", type="chair", pose=Pose2D(x=5.0, y=0.0, theta=0.0), seats=[seat]))
+    agents = {1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D()))}
+    mgr = _mk_manager(agents, world=wk)
+    iid = _create(mgr, 1, InteractionType.SIT_ON, target="chair")
+    _, formation_targets, _ = mgr.update({}, dt=0.05)
+    assert formation_targets[1] == seat
+    assert mgr.interactions[iid].contract.formation is not None
+
+
+def test_seated_agent_parks_on_its_seat_from_reach() -> None:
+    wk = WorldKnowledge()
+    seat = Pose2D(x=5.0, y=0.0, theta=-1.5)
+    wk.add_object(WorldObject(object_id="chair", type="chair", pose=Pose2D(x=5.0, y=0.0, theta=0.0), seats=[seat]))
+    agents = {1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D(x=5.0, y=-2.0)))}
+    mgr = _mk_manager(agents, world=wk)
+    iid = _create(mgr, 1, InteractionType.SIT_ON, target="chair")
+    mgr.interactions[iid].outcome = InteractionOutcome.ACTIVE
+    mgr.update({}, dt=0.05)
+    assert mgr.parked() == {}
+    agents[1].state.pose = Pose2D(x=5.0, y=-0.7)
+    assert mgr.parked() == {1: seat}
+
+
+def test_posture_waits_for_arrival() -> None:
+    """A participant is ACTIVE while still walking up, the widened footprint must not apply yet."""
+    wk = WorldKnowledge()
+    seat = Pose2D(x=5.0, y=0.0, theta=0.0)
+    wk.add_object(WorldObject(object_id="bed", type="bed", pose=Pose2D(x=5.0, y=0.0, theta=0.0), seats=[seat]))
+    agents = {1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D(x=5.0, y=-8.0)))}
+    mgr = _mk_manager(agents, world=wk)
+    iid = _create(mgr, 1, InteractionType.LIE_ON, target="bed")
+    mgr.interactions[iid].outcome = InteractionOutcome.ACTIVE
+    mgr.update({}, dt=0.05)
+    assert mgr.posture_of(1) == "standing"
+    agents[1].state.pose = Pose2D(x=5.0, y=-0.5)
+    assert mgr.posture_of(1) == "prone"
+
+
+def test_posture_of_follows_the_active_interaction_kind() -> None:
+    wk = WorldKnowledge()
+    wk.add_object(WorldObject(object_id="bed", type="bed", pose=Pose2D(x=2.0, y=0.0, theta=0.0)))
+    # on its ring slot, so the posture gate sees it as arrived
+    agents = {1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D(x=0.8, y=0.0))), 2: _FakeAgent(state=_FakeState(agent_id=2))}
+    mgr = _mk_manager(agents, world=wk)
+    assert mgr.posture_of(1) == "standing"
+    iid = _create(mgr, 1, InteractionType.LIE_ON, target="bed")
+    mgr.interactions[iid].outcome = InteractionOutcome.ACTIVE
+    assert mgr.posture_of(1) == "prone"
+    assert mgr.posture_of(2) == "standing"
+
+
+def test_offset_seat_does_not_trip_drift_eviction() -> None:
+    """The seat can lie beyond the drift radius, but the pinned agent is exactly where the interaction wants it."""
+    wk = WorldKnowledge()
+    seat = Pose2D(x=7.5, y=0.0, theta=3.1)
+    wk.add_object(WorldObject(object_id="bench", type="bench", pose=Pose2D(x=5.0, y=0.0, theta=0.0), seats=[seat]))
+    agents = {1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D(x=5.0, y=0.3)))}
+    mgr = _mk_manager(agents, world=wk)
+    iid = _create(mgr, 1, InteractionType.SIT_ON, target="bench")
+    mgr.interactions[iid].outcome = InteractionOutcome.ACTIVE
+    for x in (5.0, 6.0, 7.0, seat.x):
+        agents[1].state.pose = Pose2D(x=x, y=0.3 if x == 5.0 else 0.0)
+        mgr.update({}, dt=0.05)
+    assert mgr.interactions[iid].state["_drift_arrived"] == {1}
+    assert mgr.interactions[iid].outcome == InteractionOutcome.ACTIVE
+    assert mgr.parked() == {1: seat}
+
+
+def test_two_kinds_on_one_object_do_not_share_a_seat() -> None:
+    wk = WorldKnowledge()
+    near = Pose2D(x=5.0, y=1.0, theta=0.0)
+    far = Pose2D(x=5.0, y=-1.0, theta=0.0)
+    wk.add_object(WorldObject(object_id="bench", type="bench", pose=Pose2D(x=5.0, y=0.0, theta=0.0), seats=[near, far]))
+    agents = {
+        1: _FakeAgent(state=_FakeState(agent_id=1, pose=Pose2D(x=5.0, y=3.0))),
+        2: _FakeAgent(state=_FakeState(agent_id=2, pose=Pose2D(x=5.0, y=3.0))),
+    }
+    mgr = _mk_manager(agents, world=wk)
+    for agent_id, itype in ((1, InteractionType.SIT_ON), (2, InteractionType.LIE_ON)):
+        iid = _create(mgr, agent_id, itype, target="bench")
+        mgr.interactions[iid].outcome = InteractionOutcome.ACTIVE
+    _, formation_targets, _ = mgr.update({}, dt=0.05)
+    assert formation_targets == {1: near, 2: far}
+
+
+def test_queued_member_gets_no_seat() -> None:
+    """Seats are for sitters: a queued agent must not be routed onto the furniture."""
+    wk = WorldKnowledge()
+    seats = [Pose2D(x=5.0, y=1.0, theta=0.0), Pose2D(x=5.0, y=-1.0, theta=0.0)]
+    wk.add_object(WorldObject(object_id="bench", type="bench", pose=Pose2D(x=5.0, y=0.0, theta=0.0), seats=seats))
+    agents = {aid: _FakeAgent(state=_FakeState(agent_id=aid, pose=Pose2D(x=5.0, y=6.0))) for aid in (1, 2)}
+    mgr = _mk_manager(agents, world=wk)
+    iid = _create(mgr, 1, InteractionType.SIT_ON, target="bench")
+    mgr.interactions[iid].outcome = InteractionOutcome.ACTIVE
+    assert mgr.accept(2, iid) is True
+    assert 2 in mgr.interactions[iid].contract.queue
+    _, formation_targets, _ = mgr.update({}, dt=0.05)
+    assert 2 not in formation_targets
+    assert mgr.interactions[iid].contract.formation.occupied_slots() == [formation_targets[1]]
+
+
+def test_promotion_from_the_queue_claims_the_freed_seat() -> None:
+    wk = WorldKnowledge()
+    seat = Pose2D(x=5.0, y=1.0, theta=0.0)
+    wk.add_object(WorldObject(object_id="chair", type="chair", pose=Pose2D(x=5.0, y=0.0, theta=0.0), seats=[seat]))
+    agents = {
+        1: _FakeAgent(state=_FakeState(agent_id=1, pose=seat)),
+        2: _FakeAgent(state=_FakeState(agent_id=2, pose=Pose2D(x=5.0, y=6.0))),
+    }
+    mgr = _mk_manager(agents, world=wk)
+    iid = _create(mgr, 1, InteractionType.SIT_ON, target="chair", duration=0.5)
+    mgr.interactions[iid].outcome = InteractionOutcome.ACTIVE
+    assert mgr.accept(2, iid) is True
+    formation = mgr.interactions[iid].contract.formation
+    assert formation.slot_of(2) is None
+    mgr.update({}, dt=0.6)
+    assert mgr.interactions[iid].participants == [2]
+    assert formation.slot_of(2) == seat

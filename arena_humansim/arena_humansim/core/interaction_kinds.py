@@ -16,6 +16,9 @@ if TYPE_CHECKING:
     from arena_humansim.utils.types import InteractionState, SeekSpec
 
 
+POSTURES = ("standing", "seated", "prone")
+
+
 class InteractionType(enum.IntEnum):
     # Values are persisted in logs/replays - never reassign or reuse an index.
     TALK_TO = 0
@@ -99,6 +102,7 @@ class InteractionKind:
     allows_offer: bool = False
     interaction_radius: float = DISTANCE_TOLERANCE
     clip: str = ""  # animation clip shown while a participant, authored attention.clip overrides
+    posture: str = "standing"  # standing | seated | prone while a participant
 
     @property
     def is_object_bound(self) -> bool:
@@ -220,12 +224,14 @@ def _registry() -> dict[InteractionType, InteractionKind]:
             contract_defaults=ContractDefaults(min_participants=1, max_participants=1, queueable=True, access=AccessKind.FIFO),
             formation_default=_fs("cluster", AnchorKind.OBJECT),
             clip="sit",
+            posture="seated",
         ),
         InteractionType.LIE_ON: InteractionKind(
             label="LIE",
             handle=_OBJECT_HANDLE,
             contract_defaults=ContractDefaults(min_participants=1, max_participants=1, queueable=True, access=AccessKind.FIFO),
             formation_default=_fs("cluster", AnchorKind.OBJECT),
+            posture="prone",
         ),
         InteractionType.USE: InteractionKind(
             label="USE",

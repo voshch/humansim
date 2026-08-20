@@ -19,6 +19,7 @@ class WorldObject:
     satisfies: dict[str, float] = attrs.Factory(dict)
     formation: FormationSpec | None = None
     interaction_radius: float | None = None
+    seats: list[Pose2D] = attrs.Factory(list)
 
 
 class WorldKnowledge(Loggable):

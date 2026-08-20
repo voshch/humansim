@@ -411,6 +411,10 @@ class AttentionNode(py_trees.behaviour.Behaviour):
                 ch.raise_at(entry, self._agent.params.handedness)
                 return
 
+    def _hold_posture(self, mv: BehaviorTreeMovement | None, posture: str) -> None:
+        if mv is not None and self._att.posture:
+            mv.posture = posture
+
     def _step_clip(self) -> None:
         clip = self._clip
         if clip is None:
@@ -461,6 +465,7 @@ class AttentionNode(py_trees.behaviour.Behaviour):
                 self._step_unreachable(ch, heading, in_flight)
         self._step_clip()
         self._publish(mv)
+        self._hold_posture(mv, self._att.posture)
         return self._finish()
 
     def suspend(self) -> None:
@@ -473,6 +478,7 @@ class AttentionNode(py_trees.behaviour.Behaviour):
         for ch in self._channels:
             ch.lower()
         self._clip_published = None
+        self._hold_posture(mv, "")
 
     def terminate(self, new_status: py_trees.common.Status) -> None:
         del new_status
@@ -484,6 +490,7 @@ class AttentionNode(py_trees.behaviour.Behaviour):
         if self._clip_published is not None:
             released.append(self._clip_published)
         mv.gestures = tuple(g for g in mv.gestures if not any(g is r for r in released))
+        self._hold_posture(mv, "")
 
 
 @attrs.frozen

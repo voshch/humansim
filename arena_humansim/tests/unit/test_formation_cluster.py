@@ -74,3 +74,32 @@ def test_cluster_generated_slots_capacity_bounded() -> None:
     targets = f.tick(dt=0.01)
     # Only 3 agents placed; 4th has no free slot
     assert len(targets) == 3
+
+
+def test_explicit_seat_arrives_from_reach_and_parks() -> None:
+    seat = Pose2D(x=5.0, y=5.0, theta=-1.5)
+    poses = {1: Pose2D(x=5.0, y=4.3)}
+    f = ClusterFormation(
+        anchor=PoseAnchor(fixed=Pose2D(x=5.0, y=5.0)),
+        agent_lookup=_lookup_for(poses),
+        slot_poses=[seat],
+    )
+    f.on_join(1)
+    assert f.arrived(1)
+    assert f.seat_of(1) == seat
+    poses[1] = Pose2D(x=5.0, y=3.0)
+    assert not f.arrived(1)
+    assert f.seat_of(1) is None
+
+
+def test_generated_slots_never_park() -> None:
+    f = ClusterFormation(
+        anchor=PoseAnchor(fixed=Pose2D()),
+        agent_lookup=_lookup_for({1: Pose2D(x=1.2, y=0.0)}),
+        slot_poses=None,
+        radius=1.2,
+        capacity=4,
+    )
+    f.on_join(1)
+    assert f.arrived(1)
+    assert f.seat_of(1) is None

@@ -5,6 +5,8 @@ import math
 import attrs
 
 from arena_humansim.utils import DISTANCE_TOLERANCE
+
+SEAT_REACH = 0.9  # explicit seats sit inside furniture that keeps walkers out, arrival is declared from here and the agent is parked on the slot
 from arena_humansim.utils.types import Pose2D, pose_distance
 
 from . import AgentLookup, Formation
@@ -54,7 +56,10 @@ class ClusterFormation(Formation):
             slots.append(_Slot(pose=Pose2D(x=x, y=y, theta=theta)))
         return slots
 
-    def on_join(self, agent_id: int) -> None:
+    def on_join(self, agent_id: int, *, participant: bool = True) -> None:
+        if not participant and not self._generated:
+            # explicit seats belong to sitters, a queued member waits where it stopped instead of standing on the furniture
+            return
         if any(s.agent_id == agent_id for s in self._slots):
             return
         agent = self.agent_lookup(agent_id)
@@ -102,5 +107,19 @@ class ClusterFormation(Formation):
         agent = self.agent_lookup(agent_id)
         if agent is None:
             return True
-        pose = agent.state.pose
-        return pose_distance(pose, slot.pose) < DISTANCE_TOLERANCE
+        reach = DISTANCE_TOLERANCE if self._generated else SEAT_REACH
+        return pose_distance(agent.state.pose, slot.pose) < reach
+
+    def slot_of(self, agent_id: int) -> Pose2D | None:
+        if self._generated:
+            return None
+        slot = next((s for s in self._slots if s.agent_id == agent_id), None)
+        return slot.pose if slot is not None else None
+
+    def seat_of(self, agent_id: int) -> Pose2D | None:
+        return self.slot_of(agent_id) if self.arrived(agent_id) else None
+
+    def occupied_slots(self) -> list[Pose2D]:
+        if self._generated:
+            return []
+        return [s.pose for s in self._slots if s.agent_id is not None]

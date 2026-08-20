@@ -75,7 +75,7 @@ class LineFormation(Formation):
         backward = yaw + math.pi
         return step * math.cos(backward), step * math.sin(backward)
 
-    def on_join(self, agent_id: int) -> None:
+    def on_join(self, agent_id: int, *, participant: bool = True) -> None:
         if any(s.agent_id == agent_id for s in self._slots):
             return
         self._slots.append(_Slot(agent_id=agent_id, target=Pose2D(), prev_target=Pose2D()))

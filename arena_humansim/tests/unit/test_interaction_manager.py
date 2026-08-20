@@ -7,6 +7,7 @@ pytest.importorskip("rclpy")
 from dataclasses import dataclass
 from typing import Any
 
+from arena_humansim.core.formation import Formation
 from arena_humansim.core.interaction_kinds import InteractionType
 from arena_humansim.core.interaction_manager import CommandType, InteractionManager
 from arena_humansim.core.world_knowledge import WorldKnowledge, WorldObject
@@ -503,7 +504,7 @@ def test_object_bound_finder_reindexes_after_teardown() -> None:
     assert mgr.interactions[iid_a2].participants == [3]
 
 
-class _FakeFormation:
+class _FakeFormation(Formation):
     def __init__(self) -> None:
         self._arrived: dict[int, bool] = {}
 
@@ -513,7 +514,7 @@ class _FakeFormation:
     def arrived(self, agent_id: int) -> bool:
         return self._arrived.get(agent_id, False)
 
-    def on_join(self, agent_id: int) -> None:
+    def on_join(self, agent_id: int, *, participant: bool = True) -> None:
         self._arrived.setdefault(agent_id, False)
 
     def on_leave(self, agent_id: int) -> None:
