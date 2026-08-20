@@ -41,4 +41,4 @@ class GlobalPlanner(WallAware, Loggable, ABC):
 
 ## Benchmarks
 
-See [config/benchmark/astar_vs_dijkstra.yaml](../../../config/benchmark/astar_vs_dijkstra.yaml) for the canonical A*-vs-Dijkstra sweep.
+See [config/benchmark/astar_vs_dijkstra.yaml](../../config/benchmark/astar_vs_dijkstra.yaml) for the canonical A*-vs-Dijkstra sweep.
