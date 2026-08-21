@@ -1951,7 +1951,7 @@ class AgentManager(Node):
             self._external_entities.clear()
             self._despawn_monitor.clear()
             self._spawn_scheduler.reset_counts()
-            self._interaction_manager.interactions.clear()
+            self._interaction_manager.reset()
             self._event_bus.clear()
             self._next_agent_id = 1
             self._tick_count = 0
@@ -1986,7 +1986,7 @@ class AgentManager(Node):
         self._spawn_scheduler.reset_counts()
         self._spawn_scheduler.clear_sources()
         self._despawn_monitor.clear_sinks()
-        self._interaction_manager.interactions.clear()
+        self._interaction_manager.reset()
         self._event_bus.clear()
         self._event_scripts.clear()
         self._event_scripts_by_tick.clear()
