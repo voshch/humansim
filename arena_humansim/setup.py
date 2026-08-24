@@ -55,7 +55,7 @@ setup(
         "sarl": ["torch>=2.2"],
         "dsrnn": ["torch>=2.2"],
         "drlvo": ["torch>=2.2", "stable_baselines3>=2.0", "gymnasium>=0.29"],
-        "cadrl": ["torch>=2.2", "tensorflow>=2.12"],
+        "cadrl": ["torch>=2.2"],
         "robot": ["arena_humansim[sarl,dsrnn,drlvo,cadrl]"],
     },
     zip_safe=True,
