@@ -386,3 +386,9 @@ class NeedsState:
         for name, amount in deltas.items():
             if name in self.needs:
                 self.needs[name].value = min(100.0, self.needs[name].value + amount)
+
+    def set(self, name: str, value: float) -> None:
+        """Overwrite one need, clamped to [0, 100]. Unknown names are ignored."""
+        need = self.needs.get(name)
+        if need is not None:
+            need.value = min(100.0, max(0.0, value))

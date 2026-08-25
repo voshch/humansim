@@ -105,7 +105,11 @@ sequences:
     then: chat
 ```
 
-`transitions` evaluate every tick - they can cut a step short. `then` only fires on the last step succeeding. `on_failure: <seq_name>` routes to another sequence when the current one FAILs (unset => propagate failure to the root). `interruptible: false` disables `transitions` for the sequence.
+`transitions` evaluate every tick - they can cut a step short. `then` only fires on the last step succeeding. `on_failure: <seq_name>` routes to another sequence when the current one FAILs (unset => propagate failure to the root).
+
+### Stimuli
+
+The `notify_stimulus` service sets the need named by `stimulus` to `100 * intensity` after the agent's sampled `reaction_time`, and fires an event of the same name on the event bus. Only agents whose type declares that need react to the value, so a `transitions` entry keyed on it (e.g. `when: {alarm: {above: 50.0}}`) preempts the current sequence. `agent_id: -1` broadcasts to every agent.
 
 ### `steps`
 
@@ -129,7 +133,6 @@ Each step is either a `StepDef` (interaction, pure-wait, cancel) or a `GoToStepD
 | `allowed_actions` / `blocked_actions` | Filter the autonomous candidate pool. |
 | `until` | Event-bus event name that exits the autonomous step on fire (e.g. `"agent_ready"`). |
 | `until_need` | Need-condition predicate that exits the autonomous step (e.g. `{rest: {above: 80}}`). |
-| `interruptible` | Per-step override of the sequence flag. |
 | `interaction_radius` | Per-step override of the radius cascade; see [../scenarios/README.md](../scenarios/README.md). |
 | `on_failure` | `"abort"` (default) / `"skip"` - on step FAILURE. |
 
@@ -138,7 +141,7 @@ Each step is either a `StepDef` (interaction, pure-wait, cancel) or a `GoToStepD
 - `target_pose: {x, y, theta}` - scripted waypoint.
 - `target: <str>` - object id/type; the compiler emits `Resolve -> GoTo`.
 
-Plus `duration:` (optional hold on arrival), `patience:`, `satisfies:`, `on_failure:`, `interruptible:`.
+Plus `duration:` (optional hold on arrival), `patience:`, `satisfies:`, `on_failure:`.
 
 ### Pure-wait step
 

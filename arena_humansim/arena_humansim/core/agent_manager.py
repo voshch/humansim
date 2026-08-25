@@ -26,6 +26,7 @@ from arena_humansim_msgs.srv import (
     AddWorldObjects,
     Feedback,
     GetProfile,
+    NotifyStimulus,
     RemoveAgents,
     RemoveObstacles,
     RemoveSink,
@@ -375,6 +376,7 @@ class AgentManager(Node):
         self._sim_time_ns: int = 0
         self._subsystem_epoch_ns: int = 0
         self._pending_scenario_spawns: deque[tuple[int, AgentStateMsg]] = deque()
+        self._pending_stimuli: deque[tuple[int, int, str, float]] = deque()
         self._agent_states_pool = _AgentStateMsgPool()
         self._tick_phases: dict[str, float] = {}
         self._overrun_count: int = 0
@@ -431,6 +433,11 @@ class AgentManager(Node):
             SetFlow,
             "set_flow",
             self._set_flow_callback,
+        )
+        self._notify_stimulus_srv = self.create_service(
+            NotifyStimulus,
+            "notify_stimulus",
+            self._notify_stimulus_callback,
         )
         self._add_source_srv = self.create_service(
             AddSource,
@@ -1025,6 +1032,15 @@ class AgentManager(Node):
             resp = self._spawn_agents_callback(due, SpawnAgents.Response())
             if not resp.success:
                 self._logger.error(f"deferred scenario spawn failed at tick {self._tick_count}: {resp.message}")
+
+        while self._pending_stimuli and self._pending_stimuli[0][0] <= self._tick_count:
+            _, agent_id, stimulus, intensity = self._pending_stimuli.popleft()
+            agent = self._agents.get(agent_id)
+            if agent is None:
+                continue
+            if agent.needs is not None:
+                agent.needs.set(stimulus, 100.0 * intensity)
+            self._event_bus.fire(stimulus, agent_id)
 
         t0 = time.perf_counter()
         spawn_requests = self._spawn_scheduler.tick(self._tick_count, self._dt)
@@ -1988,6 +2004,7 @@ class AgentManager(Node):
         self._despawn_monitor.clear_sinks()
         self._interaction_manager.reset()
         self._event_bus.clear()
+        self._pending_stimuli.clear()
         self._event_scripts.clear()
         self._event_scripts_by_tick.clear()
         self._interaction_scripts.clear()
@@ -2139,6 +2156,27 @@ class AgentManager(Node):
 
         response.success = True
         response.message = f"Set {len(sources)} source(s), {len(sinks)} sink(s)"
+        self._logger.info(response.message)
+        return response
+
+    def _notify_stimulus_callback(self, request: NotifyStimulus.Request, response: NotifyStimulus.Response) -> NotifyStimulus.Response:
+        if request.agent_id == -1:
+            targets = list(self._agents.keys())
+        elif request.agent_id in self._agents:
+            targets = [request.agent_id]
+        else:
+            response.success = False
+            response.message = f"unknown agent id {request.agent_id}"
+            return response
+
+        for aid in targets:
+            agent = self._agents[aid]
+            due_tick = self._tick_count + int(round(agent.params.reaction_time / self._dt))
+            self._pending_stimuli.append((due_tick, aid, request.stimulus, float(request.intensity)))
+        self._pending_stimuli = deque(sorted(self._pending_stimuli, key=lambda entry: entry[0]))
+
+        response.success = True
+        response.message = f"queued {request.stimulus} for {len(targets)} agent(s)"
         self._logger.info(response.message)
         return response
 

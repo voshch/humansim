@@ -178,6 +178,7 @@ Config format and stage semantics: [`config/benchmark/README.md`](arena_humansim
 - `add_source`, `remove_source`, `add_sink`, `remove_sink` — flow control
 - `add_walls`, `remove_walls` — dynamic obstacles
 - `set_flow` — bulk configure sources, sinks, walls
+- `notify_stimulus` - drive a need on one agent (or `-1` for all) after its reaction time
 - `reset` — clear all simulation state
 
 ## Development
