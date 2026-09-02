@@ -30,6 +30,7 @@ class InteractionType(enum.IntEnum):
     WAVE_AT = 7
     BLOCK = 8
     SERVICE = 9
+    HUG = 10
 
     @property
     def kind(self) -> InteractionKind:
@@ -103,6 +104,10 @@ class InteractionKind:
     interaction_radius: float = DISTANCE_TOLERANCE
     clip: str = ""  # animation clip shown while a participant, authored attention.clip overrides
     posture: str = "standing"  # standing | seated | prone while a participant
+    render_pose_override: bool = False  # formation target replaces the physics pose for display
+    # (task_generator side), for a formation whose target separation is smaller than the
+    # participants' combined agent_radius - no local planner's own repulsion would ever let
+    # the physics pose alone reach it. See AttentionNode._clip_render_target.
 
     @property
     def is_object_bound(self) -> bool:
@@ -251,6 +256,15 @@ def _registry() -> dict[InteractionType, InteractionKind]:
             contract_defaults=ContractDefaults(min_participants=2, max_participants=2, queueable=False),
             formation_default=None,
             clip="wave",
+        ),
+        InteractionType.HUG: InteractionKind(
+            label="HUG",
+            handle=_SYMMETRIC_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=2, max_participants=2, queueable=False),
+            formation_default=_fs("dyad", AnchorKind.CENTROID, {"separation": 0.3}),
+            interaction_radius=0.3,
+            clip="hug",
+            render_pose_override=True,
         ),
         InteractionType.BLOCK: InteractionKind(
             label="BLOCK",

@@ -880,6 +880,32 @@ def test_clip_when_bound_waits_for_the_interaction(agent_factory: Callable[..., 
     assert _mv(agent).gestures == ()
 
 
+def test_hug_clip_publishes_render_pose_override(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
+    a = _bt_agent(agent_factory, agent_id=1, x=0.0, y=0.0)
+    b = _bt_agent(agent_factory, agent_id=2, x=2.0, y=0.0)
+    agents = {1: a, 2: b}
+    mgr = _bind(agents, InteractionType.HUG)
+    node = _node(a, _att(clip=_clip("hug", when="bound")), world, rng_np, agents=agents, ctx=StepContext(im=mgr, is_bound_lookup=mgr.is_bound))
+    assert _tick(node) == RUNNING
+    target = mgr.formation_target(1)
+    assert target is not None
+    body = _slots(a)["body"]
+    assert body.render_pose_override is True
+    assert (body.x, body.y) == pytest.approx((target.x, target.y))
+
+
+def test_non_contact_clip_does_not_publish_render_pose_override(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
+    a = _bt_agent(agent_factory, agent_id=1, x=0.0, y=0.0)
+    b = _bt_agent(agent_factory, agent_id=2, x=2.0, y=0.0)
+    agents = {1: a, 2: b}
+    mgr = _bind(agents, InteractionType.GROUP_CONVERSATION)
+    node = _node(a, _att(clip=_clip("talk_with_arm_gesture", when="bound")), world, rng_np, agents=agents, ctx=StepContext(im=mgr, is_bound_lookup=mgr.is_bound))
+    assert _tick(node) == RUNNING
+    body = _slots(a)["body"]
+    assert body.render_pose_override is False
+    assert (body.x, body.y) == (0.0, 0.0)
+
+
 def test_posture_held_for_the_step_and_dropped_after(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
     agent = _bt_agent(agent_factory)
     node = _node(agent, _att(clip=_clip("collapse_to_ground"), posture="prone"), world, rng_np, bare=True, duration=ParamDist(1.0))

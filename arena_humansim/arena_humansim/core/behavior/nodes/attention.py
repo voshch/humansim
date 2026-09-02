@@ -12,6 +12,7 @@ from arena_humansim.core.agents.types import ATTENTION_KEYWORDS, CHANNEL_SLOTS, 
 from arena_humansim.core.behavior.nodes.helpers import _bt_logger, _nav_command, _sample_param_dist
 from arena_humansim.core.behavior.reach import MIN_RESIDENCE_S, reachable
 from arena_humansim.core.behavior.step_context import StepContext
+from arena_humansim.core.interaction_kinds import InteractionType
 from arena_humansim.core.pool import KIND_ROBOT
 from arena_humansim.core.world_knowledge import WorldKnowledge
 from arena_humansim.utils.types import BehaviorTreeMovement, CommandType, GestureIntent, Pose2D, WaypointMovement
@@ -415,14 +416,35 @@ class AttentionNode(py_trees.behaviour.Behaviour):
         if mv is not None and self._att.posture:
             mv.posture = posture
 
+    def _clip_render_target(self) -> tuple[float, float] | None:
+        """World xy for this clip's render-pose override, if its bound interaction kind wants
+        one (e.g. HUG): local planners never fully close a contact-kind formation's target
+        separation against their own repulsion, so the render layer (task_generator side)
+        substitutes the formation slot for display instead of the physics pose. See
+        InteractionKind.render_pose_override and BaseHumanSimulator._agent_states_to_pedestrians.
+        """
+        mv = self._bt_mv()
+        im = self._ctx.im
+        if mv is None or mv.interaction_id is None or im is None:
+            return None
+        interaction = im.interactions.get(mv.interaction_id)
+        if interaction is None or not InteractionType(interaction.type).kind.render_pose_override:
+            return None
+        target = im.formation_target(self._agent.state.agent_id)
+        return None if target is None else (target.x, target.y)
+
     def _step_clip(self) -> None:
         clip = self._clip
         if clip is None:
             return
         if clip.when == "bound" and not self._bound():
             self._clip_published = None
-        elif self._clip_published is None:
-            self._clip_published = GestureIntent(CLIP_SLOT, clip=clip.name)
+            return
+        xy = self._clip_render_target()
+        x, y = xy if xy is not None else (0.0, 0.0)
+        override = xy is not None
+        if self._clip_published is None or (self._clip_published.x, self._clip_published.y, self._clip_published.render_pose_override) != (x, y, override):
+            self._clip_published = GestureIntent(CLIP_SLOT, x, y, clip=clip.name, render_pose_override=override)
 
     def _published(self) -> list[GestureIntent]:
         out = [ch.published for ch in self._channels if ch.published is not None]

@@ -273,6 +273,7 @@ class GestureIntent:
     z: float = 0.0
     clip: str = ""  # body slot: animation clip name
     hand: str = ""  # arm slot: dominant hand l | r, empty = default
+    render_pose_override: bool = False  # body slot: (x, y) is a render-only position override
 
 
 @attrs.define

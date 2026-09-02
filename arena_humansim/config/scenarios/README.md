@@ -8,7 +8,7 @@ Every BT step that joins or creates an interaction uses `SeekNode` under the hoo
 
 | Handle   | Interactions                                   | `target:` shape              | `offer:`              |
 |----------|------------------------------------------------|------------------------------|-----------------------|
-| `NONE`   | `TALK_TO`, `GROUP_CONVERSATION`, `WAVE_AT`     | omitted                      | not allowed           |
+| `NONE`   | `TALK_TO`, `GROUP_CONVERSATION`, `WAVE_AT`, `HUG` | omitted                   | not allowed           |
 | `OBJECT` | `USE`, `SIT_ON`, `LIE_ON`, `QUEUE_USE`         | `str` (object id or type)    | not allowed           |
 | `TAG`    | `SERVICE`                                      | `str` (service tag; required for `offer: true`, optional for seekers) | provider side only |
 | `AGENT`  | `BLOCK`                                        | `int` (agent id)             | not allowed           |
@@ -56,8 +56,15 @@ Cascade (first non-null wins):
 | `SERVICE`            | 3.0                  |
 | `WAVE_AT`            | `DISTANCE_TOLERANCE` |
 | `BLOCK`              | `DISTANCE_TOLERANCE` |
+| `HUG`                | 0.6                   |
 
 Source of truth: the `InteractionKind.interaction_radius` fields in [../../arena_humansim/core/interaction_kinds.py](../../arena_humansim/core/interaction_kinds.py).
+
+### `render_pose_override` kinds (e.g. `HUG`)
+
+A dyad whose target formation separation is smaller than the pair's combined `agent_radius` (a hug, unlike a `TALK_TO`, wants the two bodies to actually close in) can never be reached by tuning `interaction_radius` / the formation's `separation` alone: every local planner's own collision-avoidance repulsion between the pair keeps them apart by roughly `agent_radius_a + agent_radius_b`, no matter the target - this is true of every planner (SFM/HSFM, ORCA, learned ones like SocialGAIL/NSP) since it falls out of each one's own avoidance term, not something a scenario or a single planner can be tuned around.
+
+`InteractionKind.render_pose_override = True` (set on `HUG`) opts a kind out of that fight entirely, on the display side instead of the physics side: `AttentionNode._clip_render_target` (`core/behavior/nodes/attention.py`) publishes the interaction's live formation slot (`InteractionManager.formation_target`) as the clip's `GestureIntent.x/y`, flagged `render_pose_override=True` on the wire (`Gesture.msg`). `task_generator`'s humansim bridge (`_agent_states_to_pedestrians` in `simulators/human/arena_humansim/arena_humansim.py`) substitutes that position for the physics pose on the `Pedestrian` it publishes. Physics (collision avoidance, every other agent's avoidance, robot planning) is untouched - only what gets drawn/sensed downstream of `arena_peds` changes. This generalizes to any local planner, current or future, for free, since it never touches planner code at all.
 
 ### Object override
 
@@ -175,7 +182,7 @@ attention:
 
 At least one channel (`clip` counts), and exactly one arm channel (`point` xor `point_l` xor `point_r`). Nothing is implicit: a body part without a channel stays idle. Slots on the wire: `gaze` -> `head`, `point` -> `arm` with `hand` from the ped's sampled handedness, `point_l`/`point_r` -> `arm_l`/`arm_r`, `clip` -> `body` with the clip name.
 
-`clip` names a clip of the animation layer, the engine never reads it. `when: bound` shows it only while the agent is a participant of an active interaction, which is how interaction kinds carry a default (`SIT_ON` -> `sit`, `WAVE_AT` -> `wave`, `TALK_TO` / `GROUP_CONVERSATION` -> `talk_with_arm_gesture`, see `InteractionKind.clip`); an authored `clip` on the step replaces the default. A bare step with only a `clip` needs `duration` or `patience`.
+`clip` names a clip of the animation layer, the engine never reads it. `when: bound` shows it only while the agent is a participant of an active interaction, which is how interaction kinds carry a default (`SIT_ON` -> `sit`, `WAVE_AT` -> `wave`, `TALK_TO` / `GROUP_CONVERSATION` -> `talk_with_arm_gesture`, `HUG` -> `hug`, see `InteractionKind.clip`); an authored `clip` on the step replaces the default. A bare step with only a `clip` needs `duration` or `patience`.
 
 A channel is either `<targets>` (shorthand for `{at: <targets>}`) or a mapping:
 
