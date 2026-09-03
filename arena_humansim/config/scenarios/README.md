@@ -54,7 +54,7 @@ Cascade (first non-null wins):
 | `GROUP_CONVERSATION` | 3.0                  |
 | `TALK_TO`            | 2.0                  |
 | `SERVICE`            | 3.0                  |
-| `WAVE_AT`            | `DISTANCE_TOLERANCE` |
+| `WAVE_AT`            | 6.0                   |
 | `BLOCK`              | `DISTANCE_TOLERANCE` |
 | `HUG`                | 0.6                   |
 
@@ -65,6 +65,38 @@ Source of truth: the `InteractionKind.interaction_radius` fields in [../../arena
 A dyad whose target formation separation is smaller than the pair's combined `agent_radius` (a hug, unlike a `TALK_TO`, wants the two bodies to actually close in) can never be reached by tuning `interaction_radius` / the formation's `separation` alone: every local planner's own collision-avoidance repulsion between the pair keeps them apart by roughly `agent_radius_a + agent_radius_b`, no matter the target - this is true of every planner (SFM/HSFM, ORCA, learned ones like SocialGAIL/NSP) since it falls out of each one's own avoidance term, not something a scenario or a single planner can be tuned around.
 
 `InteractionKind.render_pose_override = True` (set on `HUG`) opts a kind out of that fight entirely, on the display side instead of the physics side: `AttentionNode._clip_render_target` (`core/behavior/nodes/attention.py`) publishes the interaction's live formation slot (`InteractionManager.formation_target`) as the clip's `GestureIntent.x/y`, flagged `render_pose_override=True` on the wire (`Gesture.msg`). `task_generator`'s humansim bridge (`_agent_states_to_pedestrians` in `simulators/human/arena_humansim/arena_humansim.py`) substitutes that position for the physics pose on the `Pedestrian` it publishes. Physics (collision avoidance, every other agent's avoidance, robot planning) is untouched - only what gets drawn/sensed downstream of `arena_peds` changes. This generalizes to any local planner, current or future, for free, since it never touches planner code at all.
+
+### Directional greeting (`WAVE_AT` broadcaster/responder via `clip.when`)
+
+`WAVE_AT` uses the symmetric `NONE` handle like `TALK_TO`, so either peer may create the
+interaction and the other joins once mutually visible - there is no engine-level "who waved
+first". A one-then-the-other greeting (A waves, B notices and waves back, rather than both
+starting the clip in lockstep) is authored per-agent via `attention.clip.when`, not via the
+interaction system:
+
+```yaml
+# broadcaster - keeps waving while it looks for a partner, regardless of binding
+do_wave:
+  interaction: WAVE_AT
+  attention:
+    clip: {name: wave, when: always}
+    gaze: partner
+  duration: {mean: 6.0, std: 0.0}
+
+# responder - only raises the clip once actually bound to the broadcaster's interaction
+do_wave:
+  interaction: WAVE_AT
+  attention:
+    clip: {name: wave, when: bound}
+    gaze: partner
+  duration: {mean: 6.0, std: 0.0}
+```
+
+`interaction_radius: 6.0` (above typical `vision_range`, mean 5.0) keeps the pair latched for the
+whole greeting even though `WAVE_AT` has no formation to draw them together - discovery still
+requires mutual visibility (`_scan_symmetric`'s `visibility_lookup` gate), so nothing pairs up
+outside vision range or FOV; the radius only governs post-match drift eviction. See
+`worlds/*/scenarios/social_waving/waver_{1,2}.yaml` for the working example.
 
 ### Object override
 
