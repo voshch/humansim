@@ -1469,8 +1469,13 @@ class AgentManager(Node):
         vel_theta = np.arctan2(vel[:, 1], vel[:, 0])
         goal_theta = pool.goal_theta[:n]
         has_goal_theta = pool.has_goal_theta[:n]
-        target_theta = np.where(moving, vel_theta, goal_theta)
-        rotating = (moving & ~provides_heading) | (has_goal_theta & ~moving)
+        # An explicit goal_theta (formation facing once bound, or attention's face-while-
+        # approaching) reflects deliberate intent and always wins over velocity-following
+        # heading - a formation slot re-derived from a live CentroidAnchor (e.g. DyadFormation)
+        # rarely lets speed settle fully below min_speed_for_heading, so gating on `moving` left
+        # participants facing their last direction of travel instead of each other.
+        target_theta = np.where(has_goal_theta, goal_theta, vel_theta)
+        rotating = (moving & ~provides_heading & ~has_goal_theta) | has_goal_theta
         delta = np.arctan2(
             np.sin(target_theta - theta),
             np.cos(target_theta - theta),
