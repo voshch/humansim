@@ -47,7 +47,7 @@ from rclpy.clock import Clock as RclClock
 from rclpy.clock import ClockType
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from rclpy.qos import DurabilityPolicy, QoSProfile
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rosgraph_msgs.msg import Clock
 
 from arena_humansim.animation import MotionAnimation
@@ -501,6 +501,7 @@ class AgentManager(Node):
         )
 
         self._timer: rclpy.timer.Timer | None = None
+        self._clock_sub: rclpy.subscription.Subscription | None = None
         if self._mode == self.MODE_MASTER:
             self._setup_master_mode()
         elif self._mode == self.MODE_SUBSYSTEM:
@@ -1605,14 +1606,15 @@ class AgentManager(Node):
         # Subsystem mode: external orchestrator owns /clock. If tick wall-cost
         # exceeds clock cadence our state lags the clock downstream consumers see.
         # Policies:
-        #   lag          - keep ticking every scheduled tick; stamp header with
-        #                  scheduled sim-time; emit overrun warnings. Correct
-        #                  physics, possibly stale realtime. (only one implemented)
+        #   lag          - keep ticking every period the clock has covered; stamp
+        #                  header with scheduled sim-time; emit overrun warnings.
+        #                  Correct physics, possibly stale realtime. (only one implemented)
         #   skip         - drop ticks to stay current with /clock. Not implemented.
         #   backpressure - signal orchestrator to throttle /clock. Not implemented.
         if self._subsystem_overrun_policy != "lag":
             raise ValueError(f"subsystem_overrun_policy={self._subsystem_overrun_policy!r} not implemented; only 'lag' is available")
-        self._timer = self.create_timer(self._dt, self._subsystem_timer_callback)
+        clock_sub_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
+        self._clock_sub = self.create_subscription(Clock, "/clock", self._subsystem_timer_callback, clock_sub_qos)
         # Accumulated spawn/despawn IDs returned to callers via feedback
         self._accumulated_spawned: list[int] = []
         self._accumulated_despawned: list[int] = []
@@ -1681,15 +1683,16 @@ class AgentManager(Node):
             self._logger.info(f"all robots reached their goal at tick={self._tick_count}, shutting down")
             rclpy.try_shutdown()
 
-    def _subsystem_timer_callback(self):
+    def _subsystem_timer_callback(self, msg: Clock):
+        now_ns = msg.clock.sec * 1_000_000_000 + msg.clock.nanosec
         if self._tick_count == 0:
             self._publish_world_geometry()
-            self._subsystem_epoch_ns = self.get_clock().now().nanoseconds
-        # rcl drops missed timer cycles, so tick once per period the clock has
-        # covered since the epoch: coverage (and the stamp) tracks the clock
+            self._subsystem_epoch_ns = now_ns
         dt_ns = int(self._dt * 1e9)
-        covered = (self.get_clock().now().nanoseconds - self._subsystem_epoch_ns) // dt_ns + 1
-        owed = max(1, covered - self._tick_count)
+        covered = (now_ns - self._subsystem_epoch_ns) // dt_ns + 1
+        owed = covered - self._tick_count
+        if owed <= 0:
+            return
         t0 = time.perf_counter()
         for _ in range(owed):
             self._sim_time_ns = self._tick_count * dt_ns
