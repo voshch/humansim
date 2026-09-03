@@ -312,8 +312,5 @@ def shift_agent_type(agent_type: AgentType, dx: float, dy: float) -> AgentType:
     """Translate every authored map coordinate (go_to targets, formation anchors) by (dx, dy)."""
     if dx == 0.0 and dy == 0.0:
         return agent_type
-    sequences = {
-        name: attrs.evolve(seq, steps={k: _shift_step(v, dx, dy) for k, v in seq.steps.items()})
-        for name, seq in agent_type.sequences.items()
-    }
+    sequences = {name: attrs.evolve(seq, steps={k: _shift_step(v, dx, dy) for k, v in seq.steps.items()}) for name, seq in agent_type.sequences.items()}
     return attrs.evolve(agent_type, sequences=sequences)
