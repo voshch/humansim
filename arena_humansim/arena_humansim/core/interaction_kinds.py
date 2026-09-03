@@ -31,6 +31,7 @@ class InteractionType(enum.IntEnum):
     BLOCK = 8
     SERVICE = 9
     HUG = 10
+    SHAKE_HAND = 11
 
     @property
     def kind(self) -> InteractionKind:
@@ -268,6 +269,18 @@ def _registry() -> dict[InteractionType, InteractionKind]:
             formation_default=_fs("dyad", AnchorKind.CENTROID, {"separation": 0.3}),
             interaction_radius=0.3,
             clip="hug",
+            render_pose_override=True,
+        ),
+        InteractionType.SHAKE_HAND: InteractionKind(
+            label="SHAKE",
+            handle=_SYMMETRIC_HANDLE,
+            contract_defaults=ContractDefaults(min_participants=2, max_participants=2, queueable=False),
+            # Arm's-length separation, tighter than combined agent_radius (default 0.35 each) would
+            # reliably close via local-planner repulsion alone - same render_pose_override rationale
+            # as HUG (see the note on InteractionKind.render_pose_override above).
+            formation_default=_fs("dyad", AnchorKind.CENTROID, {"separation": 0.6}),
+            interaction_radius=0.3,
+            clip="shake_hand",
             render_pose_override=True,
         ),
         InteractionType.BLOCK: InteractionKind(

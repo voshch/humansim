@@ -894,6 +894,20 @@ def test_hug_clip_publishes_render_pose_override(agent_factory: Callable[..., Ba
     assert (body.x, body.y) == pytest.approx((target.x, target.y))
 
 
+def test_shake_hand_clip_publishes_render_pose_override(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
+    a = _bt_agent(agent_factory, agent_id=1, x=0.0, y=0.0)
+    b = _bt_agent(agent_factory, agent_id=2, x=2.0, y=0.0)
+    agents = {1: a, 2: b}
+    mgr = _bind(agents, InteractionType.SHAKE_HAND)
+    node = _node(a, _att(clip=_clip("shake_hand", when="bound")), world, rng_np, agents=agents, ctx=StepContext(im=mgr, is_bound_lookup=mgr.is_bound))
+    assert _tick(node) == RUNNING
+    target = mgr.formation_target(1)
+    assert target is not None
+    body = _slots(a)["body"]
+    assert body.render_pose_override is True
+    assert (body.x, body.y) == pytest.approx((target.x, target.y))
+
+
 def test_non_contact_clip_does_not_publish_render_pose_override(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:
     a = _bt_agent(agent_factory, agent_id=1, x=0.0, y=0.0)
     b = _bt_agent(agent_factory, agent_id=2, x=2.0, y=0.0)
