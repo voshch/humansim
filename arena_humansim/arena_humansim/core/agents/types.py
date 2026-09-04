@@ -133,9 +133,9 @@ class ClipDef:
     when: str = "always"  # always | bound (only while the agent is a participant of an active interaction)
 
 
-CHANNEL_SLOTS = {"gaze": "head", "point": "arm", "point_l": "arm_l", "point_r": "arm_r"}
+CHANNEL_SLOTS = {"gaze": "head", "point": "arm", "point_l": "arm_l", "point_r": "arm_r", "halt": "halt", "halt_l": "halt_l", "halt_r": "halt_r"}
 CLIP_SLOT = "body"
-ARM_CHANNELS = ("point", "point_r", "point_l")
+ARM_CHANNELS = ("point", "point_r", "point_l", "halt", "halt_r", "halt_l")
 ATTENTION_KEYWORDS = ("partner", "partners", "target", "goal")
 
 
@@ -145,13 +145,24 @@ class AttentionDef:
     point: ChannelDef | None = None
     point_l: ChannelDef | None = None
     point_r: ChannelDef | None = None
+    halt: ChannelDef | None = None
+    halt_l: ChannelDef | None = None
+    halt_r: ChannelDef | None = None
     clip: ClipDef | None = None
     posture: str = ""  # standing | seated | prone held for the step, empty = leave it to the interaction
     face: bool | AttentionRef | None = None  # None = auto
     required: bool = False
 
     def channels(self) -> dict[str, ChannelDef]:
-        pairs = (("gaze", self.gaze), ("point", self.point), ("point_l", self.point_l), ("point_r", self.point_r))
+        pairs = (
+            ("gaze", self.gaze),
+            ("point", self.point),
+            ("point_l", self.point_l),
+            ("point_r", self.point_r),
+            ("halt", self.halt),
+            ("halt_l", self.halt_l),
+            ("halt_r", self.halt_r),
+        )
         return {name: ch for name, ch in pairs if ch is not None}
 
     def face_channel(self) -> str | None:

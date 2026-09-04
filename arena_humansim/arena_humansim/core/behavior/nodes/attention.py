@@ -228,7 +228,7 @@ class _Channel:
     def raise_at(self, entry: _Entry, handedness: str) -> None:
         assert entry.xyz is not None
         self.shown = True
-        self.published = GestureIntent(self.slot, entry.xyz[0], entry.xyz[1], entry.xyz[2], hand=handedness if self.name == "point" else "")
+        self.published = GestureIntent(self.slot, entry.xyz[0], entry.xyz[1], entry.xyz[2], hand=handedness if self.name in ("point", "halt") else "")
 
 
 class AttentionNode(py_trees.behaviour.Behaviour):

@@ -218,7 +218,7 @@ def _structure_attention_def(val: object) -> AttentionDef:
         raise ValueError(f"attention requires at least one channel: {[*CHANNEL_SLOTS, 'clip', 'posture']}")
     arms = [name for name in ARM_CHANNELS if name in channels]
     if len(arms) > 1:
-        raise ValueError(f"attention takes exactly one arm channel (point | point_l | point_r), got {arms}")
+        raise ValueError(f"attention takes exactly one arm channel ({' | '.join(ARM_CHANNELS)}), got {arms}")
     face = _structure_face(d.get("face"))
     required = d.get("required", False)
     if not isinstance(required, bool):
