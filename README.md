@@ -152,7 +152,7 @@ Config format and stage semantics: [`config/benchmark/README.md`](arena_humansim
 
 | Parameter | Default | Description |
 |---|---|---|
-| `mode` | `master` | `master` / `subsystem` |
+| `mode` | `master` | `master` owns `/clock` and ticks on a wall timer, `subsystem` ticks on `/clock` |
 | `seed` | `0` | RNG seed for deterministic runs |
 | `dt` | `0.05` | Simulation timestep (s) |
 | `bt_tick_interval` | `5` | BT ticks every N sim ticks |
@@ -172,12 +172,14 @@ Config format and stage semantics: [`config/benchmark/README.md`](arena_humansim
 
 **Subscribes:**
 - `world_state` — external robot state updates
+- `/clock` (subsystem mode) drives the tick: every message runs the ticks its sim time has covered since the epoch, so a held clock cannot starve the engine
 
 **Services:**
 - `spawn_agents`, `remove_agents` — direct agent control
 - `add_source`, `remove_source`, `add_sink`, `remove_sink` — flow control
 - `add_walls`, `remove_walls` — dynamic obstacles
 - `set_flow` — bulk configure sources, sinks, walls
+- `notify_stimulus` - drive a need on one agent (or `-1` for all) after its reaction time
 - `reset` — clear all simulation state
 
 ## Development

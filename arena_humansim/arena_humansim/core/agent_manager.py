@@ -27,6 +27,7 @@ from arena_humansim_msgs.srv import (
     AddWorldObjects,
     Feedback,
     GetProfile,
+    NotifyStimulus,
     RemoveAgents,
     RemoveObstacles,
     RemoveSink,
@@ -45,7 +46,7 @@ from py_trees.trees import BehaviourTree
 from rclpy.clock import Clock as RclClock
 from rclpy.clock import ClockType
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rosgraph_msgs.msg import Clock
 
 from arena_humansim.animation import MotionAnimation
@@ -388,6 +389,7 @@ class AgentManager(Node):
         self._sim_time_ns: int = 0
         self._subsystem_epoch_ns: int = 0
         self._pending_scenario_spawns: deque[tuple[int, AgentStateMsg]] = deque()
+        self._pending_stimuli: deque[tuple[int, int, str, float]] = deque()
         self._agent_states_pool = _AgentStateMsgPool()
         self._tick_phases: dict[str, float] = {}
         self._overrun_count: int = 0
@@ -444,6 +446,11 @@ class AgentManager(Node):
             SetFlow,
             "set_flow",
             self._set_flow_callback,
+        )
+        self._notify_stimulus_srv = self.create_service(
+            NotifyStimulus,
+            "notify_stimulus",
+            self._notify_stimulus_callback,
         )
         self._add_source_srv = self.create_service(
             AddSource,
@@ -507,6 +514,7 @@ class AgentManager(Node):
         )
 
         self._timer: rclpy.timer.Timer | None = None
+        self._clock_sub: rclpy.subscription.Subscription | None = None
         if self._mode == self.MODE_MASTER:
             self._setup_master_mode()
         elif self._mode == self.MODE_SUBSYSTEM:
@@ -1036,6 +1044,15 @@ class AgentManager(Node):
             resp = self._spawn_agents_callback(due, SpawnAgents.Response())
             if not resp.success:
                 self._logger.error(f"deferred scenario spawn failed at tick {self._tick_count}: {resp.message}")
+
+        while self._pending_stimuli and self._pending_stimuli[0][0] <= self._tick_count:
+            _, agent_id, stimulus, intensity = self._pending_stimuli.popleft()
+            agent = self._agents.get(agent_id)
+            if agent is None:
+                continue
+            if agent.needs is not None:
+                agent.needs.set(stimulus, 100.0 * intensity)
+            self._event_bus.fire(stimulus, agent_id)
 
         t0 = time.perf_counter()
         spawn_requests = self._spawn_scheduler.tick(self._tick_count, self._dt)
@@ -1615,14 +1632,15 @@ class AgentManager(Node):
         # Subsystem mode: external orchestrator owns /clock. If tick wall-cost
         # exceeds clock cadence our state lags the clock downstream consumers see.
         # Policies:
-        #   lag          - keep ticking every scheduled tick; stamp header with
-        #                  scheduled sim-time; emit overrun warnings. Correct
-        #                  physics, possibly stale realtime. (only one implemented)
+        #   lag          - keep ticking every period the clock has covered; stamp
+        #                  header with scheduled sim-time; emit overrun warnings.
+        #                  Correct physics, possibly stale realtime. (only one implemented)
         #   skip         - drop ticks to stay current with /clock. Not implemented.
         #   backpressure - signal orchestrator to throttle /clock. Not implemented.
         if self._subsystem_overrun_policy != "lag":
             raise ValueError(f"subsystem_overrun_policy={self._subsystem_overrun_policy!r} not implemented; only 'lag' is available")
-        self._timer = self.create_timer(self._dt, self._subsystem_timer_callback)
+        clock_sub_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
+        self._clock_sub = self.create_subscription(Clock, "/clock", self._subsystem_timer_callback, clock_sub_qos)
         # Accumulated spawn/despawn IDs returned to callers via feedback
         self._accumulated_spawned: list[int] = []
         self._accumulated_despawned: list[int] = []
@@ -1691,15 +1709,16 @@ class AgentManager(Node):
             self._logger.info(f"all robots reached their goal at tick={self._tick_count}, shutting down")
             rclpy.try_shutdown()
 
-    def _subsystem_timer_callback(self):
+    def _subsystem_timer_callback(self, msg: Clock):
+        now_ns = msg.clock.sec * 1_000_000_000 + msg.clock.nanosec
         if self._tick_count == 0:
             self._publish_world_geometry()
-            self._subsystem_epoch_ns = self.get_clock().now().nanoseconds
-        # rcl drops missed timer cycles, so tick once per period the clock has
-        # covered since the epoch: coverage (and the stamp) tracks the clock
+            self._subsystem_epoch_ns = now_ns
         dt_ns = int(self._dt * 1e9)
-        covered = (self.get_clock().now().nanoseconds - self._subsystem_epoch_ns) // dt_ns + 1
-        owed = max(1, covered - self._tick_count)
+        covered = (now_ns - self._subsystem_epoch_ns) // dt_ns + 1
+        owed = covered - self._tick_count
+        if owed <= 0:
+            return
         t0 = time.perf_counter()
         for _ in range(owed):
             self._sim_time_ns = self._tick_count * dt_ns
@@ -2087,6 +2106,7 @@ class AgentManager(Node):
         self._despawn_monitor.clear_sinks()
         self._interaction_manager.reset()
         self._event_bus.clear()
+        self._pending_stimuli.clear()
         self._event_scripts.clear()
         self._event_scripts_by_tick.clear()
         self._interaction_scripts.clear()
@@ -2238,6 +2258,27 @@ class AgentManager(Node):
 
         response.success = True
         response.message = f"Set {len(sources)} source(s), {len(sinks)} sink(s)"
+        self._logger.info(response.message)
+        return response
+
+    def _notify_stimulus_callback(self, request: NotifyStimulus.Request, response: NotifyStimulus.Response) -> NotifyStimulus.Response:
+        if request.agent_id == -1:
+            targets = list(self._agents.keys())
+        elif request.agent_id in self._agents:
+            targets = [request.agent_id]
+        else:
+            response.success = False
+            response.message = f"unknown agent id {request.agent_id}"
+            return response
+
+        for aid in targets:
+            agent = self._agents[aid]
+            due_tick = self._tick_count + int(round(agent.params.reaction_time / self._dt))
+            self._pending_stimuli.append((due_tick, aid, request.stimulus, float(request.intensity)))
+        self._pending_stimuli = deque(sorted(self._pending_stimuli, key=lambda entry: entry[0]))
+
+        response.success = True
+        response.message = f"queued {request.stimulus} for {len(targets)} agent(s)"
         self._logger.info(response.message)
         return response
 

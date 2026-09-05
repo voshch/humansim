@@ -117,6 +117,17 @@ class InteractionManager(Loggable):
         agent = self._agent_lookup(agent_id)
         return agent.state.pose if agent is not None else None
 
+    def reset(self) -> None:
+        """Drop all interaction state between episodes. Clearing `interactions` alone leaves
+        dangling ids in the indices the scan helpers walk; `next_interaction_id` stays monotonic
+        so ids remain unique across episodes."""
+        self.interactions.clear()
+        self._agent_membership.clear()
+        self._interaction_by_object_type.clear()
+        self._interactions_by_type.clear()
+        self._formation_targets.clear()
+        self._current_departed.clear()
+
     def set_context(
         self,
         world_knowledge: WorldKnowledge | None = None,

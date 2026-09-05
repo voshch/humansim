@@ -1,0 +1,6 @@
+int32 agent_id      # -1 = every agent
+string stimulus     # need it drives
+float32 intensity   # 0..1
+---
+bool success
+string message

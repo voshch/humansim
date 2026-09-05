@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -12,15 +11,13 @@ import numpy as np
 from arena_humansim.core.agents import BaseAgent
 from arena_humansim.utils.types import Pose2D
 
-from ..base import RobotPolicy, cache_lock, fetch_to_disk, policy_cache_dir
+from ..base import RobotPolicy, fetch_to_disk, policy_cache_dir
 from .obs import build_observation
 
 if TYPE_CHECKING:
     from .model import GA3CCADRLNet
 
-_CKPT_BASE = "https://github.com/mit-acl/gym-collision-avoidance/raw/release/gym_collision_avoidance/envs/policies/GA3C_CADRL/checkpoints/IROS18"
-_CKPT_FILES = ("network_01900000.meta", "network_01900000.index", "network_01900000.data-00000-of-00001")
-_CKPT_NAME = "network_01900000"
+_WEIGHTS_URL = "https://huggingface.co/arena-rosnav/cadrl/resolve/main/cadrl_iros18.pt"
 _CONVERTED_NAME = "cadrl_iros18.pt"
 _NUM_ACTIONS = 11
 _MAX_OTHER_AGENTS = 10
@@ -89,32 +86,8 @@ class CADRLPlanner(RobotPolicy):
         pt_path = Path(self._checkpoint_path)
         if pt_path.exists():
             return
-        cache = policy_cache_dir("cadrl")
-        # Convert + delete-tf-files runs under a per-cache lock so parallel workers
-        # don't write pt_path concurrently or yank the TF source mid-conversion.
-        with cache_lock(cache / ".convert.lock"):
-            if pt_path.exists():
-                return
-            tf_dir = cache / "tf_iros18"
-            tf_dir.mkdir(parents=True, exist_ok=True)
-            for fname in _CKPT_FILES:
-                dest = tf_dir / fname
-                url = f"{_CKPT_BASE}/{fname}"
-                if not dest.exists():
-                    self._logger.info(f"Fetching CADRL checkpoint file {url} -> {dest}")
-                    fetch_to_disk(url, dest)
-            from .tf_to_torch import convert_and_save
-
-            prefix = str(tf_dir / _CKPT_NAME)
-            self._logger.info(f"Converting TF1 checkpoint at {prefix} -> {pt_path}")
-            tmp_pt = pt_path.with_suffix(pt_path.suffix + f".convert.{os.getpid()}")
-            try:
-                convert_and_save(prefix, tmp_pt, num_actions=_NUM_ACTIONS, max_other_agents=self._max_other_agents)
-                os.replace(tmp_pt, pt_path)
-            finally:
-                Path(tmp_pt).unlink(missing_ok=True)
-            for fname in _CKPT_FILES:
-                (tf_dir / fname).unlink(missing_ok=True)
+        self._logger.info(f"Fetching CADRL weights {_WEIGHTS_URL} -> {pt_path}")
+        fetch_to_disk(_WEIGHTS_URL, pt_path)
 
     def _ensure_model(self) -> None:
         if self._model is not None:

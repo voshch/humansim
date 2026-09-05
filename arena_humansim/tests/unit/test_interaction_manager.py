@@ -825,3 +825,38 @@ def test_service_max_participants_threads_from_spec() -> None:
     assert len(mgr2.interactions) == 1
     interaction2 = next(iter(mgr2.interactions.values()))
     assert interaction2.contract.max_participants == -1
+
+
+def test_reset_clears_every_index() -> None:
+    # Regression: interactions.clear() alone left stale ids in the indices the scan helpers walk.
+    wk = WorldKnowledge()
+    wk.add_object(WorldObject(object_id="atm", type="atm", pose=Pose2D()))
+    mgr = _mk_mgr({1: _fake_bt_agent(1), 2: _fake_bt_agent(2)}, world=wk)
+    iid = _seed_interaction(mgr, 1, InteractionType.GROUP_CONVERSATION)
+    mgr.interactions[iid].outcome = InteractionOutcome.ACTIVE
+    assert mgr.accept(2, iid) is True
+    _seed_interaction(mgr, 2, InteractionType.QUEUE_USE, target="atm")
+    mgr.update({}, dt=0.05)
+    assert mgr._interactions_by_type
+    assert mgr._agent_membership
+    assert mgr._interaction_by_object_type
+    assert mgr._formation_targets
+
+    mgr.reset()
+
+    assert mgr.interactions == {}
+    assert mgr._interactions_by_type == {}
+    assert mgr._agent_membership == {}
+    assert mgr._interaction_by_object_type == {}
+    assert mgr._formation_targets == {}
+    assert mgr._current_departed == set()
+
+
+def test_reset_keeps_interaction_ids_monotonic() -> None:
+    mgr = _mk_mgr({1: _fake_bt_agent(1)})
+    _seed_interaction(mgr, 1, InteractionType.GROUP_CONVERSATION)
+    seen = mgr.next_interaction_id
+
+    mgr.reset()
+
+    assert mgr.next_interaction_id == seen

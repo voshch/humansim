@@ -35,6 +35,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/AddWorldObjects.srv"
   "srv/BehaviorTreeTick.srv"
   "srv/Feedback.srv"
+  "srv/NotifyStimulus.srv"
   "srv/RemoveAgents.srv"
   "srv/RemoveObstacles.srv"
   "srv/ResetSimulation.srv"
