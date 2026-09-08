@@ -407,6 +407,14 @@ class InteractionManager(Loggable):
             return InteractionType(interaction.type).kind.posture
         return "standing"
 
+    def active_interaction(self, agent_id: int) -> tuple[int, int] | None:
+        """(interaction_id, interaction_type) of the agent's ACTIVE participant interaction, or None."""
+        for iid in self._iter_membership(agent_id, MembershipRole.PARTICIPANT):
+            interaction = self.interactions.get(iid)
+            if interaction is not None and interaction.outcome == InteractionOutcome.ACTIVE:
+                return iid, interaction.type
+        return None
+
     def parked(self) -> dict[int, Pose2D]:
         """Agents held on an explicit seat by a posture-imposing interaction, and the seat pose."""
         out: dict[int, Pose2D] = {}

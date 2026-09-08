@@ -1959,6 +1959,11 @@ class AgentManager(Node):
             mv = agent.movement if agent is not None else None
             intents = mv.gestures if isinstance(mv, BehaviorTreeMovement) else ()
             a.gestures = [_gesture_msg(g) for g in intents]
+            active = self._interaction_manager.active_interaction(a.agent_id)
+            if active is not None:
+                a.interaction_id, a.interaction_type = active
+            else:
+                a.interaction_id = -1
         return msg
 
     def _spawn_agents_callback(
