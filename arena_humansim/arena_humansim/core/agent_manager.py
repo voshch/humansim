@@ -13,6 +13,9 @@ import rclpy
 from arena_humansim_msgs.msg import AgentState as AgentStateMsg
 from arena_humansim_msgs.msg import AgentStates as AgentStatesMsg
 from arena_humansim_msgs.msg import Gesture as GestureMsg
+from arena_humansim_msgs.msg import InteractionEvent as InteractionEventMsg
+from arena_humansim_msgs.msg import Interactions as InteractionsMsg
+from arena_humansim_msgs.msg import InteractionStatus as InteractionStatusMsg
 from arena_humansim_msgs.msg import ObstacleConfig as ObstacleConfigMsg
 from arena_humansim_msgs.msg import Shape as ShapeMsg
 from arena_humansim_msgs.msg import SinkConfig as SinkConfigMsg
@@ -45,7 +48,9 @@ from geometry_msgs.msg import Pose2D as Pose2DMsg
 from py_trees.trees import BehaviourTree
 from rclpy.clock import Clock as RclClock
 from rclpy.clock import ClockType
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rosgraph_msgs.msg import Clock
 
@@ -65,7 +70,7 @@ from arena_humansim.core.animation_kinds import locomotion_states
 from arena_humansim.core.behavior.compiler import BehaviorTreeFactory
 from arena_humansim.core.despawn_monitor import DespawnMonitor
 from arena_humansim.core.interaction_kinds import InteractionType
-from arena_humansim.core.interaction_manager import InteractionManager
+from arena_humansim.core.interaction_manager import CONTACT_ENABLED, DEFAULT_STANDING_DISTANCE, InteractionManager
 from arena_humansim.core.logger import SimulationLogger
 from arena_humansim.core.pool import KIND_ROBOT, AgentPool, PoolAware
 from arena_humansim.core.recorder import BagRecorder, default_record_dir
@@ -241,6 +246,9 @@ class AgentManager(Node):
         self.declare_parameter("time", 0.0)
         self.declare_parameter("rtf", 1.0)
         self.declare_parameter("subsystem_overrun_policy", "lag")
+        # motion-matched control arm: contact kinds hold at locomotion_standing_distance with no clip, settable per episode
+        self.declare_parameter("contact_mode", CONTACT_ENABLED)
+        self.declare_parameter("locomotion_standing_distance", DEFAULT_STANDING_DISTANCE)
 
         seed = self.get_parameter("seed").value
         self._dt = self.get_parameter("dt").value
@@ -319,6 +327,11 @@ class AgentManager(Node):
         self._policy_name_to_idx = {self._module_selections["local_planner"]: 0}
         self._policies = [self._local_planner]
         self._interaction_manager = InteractionManager(rng_manager=self._rng)
+        self._interaction_manager.set_contact_mode(
+            str(self.get_parameter("contact_mode").value),
+            float(self.get_parameter("locomotion_standing_distance").value),
+        )
+        self.add_on_set_parameters_callback(self._on_contact_params)
         self._animation = MotionAnimation.create(
             self._module_selections["animation"],
         )
@@ -405,6 +418,13 @@ class AgentManager(Node):
             AgentStatesMsg,
             "agent_states",
             10,
+        )
+
+        # lifecycle edges ride on this, a dropped message loses an edge: keep it reliable
+        self._interactions_pub = self.create_publisher(
+            InteractionsMsg,
+            "interactions",
+            QoSProfile(depth=50, reliability=ReliabilityPolicy.RELIABLE),
         )
 
         self._world_geometry_pub = self.create_publisher(
@@ -1301,6 +1321,7 @@ class AgentManager(Node):
         self._update_animation_states()
         msg = self._build_agent_states_msg()
         self._agent_states_pub.publish(msg)
+        self._interactions_pub.publish(self._build_interactions_msg(interactions, msg.header))
 
         if self._marker_pub is not None:
             pool.sync_back(agents)
@@ -1964,6 +1985,51 @@ class AgentManager(Node):
                 a.interaction_id, a.interaction_type = active
             else:
                 a.interaction_id = -1
+        return msg
+
+    def _on_contact_params(self, params: list[Parameter]) -> SetParametersResult:
+        """Validate and apply contact_mode / locomotion_standing_distance, other params pass through."""
+        mode = self._interaction_manager.contact_mode
+        distance: float | None = None
+        for p in params:
+            if p.name == "contact_mode":
+                mode = str(p.value)
+            elif p.name == "locomotion_standing_distance":
+                distance = float(p.value)
+        try:
+            self._interaction_manager.set_contact_mode(mode, distance)
+        except ValueError as e:
+            return SetParametersResult(successful=False, reason=str(e))
+        return SetParametersResult(successful=True)
+
+    def _build_interactions_msg(self, interactions: dict[int, Any], header: Any) -> InteractionsMsg:  # noqa: ANN401
+        """Live interactions plus the lifecycle edges fired this tick, stamped like the agent states."""
+        im = self._interaction_manager
+        msg = InteractionsMsg()
+        msg.header = header
+        for iid in sorted(interactions):
+            interaction = interactions[iid]
+            if interaction.outcome not in (InteractionOutcome.FORMING, InteractionOutcome.ACTIVE):
+                continue
+            contract = interaction.contract
+            status = InteractionStatusMsg()
+            status.interaction_id = int(iid)
+            status.interaction_type = int(interaction.type)
+            status.outcome = int(interaction.outcome)
+            status.participants = [int(p) for p in interaction.participants]
+            status.queue = [int(q) for q in contract.queue]
+            status.arrived = im.all_arrived(interaction)
+            status.holding = im.is_holding(interaction)
+            status.hold_elapsed = float(contract.elapsed)
+            status.duration = float(contract.duration) if contract.duration is not None else -1.0
+            msg.interactions.append(status)
+        for edge in im.drain_edges():
+            event = InteractionEventMsg()
+            event.interaction_id = int(edge.interaction_id)
+            event.interaction_type = int(edge.interaction_type)
+            event.event = int(edge.edge)
+            event.participants = [int(p) for p in edge.participants]
+            msg.events.append(event)
         return msg
 
     def _spawn_agents_callback(
