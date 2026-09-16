@@ -75,6 +75,9 @@ _TERMINAL_EDGES: dict[int, LifecycleEdge] = {
 CONTACT_ENABLED = "enabled"
 CONTACT_LOCOMOTION_ONLY = "locomotion_only"  # contact kinds approach and hold at a standing distance, never touch
 CONTACT_MODES = (CONTACT_ENABLED, CONTACT_LOCOMOTION_ONLY)
+GESTURE_ENABLED = "enabled"
+GESTURE_DISABLED = "disabled"  # agents behave the same but publish no gesture: nothing renders, no consumer can read one
+GESTURE_MODES = (GESTURE_ENABLED, GESTURE_DISABLED)
 DEFAULT_STANDING_DISTANCE = 1.2
 
 

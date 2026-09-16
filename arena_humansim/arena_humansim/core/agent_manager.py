@@ -70,7 +70,7 @@ from arena_humansim.core.animation_kinds import locomotion_states
 from arena_humansim.core.behavior.compiler import BehaviorTreeFactory
 from arena_humansim.core.despawn_monitor import DespawnMonitor
 from arena_humansim.core.interaction_kinds import InteractionType
-from arena_humansim.core.interaction_manager import CONTACT_ENABLED, DEFAULT_STANDING_DISTANCE, InteractionManager
+from arena_humansim.core.interaction_manager import CONTACT_ENABLED, DEFAULT_STANDING_DISTANCE, GESTURE_ENABLED, GESTURE_MODES, InteractionManager
 from arena_humansim.core.logger import SimulationLogger
 from arena_humansim.core.pool import KIND_ROBOT, AgentPool, PoolAware
 from arena_humansim.core.recorder import BagRecorder, default_record_dir
@@ -249,6 +249,9 @@ class AgentManager(Node):
         # motion-matched control arm: contact kinds hold at locomotion_standing_distance with no clip, settable per episode
         self.declare_parameter("contact_mode", CONTACT_ENABLED)
         self.declare_parameter("locomotion_standing_distance", DEFAULT_STANDING_DISTANCE)
+        # gesture-off control arm: the agents behave the same but publish no gesture, so nothing is rendered and
+        # no consumer can read one. The pedestrian is then what a simulator without the layer offers: a body that walks.
+        self.declare_parameter("gesture_mode", GESTURE_ENABLED)
 
         seed = self.get_parameter("seed").value
         self._dt = self.get_parameter("dt").value
@@ -331,6 +334,7 @@ class AgentManager(Node):
             str(self.get_parameter("contact_mode").value),
             float(self.get_parameter("locomotion_standing_distance").value),
         )
+        self._gesture_mode = str(self.get_parameter("gesture_mode").value)
         self.add_on_set_parameters_callback(self._on_contact_params)
         self._animation = MotionAnimation.create(
             self._module_selections["animation"],
@@ -1979,8 +1983,12 @@ class AgentManager(Node):
             a.handedness = agent.params.handedness if agent is not None else ""
             mv = agent.movement if agent is not None else None
             intents = mv.gestures if isinstance(mv, BehaviorTreeMovement) else ()
-            a.gestures = [_gesture_msg(g) for g in intents]
-            active = self._interaction_manager.active_interaction(a.agent_id)
+            # gesture_mode=disabled is the no-layer control: the agents behave the same, but nothing they do
+            # while interacting reaches a consumer. That means the clip AND the interaction id, since the id is
+            # what lets a costmap treat a group as a group rather than as unrelated bodies.
+            rendered = self._gesture_mode == GESTURE_ENABLED
+            a.gestures = [_gesture_msg(g) for g in intents] if rendered else []
+            active = self._interaction_manager.active_interaction(a.agent_id) if rendered else None
             if active is not None:
                 a.interaction_id, a.interaction_type = active
             else:
@@ -1988,18 +1996,24 @@ class AgentManager(Node):
         return msg
 
     def _on_contact_params(self, params: list[Parameter]) -> SetParametersResult:
-        """Validate and apply contact_mode / locomotion_standing_distance, other params pass through."""
+        """Validate and apply contact_mode / locomotion_standing_distance / gesture_mode, other params pass through."""
         mode = self._interaction_manager.contact_mode
         distance: float | None = None
+        gesture_mode = self._gesture_mode
         for p in params:
             if p.name == "contact_mode":
                 mode = str(p.value)
             elif p.name == "locomotion_standing_distance":
                 distance = float(p.value)
+            elif p.name == "gesture_mode":
+                gesture_mode = str(p.value)
+        if gesture_mode not in GESTURE_MODES:
+            return SetParametersResult(successful=False, reason=f"gesture_mode must be one of {GESTURE_MODES}, got {gesture_mode!r}")
         try:
             self._interaction_manager.set_contact_mode(mode, distance)
         except ValueError as e:
             return SetParametersResult(successful=False, reason=str(e))
+        self._gesture_mode = gesture_mode
         return SetParametersResult(successful=True)
 
     def _build_interactions_msg(self, interactions: dict[int, Any], header: Any) -> InteractionsMsg:  # noqa: ANN401
