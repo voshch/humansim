@@ -248,27 +248,28 @@ def plot_sensitivity_profile(cells: pd.DataFrame, out: Path) -> pd.DataFrame:
             row[m] = float(np.average(g[m], weights=g["n_trials"]))
         pooled.append(row)
     pooled = pd.DataFrame(pooled)
+    fs_cell, fs_tick, fs_title = 10.0, 10.5, 12.0
     fig, axes = plt.subplots(1, 3, figsize=SIZE_SENSITIVITY)
     for ax, (m, label, cmap, fmt) in zip(axes, metrics, strict=True):
         mat = pooled.pivot(index="robot_policy", columns="ped_planner", values=m).reindex(index=POLICY_ORDER, columns=DRIVER_ORDER)
         vmin, vmax = (0.0, 1.0) if m == "success_mean" else (float(np.nanmin(mat.to_numpy(dtype=float))), float(np.nanmax(mat.to_numpy(dtype=float))))
         im = ax.imshow(mat.to_numpy(dtype=float), cmap=cmap, aspect="auto", vmin=vmin, vmax=vmax)
         ax.set_xticks(range(6))
-        ax.set_xticklabels(_label_drivers(DRIVER_ORDER), rotation=45, ha="right")
+        ax.set_xticklabels(_label_drivers(DRIVER_ORDER), rotation=45, ha="right", rotation_mode="anchor", fontsize=fs_tick)
         ax.set_yticks(range(4))
-        ax.set_yticklabels([POLICY_LABEL[p] for p in POLICY_ORDER])
+        ax.set_yticklabels([POLICY_LABEL[p] for p in POLICY_ORDER], fontsize=fs_tick)
         for i in range(4):
             for j in range(6):
                 v = mat.iat[i, j]
                 if np.isfinite(v):
                     r, g, b, _ = im.cmap(im.norm(v))
                     dark = 0.299 * r + 0.587 * g + 0.114 * b < 0.5
-                    ax.text(j, i, format(v, fmt), ha="center", va="center", fontsize=6.5, color="w" if dark else "k")
+                    ax.text(j, i, format(v, fmt), ha="center", va="center", fontsize=fs_cell, color="w" if dark else "k")
         for k in (2, 3, 4):
             ax.axvline(k - 0.5, color="w", lw=3.0)
-        ax.set_title(label)
-        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03)
-    fig.tight_layout()
+        ax.set_title(label, fontsize=fs_title)
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03).ax.tick_params(labelsize=fs_tick)
+    fig.tight_layout(pad=0.4, w_pad=0.4)
     fig.savefig(out)
     plt.close(fig)
     return pooled
