@@ -204,10 +204,11 @@ def test_notify_skips_agent_removed_before_due(manager_factory: Callable[..., Ag
     removed, survivor = _spawn(mgr, 2)
     mgr._agents[survivor].needs = _alarm_needs()
     assert _notify(mgr, -1).success
+    last_due = max(_due_ticks(mgr, removed), _due_ticks(mgr, survivor))
     req = RemoveAgents.Request()
     req.agent_ids = [removed]
     mgr._remove_agents_callback(req, RemoveAgents.Response())
-    for _ in range(_due_ticks(mgr, survivor) + 1):
+    for _ in range(last_due + 1):
         mgr.tick()
     assert not mgr._pending_stimuli
     assert mgr._agents[survivor].needs.needs["alarm"].value == pytest.approx(100.0)

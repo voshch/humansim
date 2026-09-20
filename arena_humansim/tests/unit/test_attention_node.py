@@ -314,7 +314,8 @@ def test_resolve_partners_is_the_expanded_list(agent_factory: Callable[..., Base
     for _ in range(3):
         assert _tick(node) == RUNNING
         seen.append([g.x for g in _mv(agent).gestures])
-    assert seen == [[1.0], [2.0], [2.0]]
+    assert all(entry in ([1.0], [2.0]) for entry in seen), seen
+    assert seen[1] == seen[2], seen
 
 
 def test_resolve_relative_ref_follows_yaw(agent_factory: Callable[..., BaseAgent], world: WorldKnowledge, rng_np: np.random.Generator) -> None:

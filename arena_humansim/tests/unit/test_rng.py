@@ -36,7 +36,7 @@ def test_substream_order_independent_of_first_access() -> None:
     v1 = r1.get_substream("a").random(5)
     _ = r2.get_substream("b").random(5)
     v1_again = r2.get_substream("a").random(5)
-    assert not np.array_equal(v1, v1_again)
+    assert np.array_equal(v1, v1_again)
 
 
 def test_reset_restores_state() -> None:
