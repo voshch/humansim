@@ -86,15 +86,38 @@ def test_headline_seed_ratio_shows_driver_dominance() -> None:
     self_df = self_divergence_table(df)
     head = headline_seed_ratio(pair_df, self_df, n_bootstrap=100, ci_seed=0)
     nav_row = head[head["bucket"] == "nav"].iloc[0]
-    assert nav_row["across_driver_mean"] > nav_row["within_driver_seed_mean"]
+    assert nav_row["across_class_mean"] > nav_row["within_driver_seed_mean"]
     assert nav_row["K_seed"] > 10.0
     assert nav_row["K_seed_lo"] <= nav_row["K_seed"] <= nav_row["K_seed_hi"] or np.isnan(nav_row["K_seed_lo"])
 
 
 def test_headline_seed_ratio_handles_empty_inputs() -> None:
-    empty = pd.DataFrame(columns=["bucket", "scenario", "hausdorff"])
-    head = headline_seed_ratio(empty, empty, n_bootstrap=10, ci_seed=0)
+    empty_pairs = pd.DataFrame(columns=["bucket", "scenario", "hausdorff", "same_class"])
+    empty_self = pd.DataFrame(columns=["bucket", "scenario", "hausdorff"])
+    head = headline_seed_ratio(empty_pairs, empty_self, n_bootstrap=10, ci_seed=0)
     assert head.empty
+
+
+def test_headline_seed_ratio_uses_across_class_pairs_only() -> None:
+    df = _build_states(
+        scenarios=["simple_crossing", "corridor"],
+        planners={"sfm": (10.0, 0.0), "hsfm": (10.0, 0.0), "orca": (0.0, 10.0)},
+        seeds=[0, 1, 2],
+        jitter=0.01,
+    )
+    from arena_humansim.utils.evaluation.analyze import compute_pairwise_table
+
+    pair_df = compute_pairwise_table(df)
+    self_df = self_divergence_table(df)
+    assert pair_df["same_class"].any()
+    head = headline_seed_ratio(pair_df, self_df, n_bootstrap=50, ci_seed=0)
+    nav_row = head[head["bucket"] == "nav"].iloc[0]
+    across = pair_df[~pair_df["same_class"]]
+    expected = across.groupby("scenario")["hausdorff"].mean().mean()
+    all_pairs = pair_df.groupby("scenario")["hausdorff"].mean().mean()
+    assert nav_row["across_class_mean"] == pytest.approx(expected)
+    assert nav_row["across_class_mean"] > all_pairs
+    assert nav_row["n_cross_pairs"] == len(across)
 
 
 def test_decompose_scalar_variance_attributes_to_factor() -> None:

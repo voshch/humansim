@@ -8,7 +8,7 @@ Levels (cheapest hit first):
 A cache is fresh iff its mtime is >= every source it depends on:
   - per-trial pkl vs the bag's metadata.yaml mtime
   - per-sweep pkl vs every per-trial pkl mtime (after they're materialized)
-  - multi-sweep pkl vs every per-sweep pkl mtime
+  - multi-sweep pkl vs every per-sweep pkl mtime, and each per-sweep pkl vs its newest bag
 
 A trial whose bag is unreadable is cached as an empty df, so we don't keep
 retrying within or across runs. Re-recording the bag updates metadata.yaml
@@ -97,7 +97,9 @@ def load_multi(sweep_dirs: list[Path]) -> dict[str, dict[str, pd.DataFrame]]:
     sweep_pkl_mts: list[float] = []
     for sd in sweep_dirs:
         sc = sd / _SWEEP_PKL
-        sweep_pkl_mts.append(sc.stat().st_mtime if sc.exists() else float("inf"))
+        newest_bag = max((_bag_mtime(d) for d in _trial_dirs(sd)), default=0.0)
+        fresh = sc.exists() and sc.stat().st_mtime >= newest_bag
+        sweep_pkl_mts.append(sc.stat().st_mtime if fresh else float("inf"))
     newest = max(sweep_pkl_mts) if sweep_pkl_mts else 0.0
     if cache.exists() and newest != float("inf") and cache.stat().st_mtime >= newest:
         try:

@@ -110,14 +110,16 @@ def headline_seed_ratio(
     n_bootstrap: int = 1000,
     ci_seed: int = 0,
 ) -> pd.DataFrame:
-    """Per-bucket K_seed = across-driver Hausdorff / within-driver across-seed Hausdorff.
+    """Per-bucket K_seed = across-class Hausdorff / within-driver across-seed Hausdorff.
 
-    K_seed >> 1 supports the abstract claim that driver substitution dominates
-    trial-to-trial variation. K_seed ~ 1 is the negative result. Does not separate
+    The numerator is the across-class pair set of K. On flow-spawned scenarios an
+    agent id under a new seed is a different person, which inflates the
+    denominator. Does not separate
     scheduler-induced from seed-induced variance - for that, same-seed reruns are
     required.
     """
     rng = np.random.default_rng(ci_seed)
+    pairwise_df = pairwise_df[~pairwise_df["same_class"].astype(bool)]
 
     def _agg(num: pd.DataFrame, den: pd.DataFrame, label: str) -> dict:
         x = _scenario_equal_weight(num)
@@ -126,7 +128,7 @@ def headline_seed_ratio(
         k_lo, k_hi = _bootstrap_ratio(num, den, n_bootstrap, rng)
         return {
             "bucket": label,
-            "across_driver_mean": x,
+            "across_class_mean": x,
             "within_driver_seed_mean": y,
             "K_seed": k,
             "K_seed_lo": k_lo,

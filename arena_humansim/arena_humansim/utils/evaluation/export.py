@@ -465,7 +465,7 @@ def _process_trial(recordings_dir: Path, trial_name: str, states_dir: Path, do_r
     snapshot = trial_dir / "scenario.yaml"
     if snapshot.exists():
         try:
-            bucket = infer_bucket(yaml.safe_load(snapshot.read_text()) or {})
+            bucket = infer_bucket(yaml.safe_load(snapshot.read_text()) or {}, scenario)
         except Exception:
             bucket = "unknown"
     else:

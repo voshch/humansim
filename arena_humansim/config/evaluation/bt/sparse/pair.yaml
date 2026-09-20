@@ -1,9 +1,11 @@
-# Two TALK_TO pair-interactions running concurrently.
+# Two TALK_TO pairs that meet, talk, and swap meeting spots, so their routes cross.
 
 name: bt_sparse_pair
 description: >-
-  Two pairs of agents engaged in TALK_TO. Tests pair formation slotting and
-  symmetric peer pairing under HandleKind.NONE.
+  Two pairs of agents walk in to a meeting spot, hold a TALK_TO, then walk to
+  the other pair's spot and talk again. The pairs swap spots on every cycle, so
+  their routes cross at the origin. Tests pair formation slotting and symmetric
+  peer pairing under HandleKind.NONE with locomotion between the holds.
 
 simulation:
   seed: 83
@@ -13,7 +15,7 @@ simulation:
   execution_mode: master
 
 agent_types:
-  talker:
+  talker_1:
     extends: adult
     mode: behavior_tree
     desired_velocity: {mean: 1.0, std: 0.1, clip_low: 0.7, clip_high: 1.3}
@@ -21,16 +23,79 @@ agent_types:
     sequences:
       chat:
         steps:
-          talk:
+          walk_a: {kind: go_to, target_pose: {x: -3.6, y: 2.0}}
+          talk_a:
             interaction: TALK_TO
-            duration: {mean: 30.0, std: 8.0, clip_low: 15.0, clip_high: 60.0}
-            patience: {mean: 45.0, std: 10.0, clip_low: 20.0, clip_high: 90.0}
+            duration: {mean: 10.0, std: 3.0, clip_low: 6.0, clip_high: 15.0}
+            patience: {mean: 30.0, std: 5.0, clip_low: 20.0, clip_high: 45.0}
+          walk_b: {kind: go_to, target_pose: {x: 2.4, y: -2.0}}
+          talk_b:
+            interaction: TALK_TO
+            duration: {mean: 10.0, std: 3.0, clip_low: 6.0, clip_high: 15.0}
+            patience: {mean: 30.0, std: 5.0, clip_low: 20.0, clip_high: 45.0}
+        then: chat
+  talker_2:
+    extends: adult
+    mode: behavior_tree
+    desired_velocity: {mean: 1.0, std: 0.1, clip_low: 0.7, clip_high: 1.3}
+    initial_sequence: chat
+    sequences:
+      chat:
+        steps:
+          walk_a: {kind: go_to, target_pose: {x: -2.4, y: 2.0}}
+          talk_a:
+            interaction: TALK_TO
+            duration: {mean: 10.0, std: 3.0, clip_low: 6.0, clip_high: 15.0}
+            patience: {mean: 30.0, std: 5.0, clip_low: 20.0, clip_high: 45.0}
+          walk_b: {kind: go_to, target_pose: {x: 3.6, y: -2.0}}
+          talk_b:
+            interaction: TALK_TO
+            duration: {mean: 10.0, std: 3.0, clip_low: 6.0, clip_high: 15.0}
+            patience: {mean: 30.0, std: 5.0, clip_low: 20.0, clip_high: 45.0}
+        then: chat
+  talker_3:
+    extends: adult
+    mode: behavior_tree
+    desired_velocity: {mean: 1.0, std: 0.1, clip_low: 0.7, clip_high: 1.3}
+    initial_sequence: chat
+    sequences:
+      chat:
+        steps:
+          walk_a: {kind: go_to, target_pose: {x: 2.4, y: -2.0}}
+          talk_a:
+            interaction: TALK_TO
+            duration: {mean: 10.0, std: 3.0, clip_low: 6.0, clip_high: 15.0}
+            patience: {mean: 30.0, std: 5.0, clip_low: 20.0, clip_high: 45.0}
+          walk_b: {kind: go_to, target_pose: {x: -3.6, y: 2.0}}
+          talk_b:
+            interaction: TALK_TO
+            duration: {mean: 10.0, std: 3.0, clip_low: 6.0, clip_high: 15.0}
+            patience: {mean: 30.0, std: 5.0, clip_low: 20.0, clip_high: 45.0}
+        then: chat
+  talker_4:
+    extends: adult
+    mode: behavior_tree
+    desired_velocity: {mean: 1.0, std: 0.1, clip_low: 0.7, clip_high: 1.3}
+    initial_sequence: chat
+    sequences:
+      chat:
+        steps:
+          walk_a: {kind: go_to, target_pose: {x: 3.6, y: -2.0}}
+          talk_a:
+            interaction: TALK_TO
+            duration: {mean: 10.0, std: 3.0, clip_low: 6.0, clip_high: 15.0}
+            patience: {mean: 30.0, std: 5.0, clip_low: 20.0, clip_high: 45.0}
+          walk_b: {kind: go_to, target_pose: {x: -2.4, y: 2.0}}
+          talk_b:
+            interaction: TALK_TO
+            duration: {mean: 10.0, std: 3.0, clip_low: 6.0, clip_high: 15.0}
+            patience: {mean: 30.0, std: 5.0, clip_low: 20.0, clip_high: 45.0}
         then: chat
 
 agents:
-  - {agent_id: 1, agent_type: talker, spawn_pose: {x: -3.0, y:  2.0, theta: 0.0}}
-  - {agent_id: 2, agent_type: talker, spawn_pose: {x: -1.5, y:  2.0, theta: 3.14159}}
-  - {agent_id: 3, agent_type: talker, spawn_pose: {x:  1.5, y: -2.0, theta: 0.0}}
-  - {agent_id: 4, agent_type: talker, spawn_pose: {x:  3.0, y: -2.0, theta: 3.14159}}
+  - {agent_id: 1, agent_type: talker_1, spawn_pose: {x:  4.5, y: -3.0, theta: 2.55}}
+  - {agent_id: 2, agent_type: talker_2, spawn_pose: {x:  5.3, y: -3.55, theta: 2.55}}
+  - {agent_id: 3, agent_type: talker_3, spawn_pose: {x: -4.5, y:  3.0, theta: -0.59}}
+  - {agent_id: 4, agent_type: talker_4, spawn_pose: {x: -5.3, y:  3.55, theta: -0.59}}
 
 interaction_scripts: []

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import math
 
 import numpy as np
@@ -17,6 +18,7 @@ from arena_humansim.utils.types import (
     SinkAffinity,
     SinkConfig,
     SourceConfig,
+    SourceType,
 )
 
 
@@ -26,6 +28,7 @@ def _make_source(
     rate: float = 1.0,
     max_concurrent: int = -1,
     max_total: int = -1,
+    type: SourceType = SourceType.POISSON,
     shape: Shape | None = None,
     pose: Pose2D | None = None,
     agent: AgentTemplate | None = None,
@@ -35,7 +38,8 @@ def _make_source(
         name=name,
         pose=pose if pose is not None else Pose2D(),
         shape=shape if shape is not None else Shape(type=ShapeType.POLYGON, vertices=[]),
-        rate_profile=profile if profile is not None else [RateKeyframe(t=0.0, rate=rate)],
+        type=type,
+        rate_profile=profile if profile is not None else ([] if type is SourceType.MAX else [RateKeyframe(t=0.0, rate=rate)]),
         max_concurrent=max_concurrent,
         max_total=max_total,
         agent=agent if agent is not None else AgentTemplate(),
@@ -227,3 +231,83 @@ def test_tick_uses_default_rng_seed_deterministic() -> None:
     a = [len(s1.tick(i, 0.5)) for i in range(5)]
     b = [len(s2.tick(i, 0.5)) for i in range(5)]
     assert a == b
+
+
+def _release_log(sched: SpawnScheduler, ticks: int, despawn_every: int | None) -> list[tuple[int, float, float, float, str]]:
+    alive: list[int] = []
+    out = []
+    for i in range(ticks):
+        for req in sched.tick(i, 0.5):
+            sched.register_agent(req.agent_id, "s")
+            alive.append(req.agent_id)
+            out.append((req.agent_id, req.pose.x, req.pose.y, req.desired_velocity, req.lifetime.target_sink_name))
+        if despawn_every and i % despawn_every == 0 and alive:
+            sched.notify_despawn(alive.pop(0))
+    return out
+
+
+@pytest.mark.parametrize("type", [SourceType.POISSON, SourceType.MAX])
+def test_kth_released_agent_is_independent_of_concurrency_pressure(type: SourceType) -> None:
+    shape = Shape(type=ShapeType.CIRCLE, radius=2.0)
+    src = _make_source("s", rate=2.0, max_concurrent=3, type=type, shape=shape)
+    fast = SpawnScheduler(np.random.default_rng(7))
+    slow = SpawnScheduler(np.random.default_rng(7))
+    fast.add_source(src)
+    slow.add_source(src)
+    log_fast = _release_log(fast, 40, despawn_every=1)
+    log_slow = _release_log(slow, 40, despawn_every=5)
+    assert len(log_fast) > len(log_slow) > 0
+    assert log_slow == log_fast[: len(log_slow)]
+
+
+def test_reserved_ids_come_from_the_allocator_in_release_order() -> None:
+    ids = itertools.count(100)
+    sched = SpawnScheduler(np.random.default_rng(1), allocate_id=lambda: next(ids))
+    sched.add_source(_make_source("s", rate=1000.0, max_concurrent=2))
+    first = sched.tick(0, 1.0)
+    assert [r.agent_id for r in first] == [100, 101]
+    sched.register_agent(100, "s")
+    sched.notify_despawn(100)
+    nxt = sched.tick(1, 1.0)
+    assert [r.agent_id for r in nxt] == [102]
+
+
+def test_poisson_loses_arrivals_over_the_cap() -> None:
+    sched = SpawnScheduler(np.random.default_rng(1))
+    sched.add_source(_make_source("s", max_concurrent=2, profile=[RateKeyframe(t=0.0, rate=1000.0), RateKeyframe(t=1.0, rate=0.0)]))
+    first = sched.tick(0, 0.5)
+    assert len(first) == 2
+    for r in first:
+        sched.register_agent(r.agent_id, "s")
+        sched.notify_despawn(r.agent_id)
+    assert sched.tick(4, 0.5) == []
+
+
+def test_max_holds_the_cap_and_refills_on_despawn() -> None:
+    sched = SpawnScheduler(np.random.default_rng(1))
+    sched.add_source(_make_source("s", max_concurrent=3, type=SourceType.MAX))
+    first = sched.tick(0, 0.5)
+    assert len(first) == 3
+    assert sched.tick(1, 0.5) == []
+    sched.register_agent(first[0].agent_id, "s")
+    sched.notify_despawn(first[0].agent_id)
+    assert len(sched.tick(2, 0.5)) == 1
+
+
+def test_max_respects_max_total() -> None:
+    sched = SpawnScheduler(np.random.default_rng(1))
+    sched.add_source(_make_source("s", max_concurrent=3, max_total=4, type=SourceType.MAX))
+    first = sched.tick(0, 0.5)
+    for r in first:
+        sched.register_agent(r.agent_id, "s")
+        sched.notify_despawn(r.agent_id)
+    assert len(sched.tick(1, 0.5)) == 1
+    assert sched.tick(2, 0.5) == []
+
+
+def test_max_rejects_rate_profile_and_missing_cap() -> None:
+    sched = SpawnScheduler(np.random.default_rng(1))
+    with pytest.raises(ValueError):
+        sched.add_source(_make_source("s", max_concurrent=3, type=SourceType.MAX, profile=[RateKeyframe(t=0.0, rate=1.0)]))
+    with pytest.raises(ValueError):
+        sched.add_source(_make_source("s", type=SourceType.MAX))

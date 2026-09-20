@@ -291,6 +291,11 @@ class ShapeType(enum.Enum):
     POLYGON = "polygon"
 
 
+class SourceType(enum.Enum):
+    POISSON = "poisson"  # arrivals at rate_profile, lost over max_concurrent
+    MAX = "max"  # holds max_concurrent alive, refills on despawn
+
+
 @attrs.define
 class Shape:
     type: ShapeType = ShapeType.POLYGON
@@ -332,6 +337,7 @@ class SourceConfig:
     name: str = ""
     pose: Pose2D = attrs.Factory(Pose2D)
     shape: Shape = attrs.Factory(Shape)
+    type: SourceType = SourceType.POISSON
     rate_profile: list[RateKeyframe] = attrs.Factory(list)
     max_concurrent: int = -1  # -1 = unlimited
     max_total: int = -1  # -1 = unlimited
@@ -367,6 +373,7 @@ class AgentLifetime:
 class SpawnRequest:
     """Lightweight spawn descriptor - AgentManager materializes into BaseAgent."""
 
+    agent_id: int = 0  # 0 = manager allocates
     pose: Pose2D = attrs.Factory(Pose2D)
     desired_velocity: float = 1.3
     agent_radius: float = 0.35

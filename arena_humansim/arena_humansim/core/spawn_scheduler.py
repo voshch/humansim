@@ -1,46 +1,72 @@
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import numpy as np
 
 from arena_humansim.utils.loggable import Loggable
-from arena_humansim.utils.types import AgentLifetime, Pose2D, RateKeyframe, Shape, ShapeType, SinkConfig, SourceConfig, SpawnRequest
+from arena_humansim.utils.rng import RNG, derive_seed
+from arena_humansim.utils.types import AgentLifetime, Pose2D, RateKeyframe, Shape, ShapeType, SinkConfig, SourceConfig, SourceType, SpawnRequest
 
 
 class SpawnScheduler(Loggable):
-    def __init__(self, rng: np.random.Generator):
+    def __init__(self, rng: RNG | np.random.Generator, allocate_id: Callable[[], int] | None = None):
         self._sources: dict[str, SourceConfig] = {}
         self._sinks: dict[str, SinkConfig] = {}
         self._alive_count: dict[str, int] = {}
         self._total_count: dict[str, int] = {}
         self._agent_source: dict[int, str] = {}
         self._rng = rng
+        self._base_seed = int(rng.integers(0, 2**62)) if isinstance(rng, np.random.Generator) else -1
+        self._streams: dict[str, np.random.Generator] = {}
+        self._local_next_id = 1
+        self._allocate_id = allocate_id if allocate_id is not None else self._allocate_local_id
+
+    def _allocate_local_id(self) -> int:
+        aid = self._local_next_id
+        self._local_next_id += 1
+        return aid
+
+    def _stream(self, name: str) -> np.random.Generator:
+        if isinstance(self._rng, RNG):
+            return self._rng.get_substream(f"spawn_scheduler/{name}")
+        gen = self._streams.get(name)
+        if gen is None:
+            gen = np.random.default_rng(self._seed(name))
+            self._streams[name] = gen
+        return gen
+
+    def _seed(self, name: str) -> int:
+        base = self._rng.seed if isinstance(self._rng, RNG) else self._base_seed
+        return derive_seed(base, f"spawn_scheduler/{name}")
+
+    def _event_stream(self, name: str) -> np.random.Generator:
+        return np.random.default_rng(self._seed(name))
 
     def tick(self, tick_count: int, dt: float) -> list[SpawnRequest]:
         sim_time_s = tick_count * dt
         requests = []
         for src in self._sources.values():
-            rate = self._interpolate_rate(src.rate_profile, sim_time_s)
-            if rate <= 0.0:
-                continue
-
-            if src.max_total > 0 and self._total_count.get(src.name, 0) >= src.max_total:
-                continue
-            if src.max_concurrent > 0 and self._alive_count.get(src.name, 0) >= src.max_concurrent:
-                continue
-
-            n = int(self._rng.poisson(rate * dt))
-
-            if src.max_concurrent > 0:
-                n = min(n, src.max_concurrent - self._alive_count.get(src.name, 0))
+            alive = self._alive_count.get(src.name, 0)
+            total = self._total_count.get(src.name, 0)
+            if src.type is SourceType.MAX:
+                n = src.max_concurrent - alive
+            else:
+                rate = self._interpolate_rate(src.rate_profile, sim_time_s)
+                if rate <= 0.0:
+                    continue
+                n = int(self._stream(f"{src.name}/poisson").poisson(rate * dt))
+                if src.max_concurrent > 0:
+                    n = min(n, src.max_concurrent - alive)
             if src.max_total > 0:
-                n = min(n, src.max_total - self._total_count.get(src.name, 0))
-
-            for _ in range(n):
-                req = self._sample_spawn_request(src, tick_count)
+                n = min(n, src.max_total - total)
+            for _ in range(max(0, n)):
+                req = self._sample_spawn_request(src, tick_count, self._event_stream(f"{src.name}/event/{total}"))
+                req.agent_id = self._allocate_id()
                 requests.append(req)
-                self._alive_count[src.name] = self._alive_count.get(src.name, 0) + 1
-                self._total_count[src.name] = self._total_count.get(src.name, 0) + 1
+                alive += 1
+                total += 1
+            self._alive_count[src.name] = alive
+            self._total_count[src.name] = total
 
         if requests:
             self._logger.debug(f"Tick {tick_count}: {len(requests)} spawn request(s)")
@@ -54,7 +80,16 @@ class SpawnScheduler(Loggable):
         if source_name is not None and source_name in self._alive_count:
             self._alive_count[source_name] = max(0, self._alive_count[source_name] - 1)
 
+    @staticmethod
+    def validate(config: SourceConfig) -> None:
+        if config.type is SourceType.MAX:
+            if config.max_concurrent <= 0:
+                raise ValueError(f"source {config.name!r}: type max needs max_concurrent > 0")
+            if config.rate_profile:
+                raise ValueError(f"source {config.name!r}: type max takes no rate_profile")
+
     def add_source(self, config: SourceConfig) -> str:
+        self.validate(config)
         self._sources[config.name] = config
         self._alive_count.setdefault(config.name, 0)
         self._total_count.setdefault(config.name, 0)
@@ -75,6 +110,8 @@ class SpawnScheduler(Loggable):
         self._alive_count.clear()
         self._total_count.clear()
         self._agent_source.clear()
+        self._streams.clear()
+        self._local_next_id = 1
 
     @staticmethod
     def _interpolate_rate(profile: Sequence[RateKeyframe], t: float) -> float:
@@ -97,19 +134,19 @@ class SpawnScheduler(Loggable):
 
         return profile[-1].rate
 
-    def _sample_spawn_request(self, src: SourceConfig, tick_count: int) -> SpawnRequest:
+    def _sample_spawn_request(self, src: SourceConfig, tick_count: int, rng: np.random.Generator) -> SpawnRequest:
         tmpl = src.agent
 
-        pose = self._sample_pose_in_shape(src.pose, src.shape)
+        pose = self._sample_pose_in_shape(src.pose, src.shape, rng)
 
-        desired_velocity = self._rng.uniform(tmpl.desired_velocity_min, tmpl.desired_velocity_max)
+        desired_velocity = rng.uniform(tmpl.desired_velocity_min, tmpl.desired_velocity_max)
 
         target_sink_name = ""
         waypoints: list[Pose2D] = []
         if tmpl.sink_affinity:
             weights = np.array([sa.weight for sa in tmpl.sink_affinity])
             weights = weights / weights.sum()
-            chosen = int(self._rng.choice(len(tmpl.sink_affinity), p=weights))
+            chosen = int(rng.choice(len(tmpl.sink_affinity), p=weights))
             target_sink_name = tmpl.sink_affinity[chosen].sink_name
 
             if target_sink_name and target_sink_name in self._sinks:
@@ -132,20 +169,24 @@ class SpawnScheduler(Loggable):
             lifetime=lifetime,
         )
 
-    def _sample_pose_in_shape(self, center: Pose2D, shape: Shape) -> Pose2D:
+    def _sample_pose_in_shape(self, center: Pose2D, shape: Shape, rng: np.random.Generator | None = None) -> Pose2D:
+        if rng is None:
+            rng = self._stream("pose")
         if shape.type == ShapeType.CIRCLE and shape.radius > 0:
-            r = shape.radius * math.sqrt(float(self._rng.random()))
-            angle = float(self._rng.uniform(0, 2 * math.pi))
+            r = shape.radius * math.sqrt(float(rng.random()))
+            angle = float(rng.uniform(0, 2 * math.pi))
             return Pose2D(
                 x=center.x + r * math.cos(angle),
                 y=center.y + r * math.sin(angle),
                 theta=0.0,
             )
         if shape.vertices:
-            return self._sample_pose_in_polygon(shape.vertices, center)
+            return self._sample_pose_in_polygon(shape.vertices, center, rng)
         return Pose2D(x=center.x, y=center.y, theta=0.0)
 
-    def _sample_pose_in_polygon(self, vertices: Sequence[Pose2D], center: Pose2D) -> Pose2D:
+    def _sample_pose_in_polygon(self, vertices: Sequence[Pose2D], center: Pose2D, rng: np.random.Generator | None = None) -> Pose2D:
+        if rng is None:
+            rng = self._stream("pose")
         n = len(vertices)
         if n < 3:
             if vertices:
@@ -165,7 +206,7 @@ class SpawnScheduler(Loggable):
         if total_area <= 0:
             return Pose2D(x=center.x + v0.x, y=center.y + v0.y)
 
-        r = float(self._rng.random()) * total_area
+        r = float(rng.random()) * total_area
         cumulative = 0.0
         tri = triangles[0]
         for tri, area in zip(triangles, areas, strict=True):  # noqa: B007
@@ -173,8 +214,8 @@ class SpawnScheduler(Loggable):
             if cumulative >= r:
                 break
 
-        u = float(self._rng.random())
-        v = float(self._rng.random())
+        u = float(rng.random())
+        v = float(rng.random())
         if u + v > 1.0:
             u, v = 1.0 - u, 1.0 - v
         w = 1.0 - u - v

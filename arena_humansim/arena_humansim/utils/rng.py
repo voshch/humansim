@@ -1,4 +1,11 @@
+import hashlib
+
 import numpy as np
+
+
+def derive_seed(base_seed: int, name: str) -> int:
+    digest = hashlib.blake2b(f"{base_seed}/{name}".encode(), digest_size=8).digest()
+    return int.from_bytes(digest, "little")
 
 
 class RNG:
@@ -9,8 +16,7 @@ class RNG:
 
     def get_substream(self, name: str) -> np.random.Generator:
         if name not in self._substreams:
-            child_seed = int(self._rng.integers(0, 2**31))
-            self._substreams[name] = np.random.default_rng(child_seed)
+            self._substreams[name] = np.random.default_rng(derive_seed(self._seed, name))
         return self._substreams[name]
 
     def get_agent_substream(self, agent_id: int, module_name: str) -> np.random.Generator:
