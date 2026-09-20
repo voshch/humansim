@@ -27,6 +27,7 @@ _VX_MAX = 0.5
 _WZ_MIN = -2.0
 _WZ_MAX = 2.0
 _OBSTACLE_TURN_RATE = 0.7
+_ARRIVAL_M = 0.05
 _DEFAULT_NEIGHBOR_RADIUS = 0.35
 
 
@@ -135,6 +136,7 @@ class DRLVOPlanner(RobotPolicy):
 
         self._seed_rngs(self._seed)
         self._model = PPO.load(self._checkpoint_path, device=self._device_str, custom_objects=custom_objects)
+        self._yaw: dict[int, float] = {}
         self._logger.info(f"Loaded DRL-VO checkpoint from {self._checkpoint_path}")
 
     def compute(
@@ -162,7 +164,10 @@ class DRLVOPlanner(RobotPolicy):
 
             px = agent.state.pose.x
             py = agent.state.pose.y
-            yaw = agent.state.pose.theta
+            yaw = self._yaw.get(agent_id)
+            if yaw is None:
+                yaw = float(agent.state.pose.theta)
+                self._yaw[agent_id] = yaw
 
             neighbors = []
             if agent.belief is not None:
@@ -189,11 +194,17 @@ class DRLVOPlanner(RobotPolicy):
             goal_dy = goal.y - py
             goal_dist = math.hypot(goal_dx, goal_dy)
             if goal_dist <= _GOAL_MARGIN:
-                out[agent_id] = (0.0, 0.0)
+                if goal_dist <= _ARRIVAL_M:
+                    out[agent_id] = (0.0, 0.0)
+                    continue
+                yaw = math.atan2(goal_dy, goal_dx)
+                self._yaw[agent_id] = yaw
+                out[agent_id] = _twist_to_world(min(_VX_MAX, goal_dist), yaw)
                 continue
             if min_scan <= _OBSTACLE_MARGIN:
-                vx_w, vy_w = _twist_to_world(0.0, _OBSTACLE_TURN_RATE, yaw)
-                out[agent_id] = (vx_w, vy_w)
+                yaw = _wrap_angle(yaw + _OBSTACLE_TURN_RATE * dt)
+                self._yaw[agent_id] = yaw
+                out[agent_id] = _twist_to_world(0.0, yaw)
                 continue
 
             # Sanity: obs is finite and shape-correct.
@@ -213,19 +224,20 @@ class DRLVOPlanner(RobotPolicy):
                 v_lin *= float(agent.params.desired_velocity) / _VX_MAX
             w_ang = (action[1] + 1.0) * (_WZ_MAX - _WZ_MIN) / 2.0 + _WZ_MIN
 
-            vx_w, vy_w = _twist_to_world(float(v_lin), float(w_ang), yaw)
-            out[agent_id] = (vx_w, vy_w)
+            yaw = _wrap_angle(yaw + float(w_ang) * dt)
+            self._yaw[agent_id] = yaw
+            out[agent_id] = _twist_to_world(float(v_lin), yaw)
 
         self._scan_history.evict(keep)
+        self._yaw = {aid: yaw for aid, yaw in self._yaw.items() if aid in keep}
         return out
 
 
-def _twist_to_world(v_lin: float, w_ang: float, yaw: float) -> tuple[float, float]:
-    # Upstream emits Twist (linear.x, angular.z); robot frame +x is forward. Convert to world vx/vy
-    # via the agent's current yaw. Angular component is dropped here because the planner output
-    # contract is Cartesian velocity; the kinematic-constraint path is bypassed and downstream
-    # animation uses the velocity vector to derive heading.
-    _ = w_ang
+def _wrap_angle(a: float) -> float:
+    return math.atan2(math.sin(a), math.cos(a))
+
+
+def _twist_to_world(v_lin: float, yaw: float) -> tuple[float, float]:
     return v_lin * math.cos(yaw), v_lin * math.sin(yaw)
 
 
