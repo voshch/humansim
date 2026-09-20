@@ -11,6 +11,10 @@ VERBS = {
     "verify": "arena_humansim.utils.evaluation.cli.verify",
     "export": "arena_humansim.utils.evaluation.cli.export",
     "render": "arena_humansim.utils.evaluation.cli.render",
+    "eth": "arena_humansim.utils.evaluation.cli.eth",
+    "plots": "arena_humansim.utils.evaluation.cli.plots",
+    "correspond": "arena_humansim.utils.evaluation.cli.correspond",
+    "partitions": "arena_humansim.utils.evaluation.cli.partitions",
 }
 
 

@@ -43,20 +43,19 @@ def parse_trial_dir(name: str) -> tuple[str, str, str, int]:
 from arena_humansim.utils.scenario_discovery import parse_scenario_id  # noqa: E402, F401
 
 
-def infer_bucket(scenario_yaml: dict[str, Any]) -> str:
+def infer_bucket(scenario_yaml: dict[str, Any], scenario_id: str = "") -> str:
     """Classify a (resolved) scenario YAML into nav/bt/het.
 
+    'het' if the scenario id is under het/;
     'bt' if any agent_type uses mode==behavior_tree (interaction-layered humans);
-    'het' otherwise if any agent has kind==1 (robot) - heterogeneous human+robot mix;
     'nav' otherwise (pure waypoint navigation).
     """
+    if scenario_id.startswith("het_") or scenario_id.startswith("het/"):
+        return "het"
     agent_types = scenario_yaml.get("agent_types") or {}
     for atype in agent_types.values():
         if isinstance(atype, dict) and atype.get("mode") == "behavior_tree":
             return "bt"
-    for agent in scenario_yaml.get("agents") or []:
-        if isinstance(agent, dict) and int(agent.get("kind", 0)) == 1:
-            return "het"
     return "nav"
 
 
@@ -89,7 +88,7 @@ def iter_trials(recordings_dirs: Path | list[Path]) -> Iterator[tuple[pd.DataFra
             snapshot = trial_dir / "scenario.yaml"
             if snapshot.exists():
                 try:
-                    bucket = infer_bucket(yaml.safe_load(snapshot.read_text()) or {})
+                    bucket = infer_bucket(yaml.safe_load(snapshot.read_text()) or {}, scenario)
                 except Exception as exc:
                     print(f"warning: {trial_dir.name}: failed to parse scenario.yaml ({exc}); bucket=unknown")
                     bucket = "unknown"

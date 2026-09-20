@@ -140,6 +140,20 @@ ros2 run arena_humansim arena_humansim_node \
   --ros-args -p mode:=master -p seed:=42 -p dt:=0.05
 ```
 
+### Evaluation
+
+`ros2 run arena_humansim evaluate <verb>` (or `python3 -m arena_humansim.utils.evaluation.cli <verb>`):
+
+| Verb | What it does |
+|---|---|
+| `benchmark` | Parallel sweep over scenarios x drivers (x robot policies) x seeds, with an integrity gate per trial. |
+| `analyze` | Pairwise trajectory Hausdorff, the class divergence ratio K with scenario-clustered CIs, kinematics, robot metrics, failure causes. |
+| `partitions` | K per bucket under every driver-class partition (fine, binary, with and without `straight`). |
+| `plots` | Regenerates the paper figures from the analysis CSVs. |
+| `eth` | Speed, clearance and turn-rate distributions per driver against the ETH (EWAP) pedestrian dataset, and optionally one ATC day file, on a 0.4 s grid. |
+| `correspond` | Released drivers against public references on held-out scenarios: `orca` vs Python-RVO2, `sfm` vs pysocialforce, `straight` vs closed form. |
+| `verify` | Retroactive integrity check of a sweep dir. |
+
 ### Benchmark
 
 ```bash
