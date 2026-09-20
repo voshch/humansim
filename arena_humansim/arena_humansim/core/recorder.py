@@ -166,7 +166,8 @@ class BagRecorder:
             self._node.destroy_timer(self._timer)
         except Exception:
             pass
-        self._check_publishers()
+        if self._node.context.ok():
+            self._check_publishers()
         self._provenance["finished_at"] = _now()
         self._write_manifest()
         for sub in self._subs:
