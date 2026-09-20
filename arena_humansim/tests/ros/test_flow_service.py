@@ -176,3 +176,25 @@ def test_set_flow_replaces_previous(system: RosTestSystem) -> None:
     assert "sink_old" not in scheduler._sinks
 
     system.call(ResetSimulation, "reset", make_reset_request())
+
+
+def test_set_flow_rejects_invalid_max_source_and_keeps_previous(system: RosTestSystem) -> None:
+    system.call(ResetSimulation, "reset", make_reset_request())
+    assert system.call(SetFlow, "set_flow", _set_flow_request(sources=[_source("src_old", 0.0, 0.0, rate=1.0)], sinks=[])).success is True
+
+    bad = _source("src_bad", 1.0, 1.0, rate=2.0, max_concurrent=4)
+    bad.type = SourceConfig.MAX
+    resp = system.call(SetFlow, "set_flow", _set_flow_request(sources=[bad], sinks=[]))
+    assert resp.success is False
+    assert "rate_profile" in resp.message
+    assert "src_old" in system.manager._spawn_scheduler._sources
+
+
+def test_set_flow_installs_max_source(system: RosTestSystem) -> None:
+    system.call(ResetSimulation, "reset", make_reset_request())
+    src = _source("src_max", 0.0, 0.0, rate=0.0, max_concurrent=3)
+    src.rate_profile.clear()
+    src.type = SourceConfig.MAX
+    assert system.call(SetFlow, "set_flow", _set_flow_request(sources=[src], sinks=[])).success is True
+    system.manager.tick()
+    assert len(system.manager._last_spawned_ids) == 3

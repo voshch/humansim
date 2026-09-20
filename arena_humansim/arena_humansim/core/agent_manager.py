@@ -97,6 +97,7 @@ from arena_humansim.utils.types import (
     Shape,
     SinkConfig,
     SourceConfig,
+    SourceType,
     SpawnRequest,
     WallAware,
     WaypointMode,
@@ -366,9 +367,7 @@ class AgentManager(Node):
         self._interaction_scripts_by_tick: dict[int, list[InteractionScript]] = {}
 
         self._waypoint_rng = self._rng.get_substream("waypoint_advance")
-        self._spawn_scheduler = SpawnScheduler(
-            rng=self._rng.get_substream("spawn_scheduler"),
-        )
+        self._spawn_scheduler = SpawnScheduler(rng=self._rng, allocate_id=self._allocate_agent_id)
         self._despawn_monitor = DespawnMonitor()
         self._last_spawned_ids: list[int] = []
         self._last_despawned_ids: list[int] = []
@@ -594,6 +593,11 @@ class AgentManager(Node):
             except Exception:
                 pass
         return params
+
+    def _allocate_agent_id(self) -> int:
+        aid = self._next_agent_id
+        self._next_agent_id += 1
+        return aid
 
     def _attach_policy(self, planner: LocalPlanner) -> None:
         """Wire a planner created after __init__ into the pool and the walls."""
@@ -823,6 +827,7 @@ class AgentManager(Node):
                 name=f"source_{i}",
                 pose=Pose2D(x=src_cfg.pose.x, y=src_cfg.pose.y, theta=src_cfg.pose.theta),
                 shape=_shape_from_cfg(src_cfg.shape),
+                type=SourceType(src_cfg.type),
                 rate_profile=[RateKeyframe(t=float(kf.t), rate=float(kf.rate)) for kf in src_cfg.rate_profile],
                 max_concurrent=int(src_cfg.max_concurrent),
                 max_total=int(src_cfg.max_total),
@@ -1081,8 +1086,7 @@ class AgentManager(Node):
         t0 = time.perf_counter()
         spawn_requests = self._spawn_scheduler.tick(self._tick_count, self._dt)
         for spawn_req in spawn_requests:
-            aid = self._next_agent_id
-            self._next_agent_id += 1
+            aid = spawn_req.agent_id if spawn_req.agent_id > 0 else self._allocate_agent_id()
             agent = self._build_base_agent_from_spawn(aid, spawn_req)
             self._agents[aid] = agent
             idx = self._pool.add_agent(agent)
@@ -2229,6 +2233,13 @@ class AgentManager(Node):
         return Shape(type=stype, radius=shape_msg.radius, vertices=vertices)
 
     @staticmethod
+    def _source_type_from_msg(src_msg: SourceConfigMsg) -> SourceType:
+        types = {SourceConfigMsg.POISSON: SourceType.POISSON, SourceConfigMsg.MAX: SourceType.MAX}
+        if src_msg.type not in types:
+            raise ValueError(f"source {src_msg.name!r}: unknown type {src_msg.type}")
+        return types[src_msg.type]
+
+    @staticmethod
     def _source_msg_to_config(src_msg: SourceConfigMsg) -> SourceConfig:
         from arena_humansim.utils.types import AgentTemplate, RateKeyframe, SinkAffinity
 
@@ -2236,6 +2247,7 @@ class AgentManager(Node):
             name=src_msg.name,
             pose=Pose2D(x=src_msg.pose.x, y=src_msg.pose.y, theta=src_msg.pose.theta),
             shape=AgentManager._shape_msg_to_shape(src_msg.shape),
+            type=AgentManager._source_type_from_msg(src_msg),
             rate_profile=[RateKeyframe(t=kf.t, rate=kf.rate) for kf in src_msg.rate_profile],
             max_concurrent=src_msg.max_concurrent,
             max_total=src_msg.max_total,
@@ -2259,13 +2271,20 @@ class AgentManager(Node):
         )
 
     def _set_flow_callback(self, request: SetFlow.Request, response: SetFlow.Response) -> SetFlow.Response:
+        try:
+            sources = [self._source_msg_to_config(src_msg) for src_msg in request.flow.sources]
+            for src in sources:
+                self._spawn_scheduler.validate(src)
+        except ValueError as e:
+            response.success = False
+            response.message = str(e)
+            self._logger.error(response.message)
+            return response
+
         self._spawn_scheduler.clear_sources()
         self._despawn_monitor.clear_sinks()
 
-        sources = []
-        for src_msg in request.flow.sources:
-            src = self._source_msg_to_config(src_msg)
-            sources.append(src)
+        for src in sources:
             self._spawn_scheduler.add_source(src)
 
         sinks = {}
@@ -2303,8 +2322,14 @@ class AgentManager(Node):
         return response
 
     def _add_source_callback(self, request: AddSource.Request, response: AddSource.Response) -> AddSource.Response:
-        src = self._source_msg_to_config(request.source)
-        self._spawn_scheduler.add_source(src)
+        try:
+            src = self._source_msg_to_config(request.source)
+            self._spawn_scheduler.add_source(src)
+        except ValueError as e:
+            response.success = False
+            response.message = str(e)
+            self._logger.error(response.message)
+            return response
         response.success = True
         response.message = f"Added source {src.name}"
         response.name = src.name

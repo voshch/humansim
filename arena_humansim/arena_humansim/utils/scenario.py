@@ -104,6 +104,7 @@ class AgentTemplateModel:
 class SourceScenarioConfig:
     pose: Pose2D = attrs.Factory(Pose2D)
     shape: ShapeModel = attrs.Factory(ShapeModel)
+    type: str = "poisson"
     rate_profile: list[RateKeyframeModel] = attrs.Factory(list)
     max_concurrent: int = -1
     max_total: int = -1

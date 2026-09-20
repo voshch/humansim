@@ -106,14 +106,14 @@ Every interaction follows a single flow: a BT `SeekNode` emits a SEEK command, I
 
 ## Spawning & Despawning
 
-- **Sources** emit agents at a configurable Poisson rate, respecting `max_concurrent` and `max_total` caps
+- **Sources** come in two types. `type: poisson` (default) emits at the `rate_profile` and loses arrivals over `max_concurrent`. `type: max` holds `max_concurrent` agents alive, refilling on despawn, and takes no `rate_profile`. Both respect `max_total`.
 - **Sinks** absorb agents that reach them (within `absorption_radius`)
 - Agents are routed from source to sink via weighted `sink_affinity`
 - TTL-based removal as fallback
 
 ## Determinism & Replay
 
-The simulator is fully deterministic given a seed. Seeded RNG substreams are maintained per agent and per component.
+The simulator is fully deterministic given a seed. Seeded RNG substreams are maintained per agent and per component, and each substream's seed is derived by hashing `(seed, name)`, never by drawing from a parent stream, so a substream does not depend on which other substreams were requested before it. Sources sample each released agent (id, pose, speed and sink) from a `(seed, source, release index)` stream, so two runs with the same seed agree on every agent they both release. How many they release can differ for a `poisson` source under its cap, never for a `max` source.
 
 `SimulationLogger` writes per-tick JSON snapshots. `ReplayManager` replays them tick-by-tick and validates state within floating-point tolerance (1e-12).
 
