@@ -86,6 +86,10 @@ class AgentPool:
         assert self.n == 0 or self._late_attach, "register_extension must be called before agents are added"
         self._extensions.append(ext)
 
+    def unregister_extension(self, ext: PoolAware) -> None:
+        if ext in self._extensions:
+            self._extensions.remove(ext)
+
     def attach_late(self, ext: PoolAware, agents: Iterable[BaseAgent]) -> None:
         """Attach a PoolAware after agents exist and back-fill its rows for every pooled agent."""
         self._late_attach = True

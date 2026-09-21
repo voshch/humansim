@@ -79,19 +79,27 @@ class AStarPlanner(GlobalPlanner):
         self,
         replan_distance: float = 1.0,
         inflation_radius: float = 0.38,
+        resolution: float = 0.2,
     ):
         self._replan_distance = replan_distance
         self._inflation_radius = inflation_radius
+        self._resolution = resolution
 
         self._occupancy_grid: np.ndarray | None = None
         self._weights: np.ndarray | None = None
-        self._resolution: float = 0.2
         self._origin: Pose2D = Pose2D()
         self._wall_segments: list[Segment] = []
 
         self._path_cache: dict[int, tuple[tuple[float, float], list[Pose2D], int]] = {}
         self._cached_results: dict[int, Pose2D] = {}
         self._pool = ThreadPoolExecutor(max_workers=max((os.cpu_count() or 2) - 1, 1))
+
+    def configure(self, *, inflation_radius: float, resolution: float) -> None:
+        if (inflation_radius, resolution) == (self._inflation_radius, self._resolution):
+            return
+        self._inflation_radius = inflation_radius
+        self._resolution = resolution
+        self.set_walls(self._wall_segments)
 
     def set_walls(self, segments: Segments) -> None:
         self._path_cache.clear()

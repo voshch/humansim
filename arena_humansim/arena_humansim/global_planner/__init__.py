@@ -79,6 +79,9 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
     @abstractmethod
     def get_cached_goals(self) -> dict[int, Pose2D]: ...
 
+    def configure(self, *, inflation_radius: float, resolution: float) -> None:
+        pass
+
     def get_cached_paths(self) -> dict[int, list[Pose2D]]:
         return {}
 

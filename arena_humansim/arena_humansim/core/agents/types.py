@@ -25,6 +25,7 @@ __all__ = [
 ]
 
 import math
+from collections.abc import Mapping
 from pathlib import Path
 
 import attrs
@@ -39,6 +40,11 @@ class ParamDist:
     std: float = 0.0
     clip_low: float = 0.01
     clip_high: float = float("inf")
+
+    def with_mean(self, mean: float) -> "ParamDist":
+        """Same spread around a new mean. The clip window moves with it and never drops below its old floor or the mean."""
+        delta = mean - self.mean
+        return attrs.evolve(self, mean=mean, clip_low=max(self.clip_low + delta, min(self.clip_low, mean)), clip_high=self.clip_high + delta)
 
 
 def _as_paramdist(val: object) -> "ParamDist | None":
@@ -353,6 +359,7 @@ def sample_agent_type(
     agent_type: AgentType,
     rng: np.random.Generator,
     default_local_planner: str = "sfm",
+    local_planner_means: Mapping[str, float] | None = None,
 ) -> SampledParams:
     sampled_needs: dict[str, SampledNeed] = {}
     for need_name, need_dist in agent_type.needs.items():
@@ -381,6 +388,9 @@ def sample_agent_type(
 
     planner_name = agent_type.local_planner or default_local_planner
     lp_dists = {**LocalPlanner.get_class(planner_name).PARAM_DEFAULTS, **agent_type.local_planner_params}
+    for key, mean in (local_planner_means or {}).items():
+        if key in lp_dists:
+            lp_dists[key] = lp_dists[key].with_mean(mean)
     sampled_lp = {k: _sample_dist(d, rng) for k, d in lp_dists.items()}
 
     idle_gaze_rate_hz = _sample_dist(agent_type.idle_gaze_rate, rng)

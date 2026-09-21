@@ -43,9 +43,11 @@ from arena_humansim_msgs.srv import (
 from geometry_msgs.msg import Point32, Vector3
 from geometry_msgs.msg import Pose2D as Pose2DMsg
 from py_trees.trees import BehaviourTree
+from rcl_interfaces.msg import FloatingPointRange, IntegerRange, ParameterDescriptor, SetParametersResult
 from rclpy.clock import Clock as RclClock
 from rclpy.clock import ClockType
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rosgraph_msgs.msg import Clock
 
@@ -60,7 +62,7 @@ from arena_humansim.core.agents import (
     create_agent,
 )
 from arena_humansim.core.agents.loader import resolve_agent_type_name
-from arena_humansim.core.agents.types import ATTENTION_KEYWORDS
+from arena_humansim.core.agents.types import ATTENTION_KEYWORDS, ParamDist
 from arena_humansim.core.animation_kinds import locomotion_states
 from arena_humansim.core.behavior.compiler import BehaviorTreeFactory
 from arena_humansim.core.despawn_monitor import DespawnMonitor
@@ -117,10 +119,41 @@ class ObstacleData:
     wall_segments: tuple[tuple[tuple[float, float], tuple[float, float]], ...]
 
 
+_TUNABLE_PARAMS = frozenset(
+    {
+        "force_local_planner",
+        "waypoint_threshold",
+        "min_speed_for_heading",
+        "arrival_r_enter",
+        "arrival_r_exit",
+        "arrival_tau_brake",
+        "profile_phases",
+        "profile_interval",
+    }
+)
+_RECONFIGURABLE_PARAMS = _TUNABLE_PARAMS | {
+    "global_planner",
+    "global_planner.inflation_radius",
+    "global_planner.resolution",
+    "local_planner",
+    "publish_markers",
+    "rtf",
+}
+
 _MSG_BLOCK = 16
 
 _EXTERNAL_TIMEOUT_S = 2.0
 _EXTERNAL_ADOPT_RADIUS = 1.0
+
+
+@attrs.frozen
+class _Pinned:
+    """What an agent's spawn request or agent type fixed, so a reset leaves it alone."""
+
+    policy: bool = False
+    local_planner: bool = False
+    global_planner: bool = False
+    lp_keys: frozenset[str] = frozenset()
 
 
 @attrs.define
@@ -211,11 +244,22 @@ class AgentManager(Node):
         self._logger = self.get_logger()
         Loggable.init_logging(self)
 
+        inherited = set(self.list_parameters([], 0).names)
         self.declare_parameter("seed", 0)
         self.declare_parameter("dt", 0.05)
-        self.declare_parameter("bt_tick_interval", 5)
+        self.declare_parameter("bt_tick_interval", 5, ParameterDescriptor(integer_range=[IntegerRange(from_value=1, to_value=100000)]))
         self.declare_parameter("perception", "default")
         self.declare_parameter("global_planner", "astar")
+        self.declare_parameter(
+            "global_planner.inflation_radius",
+            0.38,
+            ParameterDescriptor(description="wall clearance of planned paths [m], rounded up to whole cells", floating_point_range=[FloatingPointRange(from_value=0.0, to_value=5.0)]),
+        )
+        self.declare_parameter(
+            "global_planner.resolution",
+            0.2,
+            ParameterDescriptor(description="planning grid cell size [m]", floating_point_range=[FloatingPointRange(from_value=0.01, to_value=5.0)]),
+        )
         self.declare_parameter("local_planner", "sfm")
         self.declare_parameter("force_local_planner", False)
         self.declare_parameter("robot_policy", "")
@@ -232,7 +276,7 @@ class AgentManager(Node):
         self.declare_parameter("arrival_r_enter", 0.15)
         self.declare_parameter("arrival_r_exit", 0.30)
         self.declare_parameter("arrival_tau_brake", 0.15)
-        self.declare_parameter("publish_markers", 0)
+        self.declare_parameter("publish_markers", 0, ParameterDescriptor(integer_range=[IntegerRange(from_value=0, to_value=2)]))
         self.declare_parameter("profile_phases", False)
         self.declare_parameter("profile_interval", 0)
         self.declare_parameter("record_bag", False)
@@ -242,8 +286,9 @@ class AgentManager(Node):
         self.declare_parameter("scenario", "")
         self.declare_parameter("ticks", 0)
         self.declare_parameter("time", 0.0)
-        self.declare_parameter("rtf", 1.0)
+        self.declare_parameter("rtf", 1.0, ParameterDescriptor(floating_point_range=[FloatingPointRange(from_value=0.0, to_value=1000.0)]))
         self.declare_parameter("subsystem_overrun_policy", "lag")
+        self._static_params = frozenset(self.list_parameters([], 0).names) - inherited - _RECONFIGURABLE_PARAMS
 
         seed = self.get_parameter("seed").value
         self._dt = self.get_parameter("dt").value
@@ -251,23 +296,15 @@ class AgentManager(Node):
         self._mode = self.get_parameter("mode").value
         log_dir = self.get_parameter("log_dir").value
         replay_mode = self.get_parameter("replay_mode").value
-        self._waypoint_threshold = self.get_parameter("waypoint_threshold").value
-        self._min_speed_for_heading = self.get_parameter("min_speed_for_heading").value
-        self._arrival_r_enter = float(self.get_parameter("arrival_r_enter").value)
-        self._arrival_r_exit = float(self.get_parameter("arrival_r_exit").value)
-        self._arrival_tau_brake = float(self.get_parameter("arrival_tau_brake").value)
+        self._load_tunables()
         if not (0.0 < self._arrival_r_enter < self._arrival_r_exit):
             raise ValueError(f"arrival_r_enter ({self._arrival_r_enter}) must be >0 and < arrival_r_exit ({self._arrival_r_exit})")
-        if self._arrival_tau_brake < self._dt:
-            self._logger.warning(f"arrival_tau_brake ({self._arrival_tau_brake}) < dt ({self._dt}); clamping to dt")
-            self._arrival_tau_brake = float(self._dt)
         self._ticks_limit = int(self.get_parameter("ticks").value)
         time_limit = float(self.get_parameter("time").value)
         if self._ticks_limit == 0 and time_limit > 0.0:
             self._ticks_limit = max(1, int(round(time_limit / self._dt)))
         self._rtf = float(self.get_parameter("rtf").value)
         self._subsystem_overrun_policy = str(self.get_parameter("subsystem_overrun_policy").value)
-        self._force_local_planner = bool(self.get_parameter("force_local_planner").value)
         self._robot_policy_override = str(self.get_parameter("robot_policy").value)
         self._trial_id = str(self.get_parameter("trial_id").value)
         self._robot_shutdown_override = str(self.get_parameter("robot_shutdown").value).strip().lower()
@@ -286,8 +323,6 @@ class AgentManager(Node):
             self._publish_markers = 2 if _pm else 0
         else:
             self._publish_markers = int(_pm)
-        self._profile_phases = self.get_parameter("profile_phases").value
-        self._profile_interval = self.get_parameter("profile_interval").value
         self._phase_accum: dict[str, list[float]] = {}
 
         self._module_selections = {
@@ -315,9 +350,16 @@ class AgentManager(Node):
         self._global_planner = GlobalPlanner.create(
             self._module_selections["global_planner"],
         )
+        self._configure_global_planner()
+        self.add_pre_set_parameters_callback(self._widen_ints)
+        self.add_on_set_parameters_callback(self._validate_parameters)
+        self.add_post_set_parameters_callback(self._on_parameters_set)
         self._local_planner = LocalPlanner.create(
             self._module_selections["local_planner"],
         )
+        self._declare_local_planner_params(type(self._local_planner))
+        self._lp_means = self._read_lp_means()
+        self._pinned: dict[int, _Pinned] = {}
         self._default_policy_idx: int = 0
         self._policy_names = [self._module_selections["local_planner"]]
         self._policy_name_to_idx = {self._module_selections["local_planner"]: 0}
@@ -599,7 +641,177 @@ class AgentManager(Node):
         self._next_agent_id += 1
         return aid
 
-    def _attach_policy(self, planner: LocalPlanner) -> None:
+    def _widen_ints(self, params: list[Parameter]) -> list[Parameter]:
+        def widen(p: Parameter) -> Parameter:
+            if p.type_ == Parameter.Type.INTEGER and self.has_parameter(p.name) and self.get_parameter(p.name).type_ == Parameter.Type.DOUBLE:
+                return Parameter(p.name, Parameter.Type.DOUBLE, float(p.value))
+            return p
+
+        return [widen(p) for p in params]
+
+    def _load_tunables(self) -> None:
+        self._force_local_planner = bool(self.get_parameter("force_local_planner").value)
+        self._waypoint_threshold = self.get_parameter("waypoint_threshold").value
+        self._min_speed_for_heading = self.get_parameter("min_speed_for_heading").value
+        self._arrival_r_enter = float(self.get_parameter("arrival_r_enter").value)
+        self._arrival_r_exit = float(self.get_parameter("arrival_r_exit").value)
+        self._arrival_tau_brake = float(self.get_parameter("arrival_tau_brake").value)
+        if self._arrival_tau_brake < self._dt:
+            self._logger.warning(f"arrival_tau_brake ({self._arrival_tau_brake}) < dt ({self._dt}), clamping to dt")
+            self._arrival_tau_brake = float(self._dt)
+        self._profile_phases = self.get_parameter("profile_phases").value
+        self._profile_interval = self.get_parameter("profile_interval").value
+
+    def _validate_parameters(self, params: list[Parameter]) -> SetParametersResult:
+        incoming = {p.name: p.value for p in params}
+        static = sorted(self._static_params & incoming.keys())
+        if static:
+            return SetParametersResult(successful=False, reason=f"not reconfigurable at runtime: {', '.join(static)}")
+        r_enter = incoming.get("arrival_r_enter", self.get_parameter("arrival_r_enter").value)
+        r_exit = incoming.get("arrival_r_exit", self.get_parameter("arrival_r_exit").value)
+        if not 0.0 < r_enter < r_exit:
+            return SetParametersResult(successful=False, reason=f"arrival_r_enter ({r_enter}) must be >0 and < arrival_r_exit ({r_exit})")
+        for name, registry in (("local_planner", LocalPlanner), ("global_planner", GlobalPlanner)):
+            if name in incoming and incoming[name] not in registry.list_available():
+                return SetParametersResult(successful=False, reason=f"{name}: unknown module {incoming[name]!r}, available: {', '.join(registry.list_available())}")
+        return SetParametersResult(successful=True)
+
+    def set_parameters_atomically(self, parameter_list: list[Parameter]) -> SetParametersResult:
+        ordered = sorted(parameter_list, key=lambda p: p.name)
+        self._declare_selected_planner_params(ordered)
+        return super().set_parameters_atomically(ordered)
+
+    def _on_parameters_set(self, params: list[Parameter]) -> None:
+        self._declare_selected_planner_params(params)
+
+    def _declare_selected_planner_params(self, params: list[Parameter]) -> None:
+        for p in params:
+            if p.name == "local_planner" and p.value in LocalPlanner.list_available():
+                self._declare_local_planner_params(LocalPlanner.get_class(p.value))
+
+    def _apply_parameters(self) -> None:
+        self._load_tunables()
+        self._select_local_planner(self.get_parameter("local_planner").value)
+        self._select_global_planner(self.get_parameter("global_planner").value)
+        self._configure_global_planner()
+        self._set_marker_level(self.get_parameter("publish_markers").value)
+        self._set_rtf(self.get_parameter("rtf").value)
+        old_means, self._lp_means = self._lp_means, self._read_lp_means()
+        self._reseat_agents(old_means)
+        self._prune_planners()
+
+    def _select_local_planner(self, name: str) -> None:
+        idx = self._resolve_policy_idx(name)
+        self._default_policy_idx = idx
+        self._local_planner = self._policies[idx]
+        self._module_pool[name] = self._local_planner
+        self._module_selections["local_planner"] = name
+
+    def _select_global_planner(self, name: str) -> None:
+        if name not in self._module_pool:
+            self._module_pool[name] = GlobalPlanner.create(name)
+            self._attach_late(self._module_pool[name])
+        self._global_planner = self._module_pool[name]
+        self._module_selections["global_planner"] = name
+
+    def _set_marker_level(self, level: int) -> None:
+        if level == self._publish_markers:
+            return
+        self._publish_markers = level
+        if level == 0 and self._marker_pub is not None:
+            self._marker_pub.forget_all()
+        if level > 0 and self._marker_pub is None:
+            self._marker_pub = MarkerPublisher(self)
+
+    def _set_rtf(self, rtf: float) -> None:
+        if rtf == self._rtf:
+            return
+        self._rtf = rtf
+        if self._mode == self.MODE_MASTER:
+            self._timer.timer_period_ns = int(1e9 * self._dt / rtf) if rtf > 0.0 else 0
+
+    def _declare_local_planner_params(self, planner_cls: type[LocalPlanner]) -> None:
+        for key in planner_cls.PARAM_DEFAULTS:
+            if not self.has_parameter(f"local_planner.{key}"):
+                self.declare_parameter(f"local_planner.{key}", 0.0, ParameterDescriptor(description=f"mean of {key}, 0 = agent type's own, a per-agent spawn value still wins"))
+
+    def _read_lp_means(self) -> dict[str, float]:
+        prefix = "local_planner."
+        means = {name.removeprefix(prefix): self.get_parameter(name).value for name in self.list_parameters([], 0).names if name.startswith(prefix)}
+        return {key: mean for key, mean in means.items() if mean > 0.0}
+
+    def _local_planner_means(self, planner_name: str) -> dict[str, float]:
+        return {key: mean for key, mean in self._lp_means.items() if key in LocalPlanner.get_class(planner_name).PARAM_DEFAULTS}
+
+    def _lp_dist(self, agent: BaseAgent, key: str) -> ParamDist | None:
+        agent_type = self._agent_types.get(agent.params.name)
+        if agent_type is not None and key in agent_type.local_planner_params:
+            return agent_type.local_planner_params[key]
+        return next((p.PARAM_DEFAULTS[key] for p in self._policies if key in p.PARAM_DEFAULTS), None)
+
+    def _reseat_agents(self, old_means: dict[str, float]) -> None:
+        """Move every agent that follows the defaults onto the current planners and planner means."""
+        saved = {e.agent_id: e for e in self._external_entities.values() if e.saved_policy_idx is not None}
+        for aid, agent in self._agents.items():
+            pinned = self._pinned[aid]
+            idx = self._pool.idx(aid)
+            if not pinned.local_planner:
+                agent.local_planner = self._local_planner
+            if not pinned.global_planner:
+                agent.global_planner = self._global_planner
+            if not pinned.policy:
+                if aid in saved:
+                    saved[aid].saved_policy_idx = self._default_policy_idx
+                elif self._pool.policy_idx[idx] >= 0:
+                    self._pool.policy_idx[idx] = self._default_policy_idx
+
+            lp = dict(agent.params.local_planner_params)
+            for key in {*lp, *type(agent.local_planner).PARAM_DEFAULTS} - pinned.lp_keys:
+                dist = self._lp_dist(agent, key)
+                if dist is None:
+                    continue
+                old = old_means.get(key, dist.mean)
+                new = dist.with_mean(self._lp_means.get(key, dist.mean))
+                lp[key] = float(np.clip(lp.get(key, old) + new.mean - old, new.clip_low, new.clip_high))
+            if lp != agent.params.local_planner_params:
+                agent.params = attrs.evolve(agent.params, local_planner_params=lp)
+                for planner in self._policies:
+                    if planner.PARAM_DEFAULTS:
+                        planner.on_pool_add(idx, agent)
+
+    def _prune_planners(self) -> None:
+        """Drop every planner that no agent uses and keep the defaults."""
+        agents = list(self._agents.values())
+        n = self._pool.n
+        used = {int(i) for i in self._pool.policy_idx[:n]} | {e.saved_policy_idx for e in self._external_entities.values()} | {self._default_policy_idx}
+        keep = [i for i, p in enumerate(self._policies) if i in used or any(a.local_planner is p for a in agents)]
+        dropped: list[LocalPlanner | GlobalPlanner] = [p for i, p in enumerate(self._policies) if i not in keep]
+        remap = np.full(len(self._policies) + 1, -1, dtype=self._pool.policy_idx.dtype)
+        remap[keep] = np.arange(len(keep))
+        self._pool.policy_idx[:n] = remap[self._pool.policy_idx[:n]]
+        for entity in self._external_entities.values():
+            if entity.saved_policy_idx is not None:
+                entity.saved_policy_idx = int(remap[entity.saved_policy_idx])
+        self._default_policy_idx = int(remap[self._default_policy_idx])
+        self._policies = [self._policies[i] for i in keep]
+        self._policy_names = [self._policy_names[i] for i in keep]
+        self._policy_name_to_idx = {name: i for i, name in enumerate(self._policy_names)}
+
+        global_planners = [m for m in self._module_pool.values() if isinstance(m, GlobalPlanner)]
+        dropped += [p for p in global_planners if p is not self._global_planner and not any(a.global_planner is p for a in agents)]
+
+        for planner in dropped:
+            self._pool.unregister_extension(planner)
+        self._wall_aware = tuple(w for w in self._wall_aware if not any(w is p for p in dropped))
+        self._module_pool = {name: m for name, m in self._module_pool.items() if not any(m is p for p in dropped)}
+
+    def _configure_global_planner(self) -> None:
+        self._global_planner.configure(
+            inflation_radius=self.get_parameter("global_planner.inflation_radius").value,
+            resolution=self.get_parameter("global_planner.resolution").value,
+        )
+
+    def _attach_late(self, planner: LocalPlanner | GlobalPlanner) -> None:
         """Wire a planner created after __init__ into the pool and the walls."""
         agents = [self._agents[aid] for aid in self._pool_agent_ids if aid in self._agents]
         self._pool.attach_late(planner, agents)
@@ -615,7 +827,8 @@ class AgentManager(Node):
         if idx is not None:
             return idx
         planner = LocalPlanner.create(name)
-        self._attach_policy(planner)
+        self._attach_late(planner)
+        self._declare_local_planner_params(planner)
         idx = len(self._policies)
         self._policies.append(planner)
         self._policy_names.append(name)
@@ -866,10 +1079,11 @@ class AgentManager(Node):
         if agent_type is not None:
             self._agent_types[agent_type.name] = agent_type
             rng = self._rng.get_agent_substream(aid, "params")
-            agent = create_agent(agent_type, state, self._module_pool, self._module_selections, rng)
+            planner_name = agent_type.local_planner or self._module_selections["local_planner"]
+            agent = create_agent(agent_type, state, self._module_pool, self._module_selections, rng, local_planner_means=self._local_planner_means(planner_name))
         else:
             planner_name = self._module_selections["local_planner"]
-            lp_defaults = {k: v.mean for k, v in LocalPlanner.get_class(planner_name).PARAM_DEFAULTS.items()}
+            lp_defaults = {k: v.mean for k, v in LocalPlanner.get_class(planner_name).PARAM_DEFAULTS.items()} | self._local_planner_means(planner_name)
             params = SampledParams(
                 name=type_name,
                 desired_velocity=state.desired_velocity,
@@ -916,6 +1130,11 @@ class AgentManager(Node):
                 lp_overrides[field_name] = val
         if lp_overrides:
             overrides["local_planner_params"] = {**agent.params.local_planner_params, **lp_overrides}
+        self._pinned[aid] = _Pinned(
+            local_planner=agent_type is not None and bool(agent_type.local_planner),
+            global_planner=agent_type is not None and bool(agent_type.global_planner),
+            lp_keys=frozenset(lp_overrides),
+        )
 
         if overrides:
             agent.params = attrs.evolve(agent.params, **overrides)
@@ -998,6 +1217,7 @@ class AgentManager(Node):
             self._pool_agent_ids.pop()
         self._high_level_cmds.pop(aid, None)
         self._behavior_trees.pop(aid, None)
+        self._pinned.pop(aid, None)
         self._robot_service_advertiser.unregister(aid)
         self._interaction_manager.force_stop(aid)
         self._event_bus.clear_agent(aid)
@@ -1330,7 +1550,7 @@ class AgentManager(Node):
         msg = self._build_agent_states_msg()
         self._agent_states_pub.publish(msg)
 
-        if self._marker_pub is not None:
+        if self._marker_pub is not None and self._publish_markers > 0:
             pool.sync_back(agents)
             mlvl = self._publish_markers
             publish_agents(self._marker_pub, agents)
@@ -2027,6 +2247,8 @@ class AgentManager(Node):
                     apply(policy_params)
 
             agent = self._build_base_agent(aid, agent_msg, waypoints)
+            if policy_name and not self._force_local_planner:
+                self._pinned[aid] = attrs.evolve(self._pinned[aid], policy=True)
             agent.state.kind = kind
             agent.movement = WaypointMovement(
                 waypoints=waypoints,
@@ -2112,9 +2334,18 @@ class AgentManager(Node):
 
     def _reset_callback(
         self,
-        _request: ResetSimulation.Request,
+        request: ResetSimulation.Request,
         response: ResetSimulation.Response,
     ) -> ResetSimulation.Response:
+        if not request.soft:
+            self._wipe()
+        self._apply_parameters()
+        response.success = True
+        response.message = "Parameters applied" if request.soft else "Simulation reset"
+        self._logger.info(response.message)
+        return response
+
+    def _wipe(self) -> None:
         self._agents.clear()
         self._pool_agent_ids.clear()
         self._pool.reset()
@@ -2146,11 +2377,8 @@ class AgentManager(Node):
         self._sim_time_ns = 0
         self._last_spawned_ids = []
         self._last_despawned_ids = []
+        self._pinned.clear()
         self._publish_world_geometry()
-        response.success = True
-        response.message = "Simulation reset"
-        self._logger.info(response.message)
-        return response
 
     def _update_robot_callback(
         self,

@@ -129,7 +129,7 @@ ros2 launch arena_humansim arena_humansim.launch.py \
   rviz:=true
 ```
 
-Module-selection launch args (`perception`, `global_planner`, `local_planner`, `animation`, `collision`, `occlusion`) all default to the values in the parameters table below; pass any of them on the command line to override.
+Module-selection launch args (`perception`, `global_planner`, `local_planner`, `animation`, `collision`, `occlusion`) all default to the values in the parameters table below. Pass any of them on the command line to override. Any other launch arg is forwarded to the node as the param of the same name, e.g. `global_planner.resolution:=0.1` or `local_planner.relaxation_time:=0.7`, so the node's declarations stay the only list of params. The value is typed by YAML rules, so write a double with a decimal point. A name the node does not declare is ignored.
 
 Scenarios (world objects, agents, flow, walls) are authored under [`config/scenarios/`](arena_humansim/config/scenarios/README.md).
 
@@ -172,12 +172,37 @@ Config format and stage semantics: [`config/benchmark/README.md`](arena_humansim
 | `bt_tick_interval` | `5` | BT ticks every N sim ticks |
 | `perception` | `default` | Perception module |
 | `global_planner` | `astar` | Global planner module |
+| `global_planner.inflation_radius` | `0.38` | Wall clearance of planned paths (m), rounded up to whole grid cells |
+| `global_planner.resolution` | `0.2` | Planning grid cell size (m) |
 | `local_planner` | `sfm` | Local planner module |
+| `local_planner.<key>` | `0` | Mean of a local planner param (`relaxation_time`, `repulsion_strength`, `repulsion_range`, `anisotropy`, and for `hsfm` `lateral_gain`, `lateral_damping`, `angular_gain`, `angular_damping`). `0` leaves the agent type's own value |
 | `animation` | `noop` | Animation module |
 | `collision` | `wall_projection` | Collision resolver |
 | `occlusion` | `bitmap` | Occlusion module |
+| `waypoint_threshold` | `0.1` | Distance (m) at which a waypoint counts as reached |
+| `min_speed_for_heading` | `0.1` | Speed (m/s) below which an agent keeps its heading |
+| `arrival_r_enter`, `arrival_r_exit` | `0.15`, `0.30` | Radii (m) at which an agent latches onto its goal and releases it |
+| `arrival_tau_brake` | `0.15` | Braking time constant (s) of a latched agent, at least `dt` |
+| `profile_phases`, `profile_interval` | `false`, `0` | Time the tick phases, log the profile every N ticks |
 | `publish_markers` | `0` | RViz markers: 0=off, 1=infrastructure+labels+interactions, 2=full |
 | `log_dir` | `""` | Directory for replay logs |
+
+An integer set on a double param is widened, so `ros2 param set <node> global_planner.resolution 1` is accepted.
+
+#### Runtime reconfiguration
+
+A `set_parameters` call on a running node is validated and stored at once and takes effect at the next `reset` service call. `reset` with `soft: true` is the episode boundary. It keeps agents, world, clock, and RNG, applies the stored params, re-seats the agents, and prunes unused planners. A plain `reset` wipes the simulation first and then does the same. Every param outside the table is fixed at startup, and a set on it is rejected with `not reconfigurable at runtime`. A `set_parameters_atomically` batch is sorted by name. It may name a planner and that planner's `local_planner.<key>` params in any order, and it is rejected as a whole when one entry is invalid.
+
+| Parameter | Effect at the reset |
+|---|---|
+| `global_planner.inflation_radius`, `global_planner.resolution` | The planner rebuilds its grid from the current walls and drops cached paths |
+| `global_planner`, `local_planner` | The module is created on first use and gets the current walls and pool. An unknown module name is rejected at the set |
+| `local_planner.<key>` | Mean of a local planner param (`relaxation_time`, `repulsion_strength`, ...). It replaces the mean of the agent type and keeps its spread. `0` leaves the agent type's own value. Declared for the keys of the startup planner and of every planner selected through `local_planner` |
+| `waypoint_threshold`, `min_speed_for_heading`, `arrival_r_enter`, `arrival_r_exit`, `arrival_tau_brake`, `force_local_planner`, `profile_phases`, `profile_interval` | The node re-reads them. `arrival_r_enter` must stay below `arrival_r_exit` |
+| `publish_markers` | The marker level changes. `0` deletes the published markers |
+| `rtf` | Master mode only, retimes the tick timer |
+
+Re-seating moves every live agent that follows the defaults onto the current local and global planner and shifts its planner params by the change of the mean, so it keeps its sampled offset. Three things stay fixed: an explicit `policy` of the spawn request, a planner named by the agent type, and a per-agent planner value. Pruning drops every local and global planner that no agent uses from the policy table, the wall and pool subscribers, and the module pool. The current defaults stay.
 
 ### ROS Interface
 
@@ -194,7 +219,7 @@ Config format and stage semantics: [`config/benchmark/README.md`](arena_humansim
 - `add_walls`, `remove_walls` — dynamic obstacles
 - `set_flow` — bulk configure sources, sinks, walls
 - `notify_stimulus` - drive a need on one agent (or `-1` for all) after its reaction time
-- `reset` — clear all simulation state
+- `reset` - clear all simulation state, or with `soft: true` keep it and only apply stored params, re-seat agents, and prune unused planners
 
 ## Development
 
