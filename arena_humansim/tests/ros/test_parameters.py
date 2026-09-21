@@ -5,8 +5,8 @@ from collections.abc import Iterator
 import pytest
 from rclpy.parameter import Parameter
 
-from arena_humansim.global_planner.astar import AStarPlanner
 from arena_humansim.global_planner.dijkstra import DijkstraPlanner
+from arena_humansim.global_planner.navmesh import NavMeshPlanner
 from arena_humansim.local_planner.hsfm import HSFMPlanner
 from arena_humansim.local_planner.sfm import SFMPlanner
 from tests.ros._helpers import (
@@ -25,9 +25,11 @@ from tests.ros._helpers import (
 pytestmark = pytest.mark.ros
 
 _RESOLUTION = "global_planner.resolution"
+_COMFORT = "global_planner.comfort_radius"
 _RELAXATION = "local_planner.relaxation_time"
 _RESTORED = (
     _RESOLUTION,
+    _COMFORT,
     _RELAXATION,
     "global_planner",
     "local_planner",
@@ -72,11 +74,11 @@ def _policy(system: RosTestSystem, agent_id: int):
 
 
 def test_set_waits_for_the_reset(system: RosTestSystem) -> None:
-    before = system.manager._global_planner._resolution
-    assert _set(system, _RESOLUTION, 0.1).successful
-    assert system.manager._global_planner._resolution == pytest.approx(before)
+    before = system.manager._global_planner._comfort_radius
+    assert _set(system, _COMFORT, 0.5).successful
+    assert system.manager._global_planner._comfort_radius == pytest.approx(before)
     _soft_reset(system)
-    assert system.manager._global_planner._resolution == pytest.approx(0.1)
+    assert system.manager._global_planner._comfort_radius == pytest.approx(0.5)
 
 
 def test_full_reset_applies_too(system: RosTestSystem) -> None:
@@ -182,8 +184,8 @@ def test_global_planner_switch_reseats_prunes_and_inherits_grid(system: RosTestS
     assert planner._resolution == pytest.approx(0.1)
     assert planner._occupancy_grid is not None
     assert agent.global_planner is planner
-    assert not any(isinstance(w, AStarPlanner) for w in system.manager._wall_aware)
-    assert "astar" not in system.manager._module_pool
+    assert not any(isinstance(w, NavMeshPlanner) for w in system.manager._wall_aware)
+    assert "navmesh" not in system.manager._module_pool
     system.tick_manager(3)
 
 

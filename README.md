@@ -43,7 +43,7 @@ All modules are swappable via a plugin registry.
 
 | Layer | Options | Default |
 |---|---|---|
-| [Global Planner](arena_humansim/arena_humansim/global_planner/README.md) | `dijkstra`, `astar` | `astar` |
+| [Global Planner](arena_humansim/arena_humansim/global_planner/README.md) | `navmesh`, `astar`, `dijkstra` | `navmesh` |
 | [Local Planner](arena_humansim/arena_humansim/local_planner/README.md) | `sfm`, `hsfm`, `orca`, `straight`, `socialgail` | `sfm` |
 | [Perception](arena_humansim/arena_humansim/perception/README.md) | `default` | `default` |
 | [Animation](arena_humansim/arena_humansim/animation/README.md) | `noop`, `kinematic` | `noop` |
@@ -171,9 +171,10 @@ Config format and stage semantics: [`config/benchmark/README.md`](arena_humansim
 | `dt` | `0.05` | Simulation timestep (s) |
 | `bt_tick_interval` | `5` | BT ticks every N sim ticks |
 | `perception` | `default` | Perception module |
-| `global_planner` | `astar` | Global planner module |
+| `global_planner` | `navmesh` | Global planner module |
 | `global_planner.inflation_radius` | `0.38` | Wall clearance of planned paths (m), rounded up to whole grid cells |
-| `global_planner.resolution` | `0.2` | Planning grid cell size (m) |
+| `global_planner.resolution` | `0.2` | Planning grid cell size (m), grid planners only |
+| `global_planner.comfort_radius` | `0.6` | Preferred wall clearance of navmesh paths (m), relaxed in narrow passages, navmesh only |
 | `local_planner` | `sfm` | Local planner module |
 | `local_planner.<key>` | `0` | Mean of a local planner param (`relaxation_time`, `repulsion_strength`, `repulsion_range`, `anisotropy`, and for `hsfm` `lateral_gain`, `lateral_damping`, `angular_gain`, `angular_damping`). `0` leaves the agent type's own value |
 | `animation` | `noop` | Animation module |
@@ -195,7 +196,7 @@ A `set_parameters` call on a running node is validated and stored at once and ta
 
 | Parameter | Effect at the reset |
 |---|---|
-| `global_planner.inflation_radius`, `global_planner.resolution` | The planner rebuilds its grid from the current walls and drops cached paths |
+| `global_planner.inflation_radius`, `global_planner.resolution`, `global_planner.comfort_radius` | The planner rebuilds its grid or mesh from the current walls and drops cached paths |
 | `global_planner`, `local_planner` | The module is created on first use and gets the current walls and pool. An unknown module name is rejected at the set |
 | `local_planner.<key>` | Mean of a local planner param (`relaxation_time`, `repulsion_strength`, ...). It replaces the mean of the agent type and keeps its spread. `0` leaves the agent type's own value. Declared for the keys of the startup planner and of every planner selected through `local_planner` |
 | `waypoint_threshold`, `min_speed_for_heading`, `arrival_r_enter`, `arrival_r_exit`, `arrival_tau_brake`, `force_local_planner`, `profile_phases`, `profile_interval` | The node re-reads them. `arrival_r_enter` must stay below `arrival_r_exit` |

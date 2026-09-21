@@ -135,6 +135,7 @@ _RECONFIGURABLE_PARAMS = _TUNABLE_PARAMS | {
     "global_planner",
     "global_planner.inflation_radius",
     "global_planner.resolution",
+    "global_planner.comfort_radius",
     "local_planner",
     "publish_markers",
     "rtf",
@@ -249,7 +250,7 @@ class AgentManager(Node):
         self.declare_parameter("dt", 0.05)
         self.declare_parameter("bt_tick_interval", 5, ParameterDescriptor(integer_range=[IntegerRange(from_value=1, to_value=100000)]))
         self.declare_parameter("perception", "default")
-        self.declare_parameter("global_planner", "astar")
+        self.declare_parameter("global_planner", "navmesh")
         self.declare_parameter(
             "global_planner.inflation_radius",
             0.38,
@@ -259,6 +260,11 @@ class AgentManager(Node):
             "global_planner.resolution",
             0.2,
             ParameterDescriptor(description="planning grid cell size [m]", floating_point_range=[FloatingPointRange(from_value=0.01, to_value=5.0)]),
+        )
+        self.declare_parameter(
+            "global_planner.comfort_radius",
+            0.6,
+            ParameterDescriptor(description="preferred wall clearance of navmesh paths [m], relaxed in narrow passages", floating_point_range=[FloatingPointRange(from_value=0.0, to_value=5.0)]),
         )
         self.declare_parameter("local_planner", "sfm")
         self.declare_parameter("force_local_planner", False)
@@ -809,6 +815,7 @@ class AgentManager(Node):
         self._global_planner.configure(
             inflation_radius=self.get_parameter("global_planner.inflation_radius").value,
             resolution=self.get_parameter("global_planner.resolution").value,
+            comfort_radius=self.get_parameter("global_planner.comfort_radius").value,
         )
 
     def _attach_late(self, planner: LocalPlanner | GlobalPlanner) -> None:

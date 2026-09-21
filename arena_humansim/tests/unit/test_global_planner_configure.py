@@ -67,7 +67,7 @@ def test_configure_rebuilds_grid_from_current_walls(
 ) -> None:
     planner = planner_cls(inflation_radius=0.38, resolution=0.2)
     planner.set_walls(_two_rooms_with_metre_door())
-    planner.configure(inflation_radius=0.38, resolution=0.1)
+    planner.configure(inflation_radius=0.38, resolution=0.1, comfort_radius=0.6)
     assert _crosses_door(planner, agent_factory, commands_factory)
-    planner.configure(inflation_radius=0.38, resolution=0.2)
+    planner.configure(inflation_radius=0.38, resolution=0.2, comfort_radius=0.6)
     assert not _crosses_door(planner, agent_factory, commands_factory)

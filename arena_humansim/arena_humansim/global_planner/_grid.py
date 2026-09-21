@@ -92,10 +92,16 @@ def push_from_walls(
 
 def min_distance_to_path(pos: Pose2D, waypoints: Iterable[Pose2D]) -> float:
     best = math.inf
+    prev: Pose2D | None = None
     for wp in waypoints:
-        d = math.hypot(pos.x - wp.x, pos.y - wp.y)
+        ax, ay = (wp.x, wp.y) if prev is None else (prev.x, prev.y)
+        dx, dy = wp.x - ax, wp.y - ay
+        span = dx * dx + dy * dy
+        t = 0.0 if span == 0.0 else max(0.0, min(1.0, ((pos.x - ax) * dx + (pos.y - ay) * dy) / span))
+        d = math.hypot(pos.x - ax - t * dx, pos.y - ay - t * dy)
         if d < best:
             best = d
+        prev = wp
     return best
 
 

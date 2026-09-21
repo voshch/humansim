@@ -152,7 +152,7 @@ def generate_launch_description():
         DeclareLaunchArgument("time", default_value="0.0", description="stop after N seconds of sim time (ignored if ticks is set)"),
         DeclareLaunchArgument("rtf", default_value="1.0", description="real-time factor (0 = unthrottled, 1.0 = real-time)"),
         DeclareLaunchArgument("perception", default_value="default", description="perception module"),
-        DeclareLaunchArgument("global_planner", default_value="astar", description="global planner module"),
+        DeclareLaunchArgument("global_planner", default_value="navmesh", description="global planner module"),
         DeclareLaunchArgument("local_planner", default_value="sfm", description="local planner module (e.g. sfm, orca, hsfm, socialgail, straight)"),
         DeclareLaunchArgument("force_local_planner", default_value="false", description="if true, ignore per-agent policy: in scenario YAML and force every agent (humans and robots) to use local_planner"),
         DeclareLaunchArgument("robot_policy", default_value="", description="if non-empty, override the policy: of every kind=robot agent at scenario load (humans untouched). Hero-sweep entry point."),
