@@ -10,8 +10,6 @@ from arena_humansim.utils.types import Pose2D, Segment, Segments
 
 from . import GlobalPlanner, PlanRequest
 
-SNAP_MARGIN = 0.01  # a snapped point ends up this far outside the inflation band [m]
-SNAP_TRIES = 8
 SNAP_CACHE = 4096
 FRAME_INSET = 0.01
 
@@ -60,33 +58,28 @@ class NavMeshPlanner(GlobalPlanner):
     def _has_map(self) -> bool:
         return self._router is not None
 
-    def _snap(self, p: np.ndarray) -> np.ndarray | None:
-        """p itself when it keeps the inflation radius, else p pushed off the nearest walls, None when that fails."""
-        assert self._mesh is not None
-        r = self._inflation_radius
-        for flip in (1.0, -1.0):
-            q = p
-            for _ in range(SNAP_TRIES):
-                hit = self._mesh.index.nearest(q, r)
-                if hit is None or hit[0] >= r:
-                    return q
-                d, wall, along = hit
-                away = (q - wall) / d if d > 1e-9 else flip * np.array([-along[1], along[0]]) / np.hypot(*along)
-                q = wall + away * (r + SNAP_MARGIN)
-        return None
-
     def snap_terminal(self, pose: Pose2D) -> Pose2D:
-        if self._mesh is None:
+        if self._router is None:
             return pose
         key = (pose.x, pose.y)
         if key not in self._snapped:
             if len(self._snapped) >= SNAP_CACHE:
                 self._snapped.clear()
             p = np.array(key, dtype=np.float64)
-            q = self._snap(p)
+            q = self._router.snap(p)
             self._snapped[key] = None if q is None or q is p else (float(q[0]), float(q[1]))
         hit = self._snapped[key]
         return pose if hit is None else Pose2D(x=hit[0], y=hit[1], theta=pose.theta)
+
+    def _nearest_reachable(self, start: Pose2D, target: Pose2D) -> Pose2D | None:
+        assert self._router is not None
+        s = self._router.snap(np.array([start.x, start.y], dtype=np.float64))
+        if s is None:
+            return None
+        q = self._router.nearest_reachable(s, np.array([target.x, target.y], dtype=np.float64))
+        if q is None:
+            return None
+        return Pose2D(x=float(q[0]), y=float(q[1]), theta=target.theta)
 
     def _inside(self, p: np.ndarray) -> np.ndarray:
         """p moved onto the meshed frame when it lies beyond it."""
@@ -110,7 +103,7 @@ class NavMeshPlanner(GlobalPlanner):
         plans: dict[int, list[Pose2D] | None] = {agent_id: None for agent_id, _, _ in requests}
         by_goal: dict[tuple[float, float], list[tuple[int, Pose2D, Pose2D, np.ndarray]]] = {}
         for agent_id, agent_pos, target in requests:
-            start = self._snap(np.array([agent_pos.x, agent_pos.y], dtype=np.float64))
+            start = self._router.snap(np.array([agent_pos.x, agent_pos.y], dtype=np.float64))
             if start is not None:
                 by_goal.setdefault((target.x, target.y), []).append((agent_id, agent_pos, target, start))
 

@@ -12,7 +12,10 @@ from arena_humansim.utils.types import Pose2D, Segment, Segments
 
 from . import GlobalPlanner, PlanRequest
 from ._grid import (
+    REACHABLE_MAX_RESOLUTION,
     grid_to_world,
+    label_free_cells,
+    nearest_reachable_cell,
     push_from_walls,
     simplify_with_los,
     world_to_grid,
@@ -83,6 +86,7 @@ class AStarPlanner(GlobalPlanner):
 
         self._occupancy_grid: np.ndarray | None = None
         self._weights: np.ndarray | None = None
+        self._free_labels: np.ndarray | None = None
         self._origin: Pose2D = Pose2D()
         self._wall_segments: list[Segment] = []
 
@@ -98,6 +102,7 @@ class AStarPlanner(GlobalPlanner):
     def set_walls(self, segments: Segments) -> None:
         self._forget_paths()
         self._weights = None
+        self._free_labels = None
         self._wall_segments = list(segments)
         if not segments:
             self._occupancy_grid = None
@@ -149,6 +154,17 @@ class AStarPlanner(GlobalPlanner):
             return pose
         cell = grid_to_world(self._origin, self._resolution, snapped[0], snapped[1])
         return Pose2D(x=cell.x, y=cell.y, theta=pose.theta)
+
+    def _nearest_reachable(self, start: Pose2D, target: Pose2D) -> Pose2D | None:
+        if self._occupancy_grid is None or self._resolution > REACHABLE_MAX_RESOLUTION:
+            return None
+        if self._free_labels is None:
+            self._free_labels = label_free_cells(self._occupancy_grid)
+        rc = world_to_grid(self._origin, self._resolution, start.x, start.y)
+        cell = _nearest_free_cell(self._occupancy_grid, rc[0], rc[1])
+        if cell is None:
+            return None
+        return nearest_reachable_cell(self._free_labels, self._origin, self._resolution, cell, target)
 
     def _has_map(self) -> bool:
         return self._occupancy_grid is not None and self._weights is not None

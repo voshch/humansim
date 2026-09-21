@@ -4,8 +4,11 @@ import math
 from collections.abc import Iterable, Sequence
 
 import numpy as np
+from scipy.ndimage import label
 
 from arena_humansim.utils.types import Pose2D, Segments
+
+REACHABLE_MAX_RESOLUTION = 0.1  # coarser grids rasterize metre-wide doors shut [m]
 
 
 def world_to_grid(origin: Pose2D, resolution: float, wx: float, wy: float) -> tuple[int, int]:
@@ -16,6 +19,17 @@ def world_to_grid(origin: Pose2D, resolution: float, wx: float, wy: float) -> tu
 
 def grid_to_world(origin: Pose2D, resolution: float, row: int, col: int) -> Pose2D:
     return Pose2D(x=col * resolution + origin.x, y=row * resolution + origin.y)
+
+
+def label_free_cells(grid: np.ndarray) -> np.ndarray:
+    return label(grid == 0, structure=np.ones((3, 3), dtype=bool))[0]
+
+
+def nearest_reachable_cell(labels: np.ndarray, origin: Pose2D, resolution: float, start: tuple[int, int], target: Pose2D) -> Pose2D:
+    """Centre of the free cell connected to the free cell start that lies closest to target."""
+    rows, cols = np.nonzero(labels == labels[start])
+    k = int(np.argmin((cols * resolution + origin.x - target.x) ** 2 + (rows * resolution + origin.y - target.y) ** 2))
+    return Pose2D(x=cols[k] * resolution + origin.x, y=rows[k] * resolution + origin.y, theta=target.theta)
 
 
 def line_of_sight(grid: np.ndarray, origin: Pose2D, resolution: float, p1: Pose2D, p2: Pose2D) -> bool:

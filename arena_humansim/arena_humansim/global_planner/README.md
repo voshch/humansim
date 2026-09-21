@@ -25,13 +25,15 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
     def get_cached_paths(self) -> dict[int, list[Pose2D]]: ...
     def invalidate_paths(self, agent_ids) -> None: ...
     def configure(self, *, inflation_radius, resolution, comfort_radius) -> None: ...
+    def _nearest_reachable(self, start, target) -> Pose2D | None: ...
 ```
 
 A subclass implements only `_has_map` and `_plan`. The base class owns everything else: the per-agent path cache, the replan rule, and stepping along a cached path.
 
 - `_has_map` gates the whole planner. While false every `NAVIGATE` agent gets its raw target as its subgoal, no `_plan` call.
 - `_plan` takes `(agent_id, start pose, target pose)` requests and returns final, already-smoothed waypoints per agent, first waypoint the agent's own position, last the snapped terminal, or `None` if the target is unreachable.
-- `compute` is concrete: skips non-`NAVIGATE` commands, replans when the target moved past `_replan_distance` from the cached goal, advances a fresh cache entry with `advance_along_path`, and on `None` pops the cache entry and falls back to `snap_terminal(target)`.
+- `compute` is concrete: skips non-`NAVIGATE` commands, replans when the target moved past `_replan_distance` from the cached goal, advances a fresh cache entry with `advance_along_path`, and on `None` asks `_nearest_reachable` for a substitute target. A route to the substitute is cached under the original target, so it is not replanned every tick. Without a substitute it pops the cache entry and falls back to `snap_terminal(target)`.
+- `_nearest_reachable` is optional, default `None`. It returns the point closest to an unreachable target that the start can still reach.
 - `get_cached_goals` is how the rest of the pipeline (local planner, markers) reads the planner state without re-triggering work.
 - `get_cached_paths` is optional, only used for visualization.
 - `WallAware.set_walls(segments)` invalidates any grid / graph caches through `_forget_paths`.
@@ -49,7 +51,7 @@ The node exposes three ROS params under `global_planner.*` and calls `configure`
 
 `astar` and `dijkstra` rasterize the walls onto a uniform grid and dilate them by `inflation_radius`. An opening is passable only if it is wider than twice the inflation in whole cells. With the defaults the inflation is 2 cells (0.4 m per side), which closes a 1.0 m door. At `resolution` 0.1 the same door keeps a 0.2 m corridor. A door narrower than twice `inflation_radius` stays closed at any resolution and needs a smaller radius.
 
-An agent whose target is unreachable gets the target itself as its subgoal and walks straight at it.
+An agent whose target is unreachable walks to the reachable point closest to it and stays there. `navmesh` always does this. `astar` and `dijkstra` do it only at `resolution` 0.1 or finer, because a coarser grid rasterizes metre-wide doors shut and reports reachable targets as unreachable. Where no substitute exists, an agent walled in on all sides or a coarse grid, the agent gets the target itself as its subgoal and walks straight at it.
 
 ## Navmesh
 

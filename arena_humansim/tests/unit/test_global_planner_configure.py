@@ -71,3 +71,38 @@ def test_configure_rebuilds_grid_from_current_walls(
     assert _crosses_door(planner, agent_factory, commands_factory)
     planner.configure(inflation_radius=0.38, resolution=0.2, comfort_radius=0.6)
     assert not _crosses_door(planner, agent_factory, commands_factory)
+
+
+def _two_sealed_rooms() -> Segments:
+    return [*_two_rooms_with_metre_door()[:4], ((0.0, -3.0), (0.0, 3.0))]
+
+
+def test_unreachable_target_detours_to_closest_cell_on_fine_grid(
+    planner_cls: type,
+    agent_factory: Callable[..., BaseAgent],
+    commands_factory: Callable[..., dict[int, Any]],
+) -> None:
+    planner = planner_cls(inflation_radius=0.38, resolution=0.1)
+    planner.set_walls(_two_sealed_rooms())
+    agent = agent_factory(agent_id=1, x=-2.0, y=2.0)
+    cmds = commands_factory(agent_ids=[1], target=(2.0, 2.0))
+    planner.compute([agent], cmds)
+    path = planner.get_cached_paths()[1]
+    assert -0.8 <= path[-1].x <= -0.38
+    assert path[-1].y == pytest.approx(2.0, abs=0.11)
+    planner.compute([agent], cmds)
+    assert planner.get_cached_paths()[1] is path
+
+
+def test_unreachable_target_keeps_direct_goal_on_coarse_grid(
+    planner_cls: type,
+    agent_factory: Callable[..., BaseAgent],
+    commands_factory: Callable[..., dict[int, Any]],
+) -> None:
+    planner = planner_cls(inflation_radius=0.38, resolution=0.2)
+    planner.set_walls(_two_sealed_rooms())
+    agent = agent_factory(agent_id=1, x=-2.0, y=2.0)
+    cmds = commands_factory(agent_ids=[1], target=(2.0, 2.0))
+    goals = planner.compute([agent], cmds)
+    assert 1 not in planner.get_cached_paths()
+    assert goals[1] == planner.snap_terminal(cmds[1].target_pose)

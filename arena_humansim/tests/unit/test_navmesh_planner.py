@@ -99,7 +99,8 @@ def _crosses(
     agent = agent_factory(agent_id=1, x=start[0], y=start[1])
     cmds = commands_factory(agent_ids=[1], target=goal)
     planner.compute([agent], cmds)
-    return 1 in planner.get_cached_paths()
+    end = planner.get_cached_paths()[1][-1]
+    return math.hypot(end.x - goal[0], end.y - goal[1]) < 1e-6
 
 
 @pytest.mark.parametrize("rot_deg", [0.0, 30.0])
@@ -204,7 +205,7 @@ def test_configure_resolution_only_keeps_cached_paths(
     assert planner.get_cached_paths() == before
 
 
-def test_unreachable_target_falls_back_to_snap_terminal(
+def test_unreachable_target_routes_to_closest_reachable_point(
     agent_factory: Callable[..., BaseAgent],
     commands_factory: Callable[..., dict[int, Any]],
 ) -> None:
@@ -212,6 +213,25 @@ def test_unreachable_target_falls_back_to_snap_terminal(
     planner.set_walls(_closed_room())
     agent = agent_factory(agent_id=1, x=3.0, y=3.0)
     cmds = commands_factory(agent_ids=[1], target=(8.0, 3.0))
+    planner.compute([agent], cmds)
+    path = planner.get_cached_paths()[1]
+    assert path[-1].x == pytest.approx(6.0 - _INFLATION, abs=0.02)
+    assert path[-1].y == pytest.approx(3.0, abs=0.02)
+    walls = np.array(_closed_room(), dtype=np.float64).reshape(-1, 4)
+    assert _path_wall_clearance(np.array([(w.x, w.y) for w in path]), walls) >= _INFLATION - 5e-3
+    planner.compute([agent], cmds)
+    assert planner.get_cached_paths()[1] is path
+
+
+def test_walled_in_agent_keeps_direct_goal(
+    agent_factory: Callable[..., BaseAgent],
+    commands_factory: Callable[..., dict[int, Any]],
+) -> None:
+    cell = [((2.8, 2.8), (3.2, 2.8)), ((3.2, 2.8), (3.2, 3.2)), ((3.2, 3.2), (2.8, 3.2)), ((2.8, 3.2), (2.8, 2.8))]
+    planner = NavMeshPlanner(inflation_radius=_INFLATION)
+    planner.set_walls([*_closed_room(), *cell])
+    agent = agent_factory(agent_id=1, x=3.0, y=3.0)
+    cmds = commands_factory(agent_ids=[1], target=(5.0, 5.0))
     goals = planner.compute([agent], cmds)
     assert 1 not in planner.get_cached_paths()
     assert goals[1] == planner.snap_terminal(cmds[1].target_pose)

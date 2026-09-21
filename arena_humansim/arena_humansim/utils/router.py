@@ -8,7 +8,7 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components, dijkstra
 
 from arena_humansim.utils.funnel import funnel, polyline
-from arena_humansim.utils.mesh import CELL, Mesh, _cross, _expand, _pt_seg, _seg_seg
+from arena_humansim.utils.mesh import CELL, TOL, Mesh, _cross, _expand, _pt_seg, _seg_seg
 
 VERIFY_EPS = 5e-3  # accepted shortfall below r
 MAX_INSERT = 4
@@ -18,6 +18,10 @@ TREE_CACHE = 64
 GAP_SHARE = 0.45  # share of a passage width that one corner disc may take
 ROOM = 0.8  # share of the distance to a terminal that a corner disc may take
 SLOPE = 0.5  # max growth of the corner radius per metre along a channel side
+SNAP_MARGIN = 0.01  # a snapped point ends up this far outside the inflation band [m]
+SNAP_TRIES = 8
+REACH_NUDGE = 1e-3  # candidates start this far inside their triangle so the snap pushes them to its side of a wall [m]
+REACH_TRIES = 12
 
 Route = tuple[np.ndarray, np.ndarray]
 
@@ -333,6 +337,42 @@ class Router:
             ch.append(m)
             m = int(pred[m])
         return ch
+
+    def snap(self, p: np.ndarray) -> np.ndarray | None:
+        """p itself when it keeps the radius, else p pushed off the nearest walls, None when that fails."""
+        for flip in (1.0, -1.0):
+            q = p
+            for _ in range(SNAP_TRIES):
+                hit = self.mesh.index.nearest(q, self.r)
+                if hit is None or hit[0] >= self.r:
+                    return q
+                d, wall, along = hit
+                away = (q - wall) / d if d > 1e-9 else flip * np.array([-along[1], along[0]]) / np.hypot(*along)
+                q = wall + away * (self.r + SNAP_MARGIN)
+        return None
+
+    def nearest_reachable(self, start: np.ndarray, goal: np.ndarray) -> np.ndarray | None:
+        """Point of the free space connected to start that lies closest to goal, None when start is walled in."""
+        s, g = np.asarray(start, dtype=np.float64), np.asarray(goal, dtype=np.float64)
+        ok, t, nodes, cost = self._terminals(s[None])
+        use = np.isfinite(cost[0])
+        if not ok[0] or not use.any():
+            return None
+        mesh = self.mesh
+        e = np.nonzero(np.isin(self._comp, self._comp[nodes[0][use]]) & ~mesh.e_con & (mesh.e_len >= 2 * self.r - 1e-9))[0]
+        tris = np.unique(np.concatenate([mesh.e_t0[e], mesh.e_t1[e], t]))
+        V = mesh.P[mesh.V[tris[tris >= 0]]]
+        A, D = V, V[:, [1, 2, 0]] - V
+        u = np.clip(((g - A) * D).sum(2) / np.maximum((D * D).sum(2), TOL**2), 0.0, 1.0)
+        C = A + u[..., None] * D
+        inward = V.mean(1)[:, None] - C
+        cand = (C + inward / np.maximum(np.hypot(inward[..., 0], inward[..., 1]), TOL)[..., None] * REACH_NUDGE).reshape(-1, 2)
+        best, best_d = s, float(np.hypot(*(s - g)))
+        for q0 in cand[np.argsort(np.hypot(*(cand - g).T), kind="stable")[:REACH_TRIES]]:
+            q = self.snap(q0)
+            if q is not None and np.hypot(*(q - g)) < best_d and self.plan(s, q) is not None:
+                best, best_d = q, float(np.hypot(*(q - g)))
+        return best
 
     def line_of_sight(self, A: np.ndarray, B: np.ndarray) -> np.ndarray:
         """Per segment A->B: clear of walls by the comfort radius."""

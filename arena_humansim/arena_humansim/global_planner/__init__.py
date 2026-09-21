@@ -117,6 +117,9 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
 
         if requests:
             plans = self._plan([(agent_id, agent_pos, target) for agent_id, (agent_pos, target) in requests.items()])
+            detours = [(agent_id, agent_pos, reachable) for agent_id, (agent_pos, target) in requests.items() if plans[agent_id] is None and (reachable := self._nearest_reachable(agent_pos, target)) is not None]
+            if detours:
+                plans.update(self._plan(detours))
 
             for agent_id, (agent_pos, target) in requests.items():
                 waypoints = plans[agent_id]
@@ -153,6 +156,10 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
 
     def snap_terminal(self, pose: Pose2D) -> Pose2D:
         return pose
+
+    def _nearest_reachable(self, start: Pose2D, target: Pose2D) -> Pose2D | None:
+        """Point closest to an unreachable target that start can still reach, None to walk straight at the target."""
+        return None
 
     def publish_markers(self, pub: MarkerPublisher) -> None:
         pass
