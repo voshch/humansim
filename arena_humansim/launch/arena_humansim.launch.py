@@ -58,10 +58,12 @@ def _rviz_action(context, *args, **kwargs):
         config = os.path.join(get_package_share_directory("arena_humansim"), "config", "arena_humansim.rviz")
     else:
         config = rviz_val
-    return [ExecuteProcess(
-        cmd=["rviz2", "-d", config, "--ros-args", "-p", f"use_sim_time:={use_sim_time}"],
-        output="screen",
-    )]
+    return [
+        ExecuteProcess(
+            cmd=["rviz2", "-d", config, "--ros-args", "-p", f"use_sim_time:={use_sim_time}"],
+            output="screen",
+        )
+    ]
 
 
 def _renderer_action(context, *args, plan=None, **kwargs):
@@ -74,11 +76,13 @@ def _renderer_action(context, *args, plan=None, **kwargs):
     output = os.path.join(rd, f"scenario.{fmt}")
     log_path = os.path.join(rd, "render.log")
     renderer_exe = ExecutableInPackage(package="arena_humansim", executable="arena_humansim_render").perform(context)
-    return [ExecuteProcess(
-        cmd=[renderer_exe, bag_dir, "--output", output, "--format", fmt, "--log-file", log_path],
-        output="screen",
-        on_exit=Shutdown(reason="renderer finished"),
-    )]
+    return [
+        ExecuteProcess(
+            cmd=[renderer_exe, bag_dir, "--output", output, "--format", fmt, "--log-file", log_path],
+            output="screen",
+            on_exit=Shutdown(reason="renderer finished"),
+        )
+    ]
 
 
 def generate_launch_description():
@@ -106,6 +110,10 @@ def generate_launch_description():
              "force_waypoint_mode": ParameterValue(LaunchConfiguration("force_waypoint_mode"), value_type=str),
              "animation": LaunchConfiguration("animation"),
              "collision": LaunchConfiguration("collision"),
+             "global_planner_inflation": ParameterValue(LaunchConfiguration("global_planner_inflation"), value_type=float),
+             "global_planner_resolution": ParameterValue(LaunchConfiguration("global_planner_resolution"), value_type=float),
+             "global_planner_min_obstacle_extent": ParameterValue(LaunchConfiguration("global_planner_min_obstacle_extent"), value_type=float),
+             "global_planner_thin_inflation": ParameterValue(LaunchConfiguration("global_planner_thin_inflation"), value_type=float),
              "occlusion": LaunchConfiguration("occlusion"),
              "seed": LaunchConfiguration("seed"),
              "strict_recording": ParameterValue(LaunchConfiguration("strict_recording"), value_type=bool),
@@ -131,7 +139,7 @@ def generate_launch_description():
         DeclareLaunchArgument("namespace", default_value="arena_humansim", description="node namespace"),
         DeclareLaunchArgument("mode", default_value="master", choices=["master", "subsystem"]),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
-        DeclareLaunchArgument("markers", default_value="0", description="0=off, 1=basic, 2=full"),
+        DeclareLaunchArgument("markers", default_value="0", description="0=off, 1=basic (bodies, labels, interactions, walls and objects, vision cones), 2=full (adds global/local plans, waypoints, forces)"),
         DeclareLaunchArgument("rviz", default_value="", description="true = default config, false = off, path = custom config (empty = auto: off if markers=0 else on)"),
         DeclareLaunchArgument("record", default_value="false", description="record scenario to rosbag"),
         DeclareLaunchArgument("record_dir", default_value="", description="output dir (empty = ./recordings/<ts>[_<scenario>]/ relative to cwd)"),
@@ -150,6 +158,10 @@ def generate_launch_description():
         DeclareLaunchArgument("force_waypoint_mode", default_value="", choices=["", "once", "repeat", "reverse", "random"], description="override every kind=human scenario agent's waypoint_mode at load (robots untouched). Use to keep pedestrians moving across a benchmark trial when the scenario YAML defaults them to ONCE; empty = use scenario value."),
         DeclareLaunchArgument("animation", default_value="noop", description="animation module"),
         DeclareLaunchArgument("collision", default_value="wall_projection", description="collision resolver module"),
+        DeclareLaunchArgument("global_planner_inflation", default_value="0.38", description="metres the global planner inflates walls and obstacles by"),
+        DeclareLaunchArgument("global_planner_resolution", default_value="0.2", description="global planner grid cell size, metres"),
+        DeclareLaunchArgument("global_planner_min_obstacle_extent", default_value="0.0", description="obstacles whose longer side is shorter than this (m) are 'thin': rasterised at their footprint inflated by global_planner_thin_inflation only, so they do not seal the doorway they stand behind; 0 = every obstacle inflated fully. Also enables the walls-only fallback route when furniture seals a room"),
+        DeclareLaunchArgument("global_planner_thin_inflation", default_value="0.0", description="metres thin obstacles are inflated by in the global grid"),
         DeclareLaunchArgument("occlusion", default_value="bitmap", description="occlusion module"),
         DeclareLaunchArgument("seed", default_value="0", description="Random seed for the simulation RNG"),
         DeclareLaunchArgument("strict_recording", default_value="true", description="abort the trial when a second publisher appears on a contract topic"),
