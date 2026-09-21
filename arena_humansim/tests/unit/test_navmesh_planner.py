@@ -282,3 +282,33 @@ def test_snap_terminal_identity_when_already_clear() -> None:
     pose = Pose2D(x=5.0, y=0.0, theta=0.3)
     out = planner.snap_terminal(pose)
     assert out is pose
+
+
+def test_closing_a_door_blocks_it_without_meshing_again(
+    agent_factory: Callable[..., BaseAgent],
+    commands_factory: Callable[..., dict[int, Any]],
+) -> None:
+    rooms = _two_rooms(1.0)
+    door = ((6.0, 2.5), (6.0, 3.5))
+    planner = NavMeshPlanner(inflation_radius=_INFLATION)
+    planner.set_walls(rooms)
+    mesh = planner._mesh
+    assert _crosses(planner, (2.0, 3.0), (10.0, 3.0), agent_factory, commands_factory)
+    planner.set_walls([*rooms, door])
+    assert planner._mesh is mesh
+    assert not _crosses(planner, (2.0, 3.0), (10.0, 3.0), agent_factory, commands_factory)
+    walls = np.array([*rooms, door], dtype=np.float64).reshape(-1, 4)
+    path = np.array([(w.x, w.y) for w in planner.get_cached_paths()[1]])
+    assert _path_wall_clearance(path, walls) >= _INFLATION - 5e-3
+    planner.set_walls(rooms)
+    assert planner._mesh is mesh
+    assert _crosses(planner, (2.0, 3.0), (10.0, 3.0), agent_factory, commands_factory)
+
+
+def test_wall_off_the_mesh_edges_meshes_again() -> None:
+    rooms = _two_rooms(1.0)
+    planner = NavMeshPlanner(inflation_radius=_INFLATION)
+    planner.set_walls(rooms)
+    mesh = planner._mesh
+    planner.set_walls([*rooms, ((2.0, 1.0), (4.0, 5.0))])
+    assert planner._mesh is not mesh

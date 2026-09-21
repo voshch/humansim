@@ -14,6 +14,11 @@ SNAP_CACHE = 4096
 FRAME_INSET = 0.01
 
 
+def _keys(segs: np.ndarray) -> set[tuple[float, ...]]:
+    flip = (segs[:, 0] > segs[:, 2]) | ((segs[:, 0] == segs[:, 2]) & (segs[:, 1] > segs[:, 3]))
+    return set(map(tuple, np.where(flip[:, None], segs[:, [2, 3, 0, 1]], segs).tolist()))
+
+
 class NavMeshPlanner(GlobalPlanner):
     def __init__(
         self,
@@ -28,6 +33,7 @@ class NavMeshPlanner(GlobalPlanner):
         self._wall_segments: list[Segment] = []
         self._mesh: Mesh | None = None
         self._router: Router | None = None
+        self._meshed: set[tuple[float, ...]] = set()
         self._snapped: dict[tuple[float, float], tuple[float, float] | None] = {}
 
     def configure(self, *, inflation_radius: float, resolution: float, comfort_radius: float) -> None:
@@ -35,16 +41,20 @@ class NavMeshPlanner(GlobalPlanner):
             return
         self._inflation_radius = inflation_radius
         self._comfort_radius = comfort_radius
+        self._router = None
         self.set_walls(self._wall_segments)
 
     def set_walls(self, segments: Segments) -> None:
         self._forget_paths()
         self._snapped.clear()
         self._wall_segments = list(segments)
-        self._mesh = None
-        self._router = None
         segs = np.array(segments, dtype=np.float64).reshape(-1, 4)
         segs = segs[np.hypot(*(segs[:, 2:] - segs[:, :2]).T) > TOL]
+        keys = _keys(segs)
+        if self._block(keys):
+            return
+        self._mesh = None
+        self._router = None
         if not len(segs):
             return
 
@@ -52,8 +62,22 @@ class NavMeshPlanner(GlobalPlanner):
         reach = 2 * max(self._comfort_radius, self._inflation_radius * 1.05)
         self._mesh = Mesh.build(segs, reach)
         self._router = Router(self._mesh, self._inflation_radius, self._comfort_radius)
+        self._meshed = keys
         build_ms = (time.perf_counter() - began) * 1e3
         self._logger.info(f"Walls meshed: {len(self._mesh.V)} triangles, {len(self._mesh.P)} vertices, {len(segments)} segment(s), inflation={self._inflation_radius}m, comfort={self._comfort_radius}m, {build_ms:.0f} ms")
+
+    def _block(self, keys: set[tuple[float, ...]]) -> bool:
+        """Block the added walls on the mesh. False when the change needs a new mesh."""
+        if self._mesh is None or self._router is None or not self._meshed <= keys:
+            return False
+        began = time.perf_counter()
+        added = np.array(sorted(keys - self._meshed), dtype=np.float64).reshape(-1, 4)
+        edges = self._mesh.free_edges(added[:, :2], added[:, 2:])
+        if (edges < 0).any():
+            return False
+        self._router.set_blocked(edges)
+        self._logger.info(f"Walls blocked on the mesh: {len(edges)} edge(s), {(time.perf_counter() - began) * 1e3:.0f} ms")
+        return True
 
     def _has_map(self) -> bool:
         return self._router is not None

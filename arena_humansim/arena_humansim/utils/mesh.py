@@ -272,6 +272,7 @@ class Mesh:
         self._topology(missing)
         self._widths()
         self.index = SegIndex(self.P[con_edges[:, 0]], self.P[con_edges[:, 1]])
+        self._vertices: cKDTree | None = None
         tri.find_simplex(self.P[:1])
 
     @classmethod
@@ -318,6 +319,7 @@ class Mesh:
         uniq, inv = np.unique((np.minimum(hu, hv) * npt + np.maximum(hu, hv)).ravel(), return_inverse=True)
         he = inv.reshape(T, 3)
         E = len(uniq)
+        self._edge_key = uniq
         ea, eb = uniq // npt, uniq % npt
         ce = self.con_edges
         con = np.isin(uniq, np.minimum(ce[:, 0], ce[:, 1]) * npt + np.maximum(ce[:, 0], ce[:, 1]))
@@ -336,6 +338,19 @@ class Mesh:
         self.ea, self.eb, self.e_con, self.e_t0, self.e_t1 = ea, eb, con, t0, t1
         self.e_len = np.hypot(*(P[ea] - P[eb]).T)
         self.e_mid = (P[ea] + P[eb]) / 2
+
+    def free_edges(self, A: np.ndarray, B: np.ndarray) -> np.ndarray:
+        """Id of the free mesh edge joining the vertices at A[i] and B[i], -1 where there is none."""
+        if not len(A):
+            return np.zeros(0, np.int64)
+        if self._vertices is None:
+            self._vertices = cKDTree(self.P)
+        da, a = self._vertices.query(A)
+        db, b = self._vertices.query(B)
+        key = np.minimum(a, b) * len(self.P) + np.maximum(a, b)
+        e = np.minimum(np.searchsorted(self._edge_key, key), len(self._edge_key) - 1)
+        found = (da <= TOL) & (db <= TOL) & (self._edge_key[e] == key) & ~self.e_con[e]
+        return np.where(found, e, -1)
 
     def _widths(self) -> None:
         """Passage width of every traversal (triangle t, around vertex k), exact up to reach."""

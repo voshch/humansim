@@ -89,6 +89,31 @@ def test_remove_walls_clears_state(system: RosTestSystem) -> None:
     assert len(system.manager._walls) == 0
 
 
+def test_door_wall_toggles_without_meshing_again(system: RosTestSystem) -> None:
+    system.call(ResetSimulation, "reset", make_reset_request())
+    rooms = [
+        ("s", (0.0, 0.0), (12.0, 0.0)),
+        ("e", (12.0, 0.0), (12.0, 6.0)),
+        ("n", (12.0, 6.0), (0.0, 6.0)),
+        ("w", (0.0, 6.0), (0.0, 0.0)),
+        ("m0", (6.0, 0.0), (6.0, 2.5)),
+        ("m1", (6.0, 3.5), (6.0, 6.0)),
+    ]
+    system.call(AddWalls, "add_walls", make_add_walls_request(rooms))
+    planner = system.manager._global_planner
+    mesh = planner._mesh
+    assert mesh is not None
+
+    system.call(AddWalls, "add_walls", make_add_walls_request([("__door_d", (6.0, 2.5), (6.0, 3.5))]))
+    assert planner._mesh is mesh
+    assert len(planner._router._blocked) == 1
+
+    system.call(RemoveWalls, "remove_walls", make_remove_walls_request(["__door_d"]))
+    assert planner._mesh is mesh
+    assert len(planner._router._blocked) == 0
+    system.call(RemoveWalls, "remove_walls", make_remove_walls_request([]))
+
+
 def test_wall_changes_trajectory(system: RosTestSystem) -> None:
     system.call(ResetSimulation, "reset", make_reset_request())
     system.call(RemoveAgents, "remove_agents", make_remove_request([]))

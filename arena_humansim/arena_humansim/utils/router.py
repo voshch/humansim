@@ -8,7 +8,7 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components, dijkstra
 
 from arena_humansim.utils.funnel import funnel, polyline
-from arena_humansim.utils.mesh import CELL, TOL, Mesh, _cross, _expand, _pt_seg, _seg_seg
+from arena_humansim.utils.mesh import CELL, TOL, Mesh, SegIndex, _cross, _expand, _pt_seg, _seg_seg
 
 VERIFY_EPS = 5e-3  # accepted shortfall below r
 MAX_INSERT = 4
@@ -41,16 +41,31 @@ class Router:
             self._rho = np.clip(GAP_SHARE * gap, radius, comfort_radius)
         self._mx, self._my = mesh.e_mid[:, 0].tolist(), mesh.e_mid[:, 1].tolist()
         self._trees: dict[tuple[float, float], tuple[np.ndarray, np.ndarray]] = {}
+        self._index, self._walls = mesh.index, mesh.con_edges
+        self._blocked = np.zeros(0, np.int64)
+        self._graph()
+
+    def set_blocked(self, edges: np.ndarray) -> None:
+        """Treat exactly these free mesh edges as walls."""
+        mesh = self.mesh
+        self._blocked = np.asarray(edges, dtype=np.int64)
+        self._index, self._walls = mesh.index, mesh.con_edges
+        if len(self._blocked):
+            self._walls = np.vstack([mesh.con_edges, np.column_stack([mesh.ea[self._blocked], mesh.eb[self._blocked]])])
+            self._index = SegIndex(mesh.P[self._walls[:, 0]], mesh.P[self._walls[:, 1]])
+        self._trees.clear()
         self._graph()
 
     def clearance(self, pts: np.ndarray) -> np.ndarray:
         """Exact distance to the nearest wall, inf beyond the comfort radius."""
-        return self.mesh.index.point_clearance(np.atleast_2d(np.asarray(pts, dtype=np.float64)), self.comfort)
+        return self._index.point_clearance(np.atleast_2d(np.asarray(pts, dtype=np.float64)), self.comfort)
 
     def _graph(self) -> None:
         mesh = self.mesh
         E = len(mesh.ea)
-        m = mesh.arc_w >= 2 * self.r - 1e-9
+        self._open = ~mesh.e_con & (mesh.e_len >= 2 * self.r - 1e-9)
+        self._open[self._blocked] = False
+        m = (mesh.arc_w >= 2 * self.r - 1e-9) & self._open[mesh.arc_a] & self._open[mesh.arc_b]
         a, b = mesh.arc_a[m], mesh.arc_b[m]
         c = mesh.arc_c[m]
         src, dst, cst = np.concatenate([a, b]), np.concatenate([b, a]), np.concatenate([c, c])
@@ -68,7 +83,7 @@ class Router:
 
     def _seg_clear(self, A: np.ndarray, B: np.ndarray, owner: np.ndarray, n_owner: int, pad: float) -> tuple[np.ndarray, tuple[np.ndarray, np.ndarray, int, float] | None]:
         """Exact min wall distance per owner for path segments A->B (inf where nothing is within pad)."""
-        index = self.mesh.index
+        index = self._index
         ln = np.hypot(*(B - A).T)
         npc = np.maximum(np.ceil(ln / CELL).astype(np.int64), 1)
         seg = np.repeat(np.arange(len(A)), npc)
@@ -91,7 +106,7 @@ class Router:
         if out[0] >= self.r - VERIFY_EPS:
             return None
         p0, p1, wj, _ = worst
-        a, b = self.mesh.con_edges[wj]
+        a, b = self._walls[wj]
         da, ta = _pt_seg(P[a], p0, p1)
         db, tb = _pt_seg(P[b], p0, p1)
         dp = min(float(_pt_seg(p0, P[a], P[b])[0]), float(_pt_seg(p1, P[a], P[b])[0]))
@@ -238,9 +253,9 @@ class Router:
         mesh = self.mesh
         pts = np.atleast_2d(pts)
         t = mesh.tri.find_simplex(pts).astype(np.int64)
-        ok = (t >= 0) & (mesh.index.point_clearance(pts, self.r) >= self.r - 1e-9)
+        ok = (t >= 0) & (self._index.point_clearance(pts, self.r) >= self.r - 1e-9)
         nodes = mesh.he[np.maximum(t, 0)]
-        use = ok[:, None] & ~mesh.e_con[nodes] & (mesh.e_len[nodes] >= 2 * self.r - 1e-9)
+        use = ok[:, None] & self._open[nodes]
         reach = np.hypot(mesh.e_mid[nodes, 0] - pts[:, None, 0], mesh.e_mid[nodes, 1] - pts[:, None, 1])
         return ok, t, nodes, np.where(use, reach, np.inf)
 
@@ -343,7 +358,7 @@ class Router:
         for flip in (1.0, -1.0):
             q = p
             for _ in range(SNAP_TRIES):
-                hit = self.mesh.index.nearest(q, self.r)
+                hit = self._index.nearest(q, self.r)
                 if hit is None or hit[0] >= self.r:
                     return q
                 d, wall, along = hit
@@ -359,7 +374,7 @@ class Router:
         if not ok[0] or not use.any():
             return None
         mesh = self.mesh
-        e = np.nonzero(np.isin(self._comp, self._comp[nodes[0][use]]) & ~mesh.e_con & (mesh.e_len >= 2 * self.r - 1e-9))[0]
+        e = np.nonzero(np.isin(self._comp, self._comp[nodes[0][use]]) & self._open)[0]
         tris = np.unique(np.concatenate([mesh.e_t0[e], mesh.e_t1[e], t]))
         V = mesh.P[mesh.V[tris[tris >= 0]]]
         A, D = V, V[:, [1, 2, 0]] - V
