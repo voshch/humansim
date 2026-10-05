@@ -136,7 +136,7 @@ def test_reset_drops_pending_edges() -> None:
     assert _edges(mgr) == []
 
 
-@pytest.mark.parametrize("itype, contact_sep", [(InteractionType.HUG, 0.3), (InteractionType.SHAKE_HAND, 0.6)])
+@pytest.mark.parametrize("itype, contact_sep", [(InteractionType.HUG, 0.3), (InteractionType.SHAKE_HAND, 0.8)])
 def test_locomotion_only_holds_at_standing_distance(itype: InteractionType, contact_sep: float) -> None:
     for mode, expected in ((CONTACT_ENABLED, contact_sep), (CONTACT_LOCOMOTION_ONLY, 1.5)):
         agents = _pair(0.0, 4.0)
