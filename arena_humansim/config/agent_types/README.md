@@ -29,7 +29,7 @@ Schema is taken from the active planner's `PARAM_DEFAULTS` (`sfm`: `relaxation_t
 Module selection (name strings, not distributions):
 
 - `local_planner` - one of [local_planner/README.md](../../arena_humansim/local_planner/README.md)'s `Available` table (default: launch param, normally `sfm`).
-- `global_planner` - one of [global_planner/README.md](../../arena_humansim/global_planner/README.md)'s `Available` table (default: launch param, normally `astar`).
+- `global_planner` - one of [global_planner/README.md](../../arena_humansim/global_planner/README.md)'s `Available` table (default: launch param, normally `navmesh`).
 - `animation` - one of [animation/README.md](../../arena_humansim/animation/README.md)'s `Available` table (default: `noop`).
 - `perception_stack` - tuple of names from [perception/README.md](../../arena_humansim/perception/README.md)'s `Available` table, applied in order (default: `("default",)`).
 

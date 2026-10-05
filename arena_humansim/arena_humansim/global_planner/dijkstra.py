@@ -1,21 +1,20 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
 
 import numpy as np
 from scipy.ndimage import binary_dilation
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 
-from arena_humansim.core.agents import BaseAgent
-from arena_humansim.utils.types import CommandType, HighLevelCommand, Pose2D, Segment, Segments
+from arena_humansim.utils.types import Pose2D, Segment, Segments
 
-from . import GlobalPlanner
+from . import GlobalPlanner, PlanRequest
 from ._grid import (
+    REACHABLE_MAX_RESOLUTION,
     grid_to_world,
-    needs_replan,
-    next_waypoint,
+    label_free_cells,
+    nearest_reachable_cell,
     push_from_walls,
     simplify_with_los,
     world_to_grid,
@@ -166,23 +165,29 @@ class DijkstraPlanner(GlobalPlanner):
         self,
         replan_distance: float = 1.0,
         inflation_radius: float = 0.38,
+        resolution: float = 0.2,
     ):
-        self._replan_distance = replan_distance
+        super().__init__(replan_distance)
         self._inflation_radius = inflation_radius
+        self._resolution = resolution
 
         self._occupancy_grid: np.ndarray | None = None
         self._grid_graph: csr_matrix | None = None
-        self._resolution: float = 0.2
+        self._free_labels: np.ndarray | None = None
         self._origin: Pose2D = Pose2D()
         self._wall_segments: list[Segment] = []
 
-        self._path_cache: dict[int, tuple[tuple[float, float], list[Pose2D], int]] = {}
-
-        self._cached_results: dict[int, Pose2D] = {}
+    def configure(self, *, inflation_radius: float, resolution: float, comfort_radius: float) -> None:
+        if (inflation_radius, resolution) == (self._inflation_radius, self._resolution):
+            return
+        self._inflation_radius = inflation_radius
+        self._resolution = resolution
+        self.set_walls(self._wall_segments)
 
     def set_walls(self, segments: Segments) -> None:
-        self._path_cache.clear()
+        self._forget_paths()
         self._grid_graph = None
+        self._free_labels = None
         self._wall_segments = list(segments)
         if not segments:
             self._occupancy_grid = None
@@ -222,16 +227,6 @@ class DijkstraPlanner(GlobalPlanner):
         self._grid_graph = _build_grid_graph(grid)
         self._logger.info(f"Walls rasterized: {cols}x{rows} ({cols * rows} cells), res={res}m, {len(segments)} segment(s), inflation={self._inflation_radius}m ({radius_cells} cells), graph edges={self._grid_graph.nnz}")
 
-    def get_cached_goals(self) -> dict[int, Pose2D]:
-        return dict(self._cached_results)
-
-    def get_cached_paths(self) -> dict[int, list[Pose2D]]:
-        return {aid: wps for aid, (_, wps, _) in self._path_cache.items()}
-
-    def invalidate_paths(self, agent_ids: Iterable[int]) -> None:
-        for aid in agent_ids:
-            self._path_cache.pop(aid, None)
-
     def snap_terminal(self, pose: Pose2D) -> Pose2D:
         if self._occupancy_grid is None:
             return pose
@@ -245,48 +240,30 @@ class DijkstraPlanner(GlobalPlanner):
         cell = grid_to_world(self._origin, self._resolution, snapped[0], snapped[1])
         return Pose2D(x=cell.x, y=cell.y, theta=pose.theta)
 
-    def compute(
-        self,
-        agents: Iterable[BaseAgent],
-        high_level_commands: dict[int, HighLevelCommand],
-    ) -> dict[int, Pose2D]:
-        agent_positions: dict[int, Pose2D] = {agent.state.agent_id: agent.state.pose for agent in agents}
+    def _nearest_reachable(self, start: Pose2D, target: Pose2D) -> Pose2D | None:
+        if self._occupancy_grid is None or self._resolution > REACHABLE_MAX_RESOLUTION:
+            return None
+        if self._free_labels is None:
+            self._free_labels = label_free_cells(self._occupancy_grid)
+        rc = world_to_grid(self._origin, self._resolution, start.x, start.y)
+        cell = _nearest_free_cell(self._occupancy_grid, rc[0], rc[1])
+        if cell is None:
+            return None
+        return nearest_reachable_cell(self._free_labels, self._origin, self._resolution, cell, target)
 
-        goals: dict[int, Pose2D] = {}
+    def _has_map(self) -> bool:
+        return self._occupancy_grid is not None and self._grid_graph is not None
 
-        for agent_id, cmd in high_level_commands.items():
-            if not isinstance(cmd, HighLevelCommand):
-                continue
-            if cmd.type != CommandType.NAVIGATE:
-                continue
-
-            target = cmd.target_pose
-            agent_pos = agent_positions.get(agent_id)
-
-            if agent_pos is None:
-                goals[agent_id] = target
-                continue
-
-            if self._occupancy_grid is None or self._grid_graph is None:
-                goals[agent_id] = target
-                continue
-
-            if not needs_replan(self._path_cache, agent_id, target, agent_pos, self._replan_distance):
-                cached_goal, waypoints, idx = self._path_cache[agent_id]
-                idx = self.advance_along_path(agent_pos, waypoints, idx)
-                self._path_cache[agent_id] = (cached_goal, waypoints, idx)
-                goals[agent_id] = next_waypoint(waypoints, idx)
-                continue
-
+    def _plan(self, requests: list[PlanRequest]) -> dict[int, list[Pose2D] | None]:
+        results: dict[int, list[Pose2D] | None] = {}
+        for agent_id, agent_pos, target in requests:
             start_rc = world_to_grid(self._origin, self._resolution, agent_pos.x, agent_pos.y)
             goal_rc = world_to_grid(self._origin, self._resolution, target.x, target.y)
 
             raw_path = _dijkstra_path(self._grid_graph, self._occupancy_grid, start_rc, goal_rc)
 
             if raw_path is None:
-                self._logger.debug(f"No path for agent {agent_id} ({start_rc} -> {goal_rc}), using direct goal")
-                goals[agent_id] = self.snap_terminal(target)
-                self._path_cache.pop(agent_id, None)
+                results[agent_id] = None
                 continue
 
             waypoints = [grid_to_world(self._origin, self._resolution, r, c) for r, c in raw_path]
@@ -295,11 +272,5 @@ class DijkstraPlanner(GlobalPlanner):
             waypoints = simplify_with_los(self._occupancy_grid, self._origin, self._resolution, waypoints)
             if self._wall_segments:
                 waypoints = push_from_walls(self._wall_segments, self._inflation_radius, waypoints)
-
-            goal_key = (round(target.x, 3), round(target.y, 3))
-            idx = self.advance_along_path(agent_pos, waypoints, 0)
-            self._path_cache[agent_id] = (goal_key, waypoints, idx)
-            goals[agent_id] = next_waypoint(waypoints, idx)
-
-        self._cached_results = goals
-        return goals
+            results[agent_id] = waypoints
+        return results

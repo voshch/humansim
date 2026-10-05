@@ -81,7 +81,8 @@ def _renderer_action(context, *args, plan=None, **kwargs):
     )]
 
 
-def generate_launch_description():
+def _node_actions(context, *args, declared=frozenset(), plan=None, **kwargs):
+    forwarded = {name: ParameterValue(LaunchConfiguration(name)) for name in context.launch_configurations if name not in declared and name != "ros_remaps" and not name.startswith("_")}
     node = Node(
         package="arena_humansim",
         executable="arena_humansim_node",
@@ -109,11 +110,22 @@ def generate_launch_description():
              "occlusion": LaunchConfiguration("occlusion"),
              "seed": LaunchConfiguration("seed"),
              "strict_recording": ParameterValue(LaunchConfiguration("strict_recording"), value_type=bool),
-             "trial_id": ParameterValue(LaunchConfiguration("trial_id"), value_type=str)}
+             "trial_id": ParameterValue(LaunchConfiguration("trial_id"), value_type=str)},
+            *([forwarded] if forwarded else []),
         ],
         output="screen",
     )
+    kill_rviz = ExecuteProcess(cmd=["pkill", "-INT", "-f", "rviz2.*arena_humansim.rviz"], output="log")
+    return [
+        node,
+        RegisterEventHandler(OnProcessExit(
+            target_action=node,
+            on_exit=[kill_rviz, OpaqueFunction(function=_renderer_action, kwargs={"plan": plan})],
+        )),
+    ]
 
+
+def generate_launch_description():
     map_tf = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
@@ -123,11 +135,9 @@ def generate_launch_description():
         output="log",
     )
 
-    kill_rviz = ExecuteProcess(cmd=["pkill", "-INT", "-f", "rviz2.*arena_humansim.rviz"], output="log")
-
     renderer_plan: dict = {}
 
-    return LaunchDescription([
+    arguments = [
         DeclareLaunchArgument("namespace", default_value="arena_humansim", description="node namespace"),
         DeclareLaunchArgument("mode", default_value="master", choices=["master", "subsystem"]),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
@@ -142,7 +152,7 @@ def generate_launch_description():
         DeclareLaunchArgument("time", default_value="0.0", description="stop after N seconds of sim time (ignored if ticks is set)"),
         DeclareLaunchArgument("rtf", default_value="1.0", description="real-time factor (0 = unthrottled, 1.0 = real-time)"),
         DeclareLaunchArgument("perception", default_value="default", description="perception module"),
-        DeclareLaunchArgument("global_planner", default_value="astar", description="global planner module"),
+        DeclareLaunchArgument("global_planner", default_value="navmesh", description="global planner module"),
         DeclareLaunchArgument("local_planner", default_value="sfm", description="local planner module (e.g. sfm, orca, hsfm, socialgail, straight)"),
         DeclareLaunchArgument("force_local_planner", default_value="false", description="if true, ignore per-agent policy: in scenario YAML and force every agent (humans and robots) to use local_planner"),
         DeclareLaunchArgument("robot_policy", default_value="", description="if non-empty, override the policy: of every kind=robot agent at scenario load (humans untouched). Hero-sweep entry point."),
@@ -154,12 +164,12 @@ def generate_launch_description():
         DeclareLaunchArgument("seed", default_value="0", description="Random seed for the simulation RNG"),
         DeclareLaunchArgument("strict_recording", default_value="true", description="abort the trial when a second publisher appears on a contract topic"),
         DeclareLaunchArgument("trial_id", default_value="", description="opaque id written into the recording manifest (the sweep passes the trial dir name)"),
+    ]
+
+    return LaunchDescription([
+        *arguments,
         OpaqueFunction(function=_compute_record_dir, kwargs={"plan": renderer_plan}),
         map_tf,
-        node,
+        OpaqueFunction(function=_node_actions, kwargs={"declared": frozenset(a.name for a in arguments), "plan": renderer_plan}),
         OpaqueFunction(function=_rviz_action),
-        RegisterEventHandler(OnProcessExit(
-            target_action=node,
-            on_exit=[kill_rviz, OpaqueFunction(function=_renderer_action, kwargs={"plan": renderer_plan})],
-        )),
     ])

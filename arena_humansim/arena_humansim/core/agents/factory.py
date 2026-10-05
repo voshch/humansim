@@ -4,6 +4,8 @@ __all__ = [
     "create_agent",
 ]
 
+from collections.abc import Mapping
+
 import numpy as np
 
 from arena_humansim.utils.types import AgentState, NeedsState, NeedState
@@ -34,6 +36,7 @@ def create_agent(
     module_pool: dict[str, Module],
     defaults: dict[str, str],
     rng: np.random.Generator | None = None,
+    local_planner_means: Mapping[str, float] | None = None,
 ) -> BaseAgent:
     if isinstance(agent_type, str):
         from . import BUILTIN_AGENTS
@@ -43,7 +46,7 @@ def create_agent(
     if isinstance(agent_type, AgentType):
         if rng is None:
             raise ValueError("rng is required when agent_type is AgentType")
-        params = sample_agent_type(agent_type, rng, default_local_planner=defaults["local_planner"])
+        params = sample_agent_type(agent_type, rng, default_local_planner=defaults["local_planner"], local_planner_means=local_planner_means)
     else:
         params = agent_type
 

@@ -4,8 +4,11 @@ import math
 from collections.abc import Iterable, Sequence
 
 import numpy as np
+from scipy.ndimage import label
 
 from arena_humansim.utils.types import Pose2D, Segments
+
+REACHABLE_MAX_RESOLUTION = 0.1  # coarser grids rasterize metre-wide doors shut [m]
 
 
 def world_to_grid(origin: Pose2D, resolution: float, wx: float, wy: float) -> tuple[int, int]:
@@ -16,6 +19,17 @@ def world_to_grid(origin: Pose2D, resolution: float, wx: float, wy: float) -> tu
 
 def grid_to_world(origin: Pose2D, resolution: float, row: int, col: int) -> Pose2D:
     return Pose2D(x=col * resolution + origin.x, y=row * resolution + origin.y)
+
+
+def label_free_cells(grid: np.ndarray) -> np.ndarray:
+    return label(grid == 0, structure=np.ones((3, 3), dtype=bool))[0]
+
+
+def nearest_reachable_cell(labels: np.ndarray, origin: Pose2D, resolution: float, start: tuple[int, int], target: Pose2D) -> Pose2D:
+    """Centre of the free cell connected to the free cell start that lies closest to target."""
+    rows, cols = np.nonzero(labels == labels[start])
+    k = int(np.argmin((cols * resolution + origin.x - target.x) ** 2 + (rows * resolution + origin.y - target.y) ** 2))
+    return Pose2D(x=cols[k] * resolution + origin.x, y=rows[k] * resolution + origin.y, theta=target.theta)
 
 
 def line_of_sight(grid: np.ndarray, origin: Pose2D, resolution: float, p1: Pose2D, p2: Pose2D) -> bool:
@@ -92,10 +106,16 @@ def push_from_walls(
 
 def min_distance_to_path(pos: Pose2D, waypoints: Iterable[Pose2D]) -> float:
     best = math.inf
+    prev: Pose2D | None = None
     for wp in waypoints:
-        d = math.hypot(pos.x - wp.x, pos.y - wp.y)
+        ax, ay = (wp.x, wp.y) if prev is None else (prev.x, prev.y)
+        dx, dy = wp.x - ax, wp.y - ay
+        span = dx * dx + dy * dy
+        t = 0.0 if span == 0.0 else max(0.0, min(1.0, ((pos.x - ax) * dx + (pos.y - ay) * dy) / span))
+        d = math.hypot(pos.x - ax - t * dx, pos.y - ay - t * dy)
         if d < best:
             best = d
+        prev = wp
     return best
 
 
