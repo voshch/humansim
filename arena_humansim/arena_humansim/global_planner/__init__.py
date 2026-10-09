@@ -6,13 +6,16 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
 from arena_humansim.core.agents import BaseAgent
 from arena_humansim.core.pool import PoolAware
 from arena_humansim.utils import ModuleRegistry
 from arena_humansim.utils.loggable import Loggable
-from arena_humansim.utils.types import CommandType, HighLevelCommand, Pose2D, WallAware
+from arena_humansim.utils.types import CommandType, HighLevelCommand, Pose2D, Segment, WallAware
+from arena_humansim.utils.wall_grid import WallGrid, cast_rays
 
-from ._grid import needs_replan, next_waypoint
+from ._grid import min_distances_to_paths, next_waypoint
 
 if TYPE_CHECKING:
     from arena_humansim.core.viz import MarkerPublisher
@@ -20,6 +23,8 @@ if TYPE_CHECKING:
 _registry: ModuleRegistry[GlobalPlanner] = ModuleRegistry()
 
 PlanRequest = tuple[int, Pose2D, Pose2D]
+
+DIRECT_RANGE = 3.0
 
 
 def simplify_path(
@@ -75,8 +80,14 @@ def simplify_path(
 class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
     def __init__(self, replan_distance: float = 1.0) -> None:
         self._replan_distance = replan_distance
-        self._path_cache: dict[int, tuple[tuple[float, float], list[Pose2D], int]] = {}
+        self._path_cache: dict[int, tuple[tuple[float, float], list[Pose2D], np.ndarray, int]] = {}
         self._cached_results: dict[int, Pose2D] = {}
+        self._wall_segments: list[Segment] = []
+        self._wall_grid: tuple[list[Segment], WallGrid] | None = None
+        self._warmup()
+
+    def _warmup(self) -> None:
+        cast_rays(WallGrid([((0.0, 1.0), (1.0, 1.0))]), np.zeros((1, 2)), np.ones((1, 2)), 1.0)
 
     @abstractmethod
     def _has_map(self) -> bool: ...
@@ -92,24 +103,51 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
         agent_positions: dict[int, Pose2D] = {agent.state.agent_id: agent.state.pose for agent in agents}
         goals: dict[int, Pose2D] = {}
         requests: dict[int, tuple[Pose2D, Pose2D]] = {}
+        navigate = {agent_id: cmd.target_pose for agent_id, cmd in high_level_commands.items() if isinstance(cmd, HighLevelCommand) and cmd.type == CommandType.NAVIGATE}
+        has_map = self._has_map()
 
-        for agent_id, cmd in high_level_commands.items():
-            if not isinstance(cmd, HighLevelCommand):
-                continue
-            if cmd.type != CommandType.NAVIGATE:
-                continue
+        deviations: dict[int, float] = {}
+        if has_map:
+            tracked = [(agent_id, agent_positions[agent_id], entry[2]) for agent_id, target in navigate.items() if agent_id in agent_positions and (entry := self._path_cache.get(agent_id)) is not None and math.hypot(entry[0][0] - target.x, entry[0][1] - target.y) <= self._replan_distance and entry[1]]
+            if tracked:
+                positions = np.array([(pos.x, pos.y) for _, pos, _ in tracked], dtype=np.float64)
+                distances = min_distances_to_paths(positions, [points for _, _, points in tracked])
+                deviations = dict(zip([agent_id for agent_id, _, _ in tracked], distances.tolist(), strict=True))
+        unchanged = {aid for aid, d in deviations.items() if d <= self._replan_distance and self._path_cache[aid][0] == (round(navigate[aid].x, 3), round(navigate[aid].y, 3))}
+        straight = [aid for aid, target in navigate.items() if has_map and aid not in unchanged and (pos := agent_positions.get(aid)) is not None and (math.hypot(target.x - pos.x, target.y - pos.y) <= DIRECT_RANGE or (aid in deviations and self._path_cache[aid][3] >= len(self._path_cache[aid][1]) - 2))]
+        direct = set(straight)
+        moved = [aid for aid, d in deviations.items() if d <= self._replan_distance and aid not in unchanged and aid not in direct]
+        legs = straight + moved
+        ends = dict(zip(legs, self.snap_terminals([navigate[aid] for aid in legs]), strict=True))
+        starts = [agent_positions[aid] for aid in straight] + [waypoints[-2] if len(waypoints := self._path_cache[aid][1]) > 1 else agent_positions[aid] for aid in moved]
+        lines = np.array([((a.x, a.y), (ends[aid].x, ends[aid].y)) for aid, a in zip(legs, starts, strict=True)], dtype=np.float64).reshape(-1, 2, 2)
+        clear = dict(zip(legs, self._sees(lines[:, 0], lines[:, 1]).tolist() if legs else [], strict=True))
+        line_of = dict(zip(straight, lines, strict=False))
 
-            target = cmd.target_pose
+        for agent_id, target in navigate.items():
             agent_pos = agent_positions.get(agent_id)
 
-            if agent_pos is None or not self._has_map():
+            if agent_pos is None or not has_map:
                 goals[agent_id] = target
                 continue
 
-            if not needs_replan(self._path_cache, agent_id, target, agent_pos, self._replan_distance):
-                cached_goal, waypoints, idx = self._path_cache[agent_id]
+            if clear.get(agent_id):
+                end = ends[agent_id]
+                if agent_id in direct:
+                    waypoints, idx, points = [Pose2D(x=agent_pos.x, y=agent_pos.y), end], 0, line_of[agent_id]
+                else:
+                    cached_goal, waypoints, points, idx = self._path_cache[agent_id]
+                    waypoints = [*waypoints[:-1], end]
+                    points = np.vstack([points[:-1], (end.x, end.y)])
                 idx = self.advance_along_path(agent_pos, waypoints, idx)
-                self._path_cache[agent_id] = (cached_goal, waypoints, idx)
+                self._path_cache[agent_id] = ((round(target.x, 3), round(target.y, 3)), waypoints, points, idx)
+                goals[agent_id] = next_waypoint(waypoints, idx)
+                continue
+
+            if agent_id in unchanged:
+                cached_goal, waypoints, points, idx = self._path_cache[agent_id]
+                idx = self.advance_along_path(agent_pos, waypoints, idx)
+                self._path_cache[agent_id] = (cached_goal, waypoints, points, idx)
                 goals[agent_id] = next_waypoint(waypoints, idx)
                 continue
 
@@ -132,21 +170,23 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
 
                 goal_key = (round(target.x, 3), round(target.y, 3))
                 idx = self.advance_along_path(agent_pos, waypoints, 0)
-                self._path_cache[agent_id] = (goal_key, waypoints, idx)
+                self._path_cache[agent_id] = (goal_key, waypoints, np.array([(w.x, w.y) for w in waypoints], dtype=np.float64).reshape(-1, 2), idx)
                 goals[agent_id] = next_waypoint(waypoints, idx)
 
         self._cached_results = goals
         return goals
 
+    def _sees(self, starts: np.ndarray, ends: np.ndarray) -> np.ndarray:
+        """Whether each straight leg is walkable as a whole path."""
+        if self._wall_grid is None or self._wall_grid[0] is not self._wall_segments:
+            self._wall_grid = (self._wall_segments, WallGrid(self._wall_segments))
+        return cast_rays(self._wall_grid[1], starts, ends - starts, 1.0) >= 1.0
+
     def get_cached_goals(self) -> dict[int, Pose2D]:
         return dict(self._cached_results)
 
     def get_cached_paths(self) -> dict[int, list[Pose2D]]:
-        return {aid: wps for aid, (_, wps, _) in self._path_cache.items()}
-
-    def invalidate_paths(self, agent_ids: Iterable[int]) -> None:
-        for aid in agent_ids:
-            self._path_cache.pop(aid, None)
+        return {aid: wps for aid, (_, wps, _, _) in self._path_cache.items()}
 
     def _forget_paths(self) -> None:
         self._path_cache.clear()
@@ -156,6 +196,9 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
 
     def snap_terminal(self, pose: Pose2D) -> Pose2D:
         return pose
+
+    def snap_terminals(self, poses: Sequence[Pose2D]) -> list[Pose2D]:
+        return [self.snap_terminal(p) for p in poses]
 
     def _nearest_reachable(self, start: Pose2D, target: Pose2D) -> Pose2D | None:
         """Point closest to an unreachable target that start can still reach, None to walk straight at the target."""
@@ -183,8 +226,8 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
         return idx
 
     @classmethod
-    def register(cls, name: str) -> Callable[[Callable[[], type[GlobalPlanner]]], Callable[[], type[GlobalPlanner]]]:
-        return _registry.register(name)
+    def register(cls, name: str, label: str | None = None) -> Callable[[Callable[[], type[GlobalPlanner]]], Callable[[], type[GlobalPlanner]]]:
+        return _registry.register(name, label)
 
     @classmethod
     def create(cls, name: str, *args: Any, **kwargs: Any) -> GlobalPlanner:
@@ -193,6 +236,10 @@ class GlobalPlanner(PoolAware, WallAware, Loggable, ABC):
     @classmethod
     def list_available(cls) -> list[str]:
         return _registry.list_available()
+
+    @classmethod
+    def labels(cls) -> dict[str, str]:
+        return _registry.labels()
 
 
 def _load_dijkstra() -> type[GlobalPlanner]:
@@ -213,6 +260,6 @@ def _load_navmesh() -> type[GlobalPlanner]:
     return NavMeshPlanner
 
 
-_registry.register("dijkstra")(_load_dijkstra)
-_registry.register("astar")(_load_astar)
-_registry.register("navmesh")(_load_navmesh)
+_registry.register("navmesh", "NavMesh")(_load_navmesh)
+_registry.register("astar", "A*")(_load_astar)
+_registry.register("dijkstra", "Dijkstra")(_load_dijkstra)

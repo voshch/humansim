@@ -8,7 +8,7 @@ Every BT step that joins or creates an interaction uses `SeekNode` under the hoo
 
 | Handle   | Interactions                                   | `target:` shape              | `offer:`              |
 |----------|------------------------------------------------|------------------------------|-----------------------|
-| `NONE`   | `TALK_TO`, `GROUP_CONVERSATION`, `WAVE_AT`, `HUG`, `SHAKE_HAND` | omitted                   | not allowed           |
+| `NONE`   | `TALK_TO`, `GROUP_CONVERSATION`, `GROUP_WALK`, `WAVE_AT`, `HUG`, `SHAKE_HAND` | omitted                   | not allowed           |
 | `OBJECT` | `USE`, `SIT_ON`, `LIE_ON`, `QUEUE_USE`         | `str` (object id or type)    | not allowed           |
 | `TAG`    | `SERVICE`                                      | `str` (service tag; required for `offer: true`, optional for seekers) | provider side only |
 | `AGENT`  | `BLOCK`                                        | `int` (agent id)             | not allowed           |
@@ -52,6 +52,7 @@ Cascade (first non-null wins):
 | `SIT_ON`             | `DISTANCE_TOLERANCE` |
 | `LIE_ON`             | `DISTANCE_TOLERANCE` |
 | `GROUP_CONVERSATION` | 3.0                  |
+| `GROUP_WALK`         | 3.0                  |
 | `TALK_TO`            | 2.0                  |
 | `SERVICE`            | 3.0                  |
 | `WAVE_AT`            | 6.0                   |
@@ -200,7 +201,7 @@ drop_B:    {cancel: true}
 
 ## Attention
 
-`attention:` is one block of channels. It rides on every step kind (`go_to`, interaction, wait, cancel, BLOCK), stands as a step of its own (`kind: attention`, or just `attention:` plus duration-ish fields and no interaction/target/cancel/autonomous keys), and rides on a whole sequence (`sequences.<seq>.attention`). A kind-less step that mixes `attention:` with interaction-only fields (`offer`, `formation_spec`, `until`, ...) is rejected by the loader, add `kind:` or `interaction:`. The engine has no skeleton: it publishes the active channels each tick as `AgentState.gestures` (`Gesture{slot, at, clip, hand}`), the animation layer moves the body.
+`attention:` is one block of channels. It rides on every step kind (`go_to`, interaction, wait, cancel, BLOCK), stands as a step of its own (`kind: attention`, or just `attention:` plus duration-ish fields and no interaction/target/cancel/autonomous keys), and rides on a whole sequence (`sequences.<seq>.attention`). A kind-less step that mixes `attention:` with interaction-only fields (`offer`, `formation_spec`, `until`, ...) is rejected by the loader, add `kind:` or `interaction:`. The engine has no skeleton: it publishes the active channels on the latched `agent_gestures` topic whenever they change (`AgentGestures`: owner `agent_id` plus `Gesture{slot, at, clip, hand}`), the animation layer moves the body.
 
 ```yaml
 attention:
@@ -276,7 +277,7 @@ sequences:
 
 `attention:` is not valid in the autonomous `actions` library and not on `autonomous: true` steps.
 
-Handedness is sampled once per ped from the agent type (`handedness: {right: 0.9, left: 0.1}`, weights per hand) and can be pinned per spawn via `AgentState.handedness` (`l` | `r`); it is republished on `AgentState.handedness`.
+Handedness is sampled once per ped from the agent type (`handedness: {right: 0.9, left: 0.1}`, weights per hand) and can be pinned per spawn via `AgentState.handedness` (`l` | `r`); it is republished on `AgentMeta.handedness`.
 
 ## Robot services
 

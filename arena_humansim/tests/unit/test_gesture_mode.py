@@ -29,6 +29,7 @@ class _Node:
     def __init__(self) -> None:
         self._interaction_manager = _InteractionManager()
         self._gesture_mode = GESTURE_ENABLED
+        self._gestures_dirty = False
 
 
 def _set(node: _Node, **params: object):
@@ -47,6 +48,14 @@ def test_gesture_mode_switches_and_rejects_unknown() -> None:
     assert node._gesture_mode == GESTURE_ENABLED  # a rejected set leaves the arm as it was
 
 
+def test_a_mode_switch_republishes_the_latched_gestures() -> None:
+    node = _Node()
+    assert _set(node, gesture_mode=GESTURE_ENABLED).successful
+    assert not node._gestures_dirty  # same arm, nothing to resend
+    assert _set(node, gesture_mode=GESTURE_DISABLED).successful
+    assert node._gestures_dirty  # the latched message goes out again, empty
+
+
 def test_unrelated_parameters_pass_through() -> None:
     node = _Node()
     assert _set(node, contact_mode=CONTACT_ENABLED, locomotion_standing_distance=1.2).successful
@@ -56,6 +65,7 @@ def test_unrelated_parameters_pass_through() -> None:
 def test_disabled_also_hides_the_interaction_id() -> None:
     """The id is what lets a costmap group pedestrians, so the control arm must not publish it either."""
     source = pathlib.Path(agent_manager.__file__).read_text()
-    body = source.split("rendered = self._gesture_mode == GESTURE_ENABLED", 1)[1].split("return msg", 1)[0]
-    assert "if rendered else []" in body
-    assert "active_interaction(a.agent_id) if rendered else None" in body
+    frame = source.split("def _build_agent_frame", 1)[1].split("return msg", 1)[0]
+    assert "active_interaction(aid)" in frame and "if self._gesture_mode == GESTURE_ENABLED else [None] * len(rows)" in frame
+    gestures = source.split("def _publish_agent_gestures", 1)[1].split("\n    def ", 1)[0]
+    assert "isinstance(mv, BehaviorTreeMovement) and self._gesture_mode == GESTURE_ENABLED" in gestures

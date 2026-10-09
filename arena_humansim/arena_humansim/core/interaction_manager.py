@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import enum
+import math
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import attrs
+import numpy as np
+from numba import njit
 
 from arena_humansim.core.access import AcceptResult, AccessPolicy
 from arena_humansim.core.access.fifo_queue import FIFOQueue
@@ -35,6 +38,7 @@ from arena_humansim.utils.types import (
 
 if TYPE_CHECKING:
     from arena_humansim.core.agents import BaseAgent
+    from arena_humansim.core.formation.clearance import Clearance
     from arena_humansim.core.world_knowledge import WorldKnowledge
 
 
@@ -89,6 +93,18 @@ class InteractionEdge:
     participants: tuple[int, ...]
 
 
+@njit(cache=True)
+def _nearest_peer(xy: np.ndarray, ptr: np.ndarray) -> np.ndarray:
+    """Distance from each point to the closest other point of its group, groups delimited by ptr."""
+    out = np.full(xy.shape[0], np.inf)
+    for g in range(ptr.shape[0] - 1):
+        for i in range(ptr[g], ptr[g + 1]):
+            for j in range(ptr[g], ptr[g + 1]):
+                if i != j:
+                    out[i] = min(out[i], math.hypot(xy[i, 0] - xy[j, 0], xy[i, 1] - xy[j, 1]))
+    return out
+
+
 def _make_contract(
     interaction_type: InteractionType,
     min_participants: int | None = None,
@@ -132,6 +148,10 @@ class InteractionManager(Loggable):
         self._formation_scale = formation_scale
         self._cohesion_multiplier = cohesion_multiplier
         self._formation_targets: dict[int, Pose2D] = {}
+        self._formation_speeds: dict[int, float] = {}
+        self._formation_dt = 0.0
+        self._clearance: Clearance | None = None
+        self._warmup()
         self._current_departed: set[int] = set()
         self._edges: list[InteractionEdge] = []
         self._contact_mode = CONTACT_ENABLED
@@ -182,6 +202,9 @@ class InteractionManager(Loggable):
     def is_holding(self, interaction: InteractionState) -> bool:
         return bool(interaction.state.get(_HOLDING))
 
+    def _warmup(self) -> None:
+        _nearest_peer(np.zeros((2, 2)), np.array([0, 2], dtype=np.int64))
+
     def _pose_lookup(self, agent_id: int) -> Pose2D | None:
         agent = self._agent_lookup(agent_id)
         return agent.state.pose if agent is not None else None
@@ -195,6 +218,8 @@ class InteractionManager(Loggable):
         self._interaction_by_object_type.clear()
         self._interactions_by_type.clear()
         self._formation_targets.clear()
+        self._formation_speeds.clear()
+        self._formation_dt = 0.0
         self._current_departed.clear()
         self._edges.clear()
 
@@ -204,6 +229,7 @@ class InteractionManager(Loggable):
         agent_lookup: AgentLookup | None = None,
         formation_scale: float | None = None,
         visibility_lookup: VisibilityLookup | None = None,
+        clearance: Clearance | None = None,
     ) -> None:
         if world_knowledge is not None:
             self._world_knowledge = world_knowledge
@@ -213,6 +239,8 @@ class InteractionManager(Loggable):
             self._formation_scale = formation_scale
         if visibility_lookup is not None:
             self._visibility_lookup = visibility_lookup
+        if clearance is not None:
+            self._clearance = clearance
 
     def _update_bt_movement(
         self,
@@ -332,6 +360,7 @@ class InteractionManager(Loggable):
             return
         formation.on_leave(agent_id)
         self._formation_targets.pop(agent_id, None)
+        self._formation_speeds.pop(agent_id, None)
 
     def stop(
         self,
@@ -376,7 +405,9 @@ class InteractionManager(Loggable):
         high_level_commands: dict[int, HighLevelCommand],
         dt: float = 0.0,
         extra_commands: list[HighLevelCommand] | None = None,
+        formations: bool = True,
     ) -> tuple[dict[int, InteractionState], dict[int, Pose2D], set[int]]:
+        """Formations and drift checks advance only when `formations` is set, by the time since their last advance."""
         self._current_departed = set()
         self._prune_ended_interactions()
         self._tick_access(dt)
@@ -403,8 +434,11 @@ class InteractionManager(Loggable):
         for cmd in interaction_cmds:
             self._process_command(cmd)
 
-        self._tick_drift_eviction()
-        self._tick_formations(dt)
+        self._formation_dt += dt
+        if formations:
+            self._tick_drift_eviction()
+            self._tick_formations(self._formation_dt)
+            self._formation_dt = 0.0
         self._prune_dead_interactions()
         self._prune_ended_interactions()
         return self.interactions, dict(self._formation_targets), set(self._current_departed)
@@ -412,6 +446,7 @@ class InteractionManager(Loggable):
     def _tick_drift_eviction(self) -> None:
         # Same threshold as request-time proximity (x cohesion_multiplier)
         victims: list[tuple[int, int]] = []
+        loose: list[tuple[int, float, set[int], list[tuple[int, Pose2D]]]] = []
         for iid, interaction in self.interactions.items():
             if interaction.outcome != InteractionOutcome.ACTIVE:
                 continue
@@ -420,6 +455,7 @@ class InteractionManager(Loggable):
             kind = InteractionType(interaction.type).kind
             radius = kind.interaction_radius * self._cohesion_multiplier
             latched: set[int] = interaction.state.setdefault("_drift_arrived", set())
+            latched.intersection_update(interaction.participants)
             if kind.is_object_bound:
                 object_id = interaction.object_id
                 if object_id is None or self._world_knowledge is None:
@@ -439,13 +475,16 @@ class InteractionManager(Loggable):
                     elif aid in latched:
                         victims.append((aid, iid))
             else:
-                poses = {aid: self._pose_lookup(aid) for aid in interaction.participants}
-                poses = {aid: p for aid, p in poses.items() if p is not None}
-                if len(poses) < 2:
-                    continue
-                for aid, pose in poses.items():
-                    nearest = min(pose_distance(pose, peer) for pid, peer in poses.items() if pid != aid)
-                    if nearest <= radius:
+                poses = [(aid, p) for aid in interaction.participants if (p := self._pose_lookup(aid)) is not None]
+                if len(poses) >= 2:
+                    loose.append((iid, radius, latched, poses))
+        if loose:
+            ptr = np.zeros(len(loose) + 1, dtype=np.int64)
+            np.cumsum([len(poses) for *_, poses in loose], out=ptr[1:])
+            nearest = iter(_nearest_peer(np.array([(p.x, p.y) for *_, poses in loose for _, p in poses], dtype=np.float64), ptr).tolist())
+            for iid, radius, latched, poses in loose:
+                for aid, _ in poses:
+                    if next(nearest) <= radius:
                         latched.add(aid)
                     elif aid in latched:
                         victims.append((aid, iid))
@@ -454,38 +493,44 @@ class InteractionManager(Loggable):
 
     def _tick_formations(self, dt: float) -> dict[int, Pose2D]:
         targets: dict[int, Pose2D] = {}
+        speeds: dict[int, float] = {}
+        by_type: dict[type[Formation], list[Formation]] = {}
         for interaction in self.interactions.values():
-            if interaction.outcome != InteractionOutcome.ACTIVE:
-                continue
             formation: Formation | None = interaction.contract.formation
-            if formation is None:
-                continue
-            per_formation = formation.tick(dt)
-            for aid, pose in per_formation.items():
-                targets[aid] = pose
-                agent = self._agent_lookup(aid)
-                if agent is None or not isinstance(agent.movement, BehaviorTreeMovement):
-                    continue
-                agent.movement.command = HighLevelCommand(
-                    agent_id=aid,
-                    type=CommandType.NAVIGATE,
-                    target_pose=pose,
-                    desired_velocity=agent.state.desired_velocity,
-                )
+            if interaction.outcome == InteractionOutcome.ACTIVE and formation is not None:
+                by_type.setdefault(type(formation), []).append(formation)
+        for kind, formations in by_type.items():
+            for formation, per_formation in zip(formations, kind.tick_all(formations, dt), strict=True):
+                speeds.update(formation.speeds())
+                for aid, pose in per_formation.items():
+                    targets[aid] = pose
+                    agent = self._agent_lookup(aid)
+                    if agent is None or not isinstance(agent.movement, BehaviorTreeMovement):
+                        continue
+                    agent.movement.command = HighLevelCommand(
+                        agent_id=aid,
+                        type=CommandType.NAVIGATE,
+                        target_pose=pose,
+                        desired_velocity=agent.state.desired_velocity,
+                    )
         self._formation_targets = targets
+        self._formation_speeds = speeds
         return targets
 
     def formation_target(self, agent_id: int) -> Pose2D | None:
         return self._formation_targets.get(agent_id)
+
+    def formation_speeds(self) -> dict[int, float]:
+        return self._formation_speeds
 
     def is_in_interaction(self, agent_id: int) -> bool:
         return any(role == MembershipRole.PARTICIPANT for role in self._agent_membership.get(agent_id, {}).values())
 
     def posture_of(self, agent_id: int) -> str:
         """Posture the agent's active interaction kind imposes, ``standing`` until it has arrived."""
-        for iid in self._iter_membership(agent_id, MembershipRole.PARTICIPANT):
+        for iid, role in self._agent_membership.get(agent_id, {}).items():
             interaction = self.interactions.get(iid)
-            if interaction is None or interaction.outcome != InteractionOutcome.ACTIVE:
+            if role != MembershipRole.PARTICIPANT or interaction is None or interaction.outcome != InteractionOutcome.ACTIVE:
                 continue
             formation = interaction.contract.formation
             if formation is not None and not formation.arrived(agent_id):
@@ -500,6 +545,17 @@ class InteractionManager(Loggable):
             if interaction is not None and interaction.outcome == InteractionOutcome.ACTIVE:
                 return iid, interaction.type
         return None
+
+    def postures(self) -> dict[int, str]:
+        """posture_of for every agent it does not leave standing."""
+        out: dict[int, str] = {}
+        for interaction in self.interactions.values():
+            if interaction.outcome != InteractionOutcome.ACTIVE or InteractionType(interaction.type).kind.posture == "standing":
+                continue
+            for pid in interaction.participants:
+                if pid not in out and (posture := self.posture_of(pid)) != "standing":
+                    out[pid] = posture
+        return out
 
     def parked(self) -> dict[int, Pose2D]:
         """Agents held on an explicit seat by a posture-imposing interaction, and the seat pose."""
@@ -809,6 +865,8 @@ class InteractionManager(Loggable):
         if spec.formation_spec is not None:
             interaction.state["formation_spec"] = spec.formation_spec
         contract.formation = self._resolve_formation(interaction)
+        if contract.formation is not None:
+            contract.formation.clearance = self._clearance
         self._on_formation_join(interaction, creator_id)
 
         self._maybe_activate(interaction)
@@ -914,6 +972,8 @@ class InteractionManager(Loggable):
             if isinstance(provider_id, int) and provider_id >= 0:
                 return AgentAnchor(pose_lookup=self._pose_lookup, agent_id=provider_id)
             return None
+        if kind is AnchorKind.LEADER:
+            return AgentAnchor(pose_lookup=self._pose_lookup, agent_id=interaction.participants[0])
         if kind is AnchorKind.POSE:
             return PoseAnchor(fixed=spec.anchor_pose or Pose2D())
         if kind is AnchorKind.CENTROID:
@@ -966,7 +1026,8 @@ class InteractionManager(Loggable):
             if contract.elapsed < contract.duration:
                 continue
             if contract.access is not None and contract.queue:
-                released = list(interaction.participants)
+                # the provider stays for the next queued agent, everyone else is released
+                released = [pid for pid in interaction.participants if pid != interaction.provider]
                 if released:
                     self._emit(interaction, LifecycleEdge.RELEASED, released)
                 interaction.state[_HOLDING] = False
@@ -977,9 +1038,8 @@ class InteractionManager(Loggable):
                     self._add_membership(next_agent, iid, MembershipRole.PARTICIPANT)
                     self._update_bt_movement(next_agent, interaction_id=iid)
                     self._on_formation_join(interaction, next_agent)
-                if interaction.participants:
-                    active_id = interaction.participants[0]
-                    stored = interaction.member_durations.get(active_id)
+                if promoted:
+                    stored = interaction.member_durations.get(promoted[0])
                     if stored is not None and stored > 0:
                         contract.duration = stored
                 contract.elapsed = 0.0

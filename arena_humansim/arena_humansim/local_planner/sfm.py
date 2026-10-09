@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
+from numba import njit, prange
 
+from arena_humansim.core import interaction_classes
 from arena_humansim.core.agents import BaseAgent
 from arena_humansim.core.agents.types import ParamDist
 from arena_humansim.utils.types import Pose2D, Segments
+from arena_humansim.utils.wall_grid import WallGrid, query_walls
 
 from . import LocalPlanner
 
@@ -23,18 +27,139 @@ _EPS = 1e-6
 _DEFAULT_WALL_REPULSION_STRENGTH = 3.0
 _DEFAULT_WALL_REPULSION_RANGE = 0.1
 
-_KIND_HUMAN = 0
-_KIND_ROBOT = 1
-_N_KINDS = 2
+_DEFAULT_CLASS_GAINS: dict[tuple[str, str], tuple[float, float]] = {
+    ("human", "robot"): (1.5, 1.3),
+    ("human", "wheelchair"): (1.3, 1.4),
+    ("wheelchair", "robot"): (1.5, 1.3),
+}
 
-_DEFAULT_ROBOT_STRENGTH_SCALE = 1.5
-_DEFAULT_ROBOT_RANGE_SCALE = 1.3
+_WALL_CUTOFF_RANGES = 28.0
+_WALL_QUERY_CAPACITY = 64
 
 
 def _resize_1d(arr: np.ndarray, new_capacity: int, old_capacity: int) -> np.ndarray:
     out = np.zeros(new_capacity, dtype=arr.dtype)
     out[:old_capacity] = arr[:old_capacity]
     return out
+
+
+def _grow_gains(mat: np.ndarray, size: int) -> np.ndarray:
+    out = np.ones((size, size), dtype=np.float64)
+    k = mat.shape[0]
+    out[:k, :k] = mat
+    return out
+
+
+@njit(cache=True)
+def _wall_force_at(
+    x: float,
+    y: float,
+    r: float,
+    p1: np.ndarray,
+    d: np.ndarray,
+    len_sq: np.ndarray,
+    cell_start: np.ndarray,
+    cell_walls: np.ndarray,
+    wall_cx0: np.ndarray,
+    wall_cy0: np.ndarray,
+    origin_x: float,
+    origin_y: float,
+    cell: float,
+    nx: int,
+    ny: int,
+    strength: float,
+    rng: float,
+) -> tuple[float, float]:
+    query_r = r + rng * _WALL_CUTOFF_RANGES
+    buf = np.empty(_WALL_QUERY_CAPACITY, dtype=np.int64)
+    k = query_walls(cell_start, cell_walls, wall_cx0, wall_cy0, origin_x, origin_y, cell, nx, ny, x, y, query_r, buf)
+    if k > buf.shape[0]:
+        buf = np.empty(k, dtype=np.int64)
+        k = query_walls(cell_start, cell_walls, wall_cx0, wall_cy0, origin_x, origin_y, cell, nx, ny, x, y, query_r, buf)
+    fx = 0.0
+    fy = 0.0
+    for c in range(k):
+        w = buf[c]
+        dx = d[w, 0]
+        dy = d[w, 1]
+        t = ((x - p1[w, 0]) * dx + (y - p1[w, 1]) * dy) / max(len_sq[w], _EPS)
+        t = min(max(t, 0.0), 1.0)
+        ox = x - (p1[w, 0] + t * dx)
+        oy = y - (p1[w, 1] + t * dy)
+        dist = max(math.hypot(ox, oy), _EPS)
+        mag = strength * math.exp((r - dist) / rng)
+        fx += mag * (ox / dist)
+        fy += mag * (oy / dist)
+    return fx, fy
+
+
+@njit(cache=True, parallel=True)
+def _wall_forces_kernel(
+    pos: np.ndarray,
+    radius: np.ndarray,
+    theta: np.ndarray,
+    axial_offset: np.ndarray,
+    p1: np.ndarray,
+    d: np.ndarray,
+    len_sq: np.ndarray,
+    cell_start: np.ndarray,
+    cell_walls: np.ndarray,
+    wall_cx0: np.ndarray,
+    wall_cy0: np.ndarray,
+    origin_x: float,
+    origin_y: float,
+    cell: float,
+    nx: int,
+    ny: int,
+    strength: float,
+    rng: float,
+    out: np.ndarray,
+) -> None:
+    for i in prange(pos.shape[0]):
+        x = pos[i, 0]
+        y = pos[i, 1]
+        r = radius[i]
+        off = axial_offset[i]
+        if off > 0.0:
+            ax = off * math.cos(theta[i])
+            ay = off * math.sin(theta[i])
+            f1x, f1y = _wall_force_at(x + ax, y + ay, r, p1, d, len_sq, cell_start, cell_walls, wall_cx0, wall_cy0, origin_x, origin_y, cell, nx, ny, strength, rng)
+            f2x, f2y = _wall_force_at(x - ax, y - ay, r, p1, d, len_sq, cell_start, cell_walls, wall_cx0, wall_cy0, origin_x, origin_y, cell, nx, ny, strength, rng)
+            out[i, 0] = f1x + f2x
+            out[i, 1] = f1y + f2y
+        else:
+            query_r = r + rng * _WALL_CUTOFF_RANGES
+            buf = np.empty(_WALL_QUERY_CAPACITY, dtype=np.int64)
+            k = query_walls(cell_start, cell_walls, wall_cx0, wall_cy0, origin_x, origin_y, cell, nx, ny, x, y, query_r, buf)
+            if k > buf.shape[0]:
+                buf = np.empty(k, dtype=np.int64)
+                k = query_walls(cell_start, cell_walls, wall_cx0, wall_cy0, origin_x, origin_y, cell, nx, ny, x, y, query_r, buf)
+            fx = 0.0
+            fy = 0.0
+            for c in range(k):
+                w = buf[c]
+                dx = d[w, 0]
+                dy = d[w, 1]
+                t = ((x - p1[w, 0]) * dx + (y - p1[w, 1]) * dy) / max(len_sq[w], _EPS)
+                t = min(max(t, 0.0), 1.0)
+                ox = x - (p1[w, 0] + t * dx)
+                oy = y - (p1[w, 1] + t * dy)
+                dist = max(math.hypot(ox, oy), _EPS)
+                mag = strength * math.exp((r - dist) / rng)
+                fx += mag * (ox / dist)
+                fy += mag * (oy / dist)
+            out[i, 0] = fx
+            out[i, 1] = fy
+
+
+def _closest_disk_diff(pos: np.ndarray, theta: np.ndarray, offsets: np.ndarray, pair_obs: np.ndarray, pair_nbr: np.ndarray) -> np.ndarray:
+    axis = offsets[:, None] * np.stack((np.cos(theta), np.sin(theta)), axis=1)
+    obs_centers = np.stack((pos[pair_obs] + axis[pair_obs], pos[pair_obs] - axis[pair_obs]), axis=1)
+    nbr_centers = np.stack((pos[pair_nbr] + axis[pair_nbr], pos[pair_nbr] - axis[pair_nbr]), axis=1)
+    cand = obs_centers[:, :, None, :] - nbr_centers[:, None, :, :]
+    cand = cand.reshape(len(pair_obs), 4, 2)
+    best = np.argmin(np.hypot(cand[:, :, 0], cand[:, :, 1]), axis=1)
+    return cand[np.arange(len(pair_obs)), best]
 
 
 class SFMPlanner(LocalPlanner):
@@ -56,19 +181,70 @@ class SFMPlanner(LocalPlanner):
         self.wall_repulsion_range = wall_repulsion_range
         self._wall_segments: Segments = []
         self._wall_segments_np: np.ndarray = np.empty((0, 2, 2), dtype=np.float64)
+        self._wall_p1: np.ndarray = np.empty((0, 2), dtype=np.float64)
+        self._wall_d: np.ndarray = np.empty((0, 2), dtype=np.float64)
+        self._wall_len_sq: np.ndarray = np.empty(0, dtype=np.float64)
+        self._wall_grid = WallGrid(np.empty((0, 4), dtype=np.float64))
         self._last_forces: dict[int, tuple[tuple[float, float], tuple[float, float], tuple[float, float]]] = {}
         self._last_force_arrays: tuple | None = None
         self._last_agents: Sequence[BaseAgent] | None = None
 
-        self._gain_strength_scale = np.ones((_N_KINDS, _N_KINDS), dtype=np.float64)
-        self._gain_range_scale = np.ones((_N_KINDS, _N_KINDS), dtype=np.float64)
-        self._gain_strength_scale[_KIND_HUMAN, _KIND_ROBOT] = _DEFAULT_ROBOT_STRENGTH_SCALE
-        self._gain_range_scale[_KIND_HUMAN, _KIND_ROBOT] = _DEFAULT_ROBOT_RANGE_SCALE
+        self._gain_strength_scale = np.ones((0, 0), dtype=np.float64)
+        self._gain_range_scale = np.ones((0, 0), dtype=np.float64)
+        self._ensure_gain_classes(interaction_classes.ROBOT + 1)
 
         self._relaxation_time = np.zeros(0, dtype=np.float64)
         self._repulsion_strength = np.zeros(0, dtype=np.float64)
         self._repulsion_range = np.zeros(0, dtype=np.float64)
         self._anisotropy = np.zeros(0, dtype=np.float64)
+        self._warmup()
+
+    def _warmup(self) -> None:
+        grid = WallGrid(np.array([[0.0, 0.0, 1.0, 0.0]]))
+        p1 = np.ascontiguousarray(grid.segments[:, :2])
+        d = np.ascontiguousarray(grid.segments[:, 2:] - p1)
+        self._run_wall_kernel(np.zeros((2, 2), dtype=np.float64), np.full(2, 0.3), np.zeros(2), np.array([0.0, 0.5]), grid, p1, d, np.sum(d**2, axis=1))
+
+    def _ensure_gain_classes(self, count: int) -> None:
+        old = self._gain_strength_scale.shape[0]
+        count = max(count, interaction_classes.count())
+        if count <= old:
+            return
+        self._gain_strength_scale = _grow_gains(self._gain_strength_scale, count)
+        self._gain_range_scale = _grow_gains(self._gain_range_scale, count)
+        names = {interaction_classes.name(i): i for i in range(min(count, interaction_classes.count()))}
+        for (a, b), (s, r) in _DEFAULT_CLASS_GAINS.items():
+            i = names.get(a)
+            j = names.get(b)
+            if i is None or j is None or (i < old and j < old):
+                continue
+            self._gain_strength_scale[i, j] = s
+            self._gain_range_scale[i, j] = r
+
+    def _run_wall_kernel(self, pos: np.ndarray, radius: np.ndarray, theta: np.ndarray, axial_offset: np.ndarray, grid: WallGrid, p1: np.ndarray, d: np.ndarray, len_sq: np.ndarray) -> np.ndarray:
+        out = np.empty((pos.shape[0], 2), dtype=np.float64)
+        _wall_forces_kernel(
+            np.ascontiguousarray(pos, dtype=np.float64),
+            np.ascontiguousarray(radius, dtype=np.float64),
+            np.ascontiguousarray(theta, dtype=np.float64),
+            np.ascontiguousarray(axial_offset, dtype=np.float64),
+            p1,
+            d,
+            len_sq,
+            grid.cell_start,
+            grid.cell_walls,
+            grid.wall_cx0,
+            grid.wall_cy0,
+            grid.origin_x,
+            grid.origin_y,
+            grid.cell,
+            grid.nx,
+            grid.ny,
+            float(self.wall_repulsion_strength),
+            float(self.wall_repulsion_range),
+            out,
+        )
+        return out
 
     def attach(self, pool: AgentPool) -> None:
         self._allocate_soa(pool.capacity)
@@ -120,15 +296,13 @@ class SFMPlanner(LocalPlanner):
         gains = blob.get("kind_gains")
         if not isinstance(gains, dict):
             return
-        kind_map = {"human": _KIND_HUMAN, "robot": _KIND_ROBOT}
         for key, entry in gains.items():
             if not isinstance(entry, dict) or "_" not in key:
                 continue
             a, b = key.split("_", 1)
-            i = kind_map.get(a.lower())
-            j = kind_map.get(b.lower())
-            if i is None or j is None:
-                continue
+            i = interaction_classes.index(a.lower())
+            j = interaction_classes.index(b.lower())
+            self._ensure_gain_classes(max(i, j) + 1)
             s = entry.get("strength_scale")
             r = entry.get("range_scale")
             if isinstance(s, (int, float)):
@@ -142,9 +316,10 @@ class SFMPlanner(LocalPlanner):
             self._wall_segments_np = np.array(segments, dtype=np.float64).reshape(-1, 2, 2)
         else:
             self._wall_segments_np = np.empty((0, 2, 2), dtype=np.float64)
-        self._wall_p1 = self._wall_segments_np[:, 0, :]
-        self._wall_d = self._wall_segments_np[:, 1, :] - self._wall_p1
+        self._wall_p1 = np.ascontiguousarray(self._wall_segments_np[:, 0, :])
+        self._wall_d = np.ascontiguousarray(self._wall_segments_np[:, 1, :] - self._wall_p1)
         self._wall_len_sq = np.sum(self._wall_d**2, axis=1)
+        self._wall_grid = WallGrid(self._wall_segments_np.reshape(-1, 4))
         self._logger.info(f"Loaded {len(segments)} wall segment(s)")
 
     def _compute_forces_pool(self, pool: AgentPool) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -161,10 +336,7 @@ class SFMPlanner(LocalPlanner):
         radii = pool.agent_radius[:n]
 
         if relax.shape[0] != n:
-            raise RuntimeError(
-                f"{type(self).__name__}: parameter arrays hold {relax.shape[0]} rows for {n} pooled agents, "
-                "this planner was never attached to the pool (AgentPool.attach_late)"
-            )
+            raise RuntimeError(f"{type(self).__name__}: parameter arrays hold {relax.shape[0]} rows for {n} pooled agents, this planner was never attached to the pool (AgentPool.attach_late)")
 
         d_goal = goal - pos
         dist_goal = np.hypot(d_goal[:, 0], d_goal[:, 1])[:, None]
@@ -185,16 +357,22 @@ class SFMPlanner(LocalPlanner):
             pair_obs = np.repeat(np.arange(n, dtype=np.int32), np.diff(indptr))
             pair_nbr = indices
 
-            diff = pos[pair_obs] - pos[pair_nbr]
+            offsets = pool.axial_offset[:n]
+            if np.any(offsets > 0.0):
+                diff = _closest_disk_diff(pos, pool.theta[:n], offsets, pair_obs, pair_nbr)
+            else:
+                diff = pos[pair_obs] - pos[pair_nbr]
             dists = np.hypot(diff[:, 0], diff[:, 1])
             dists = np.maximum(dists, _EPS)
             normals = diff / dists[:, None]
 
-            kind_arr = pool.kind[:n]
-            obs_kind = np.clip(kind_arr[pair_obs].astype(np.int64), 0, _N_KINDS - 1)
-            nbr_kind = np.clip(kind_arr[pair_nbr].astype(np.int64), 0, _N_KINDS - 1)
-            s_scale = self._gain_strength_scale[obs_kind, nbr_kind]
-            r_scale = self._gain_range_scale[obs_kind, nbr_kind]
+            cls_arr = pool.interaction_class[:n]
+            self._ensure_gain_classes(int(cls_arr.max()) + 1)
+            n_cls = self._gain_strength_scale.shape[0]
+            obs_cls = np.clip(cls_arr[pair_obs].astype(np.int64), 0, n_cls - 1)
+            nbr_cls = np.clip(cls_arr[pair_nbr].astype(np.int64), 0, n_cls - 1)
+            s_scale = self._gain_strength_scale[obs_cls, nbr_cls]
+            r_scale = self._gain_range_scale[obs_cls, nbr_cls]
 
             r_ij = radii[pair_obs] + radii[pair_nbr]
             eff_strength = rep_str[pair_obs] * s_scale
@@ -209,7 +387,7 @@ class SFMPlanner(LocalPlanner):
             pair_forces = magnitudes[:, None] * normals
             np.add.at(f_rep, pair_obs, pair_forces)
 
-        f_wall = self._compute_wall_forces_vectorized(pos, radii)
+        f_wall = self._compute_wall_forces_vectorized(pos, radii, pool.theta[:n], pool.axial_offset[:n])
 
         return f_att, f_rep, f_wall, at_goal
 
@@ -253,31 +431,18 @@ class SFMPlanner(LocalPlanner):
         self,
         agent_pos: np.ndarray,
         agent_radius: np.ndarray,
+        theta: np.ndarray | None = None,
+        axial_offset: np.ndarray | None = None,
     ) -> np.ndarray:
         n = agent_pos.shape[0]
         if self._wall_segments_np.shape[0] == 0:
             return np.zeros((n, 2), dtype=np.float64)
+        if theta is None:
+            theta = np.zeros(n, dtype=np.float64)
+        if axial_offset is None:
+            axial_offset = np.zeros(n, dtype=np.float64)
 
-        seg_p1 = self._wall_p1
-        seg_d = self._wall_d
-        seg_len_sq = self._wall_len_sq
-
-        ap = agent_pos[:, None, :]
-        diff_to_p1 = ap - seg_p1[None, :, :]
-
-        t = np.sum(diff_to_p1 * seg_d[None, :, :], axis=2) / np.maximum(seg_len_sq[None, :], _EPS)
-        t = np.clip(t, 0.0, 1.0)
-
-        cp = seg_p1[None, :, :] + t[:, :, None] * seg_d[None, :, :]
-        diff = ap - cp
-        dist = np.hypot(diff[:, :, 0], diff[:, :, 1])
-        dist = np.maximum(dist, _EPS)
-        normals = diff / dist[:, :, None]
-
-        mag = self.wall_repulsion_strength * np.exp((agent_radius[:, None] - dist) / self.wall_repulsion_range)
-
-        forces = mag[:, :, None] * normals
-        return forces.sum(axis=1)
+        return self._run_wall_kernel(agent_pos, agent_radius, theta, axial_offset, self._wall_grid, self._wall_p1, self._wall_d, self._wall_len_sq)
 
     def _compute_forces_scalar(
         self,
@@ -311,16 +476,26 @@ class SFMPlanner(LocalPlanner):
             neighbors = [ag for ag in belief.observed_agents if ag.agent_id != agent.state.agent_id]
             if neighbors:
                 other_pos = np.empty((len(neighbors), 2), dtype=np.float64)
+                nbr_cls = np.empty(len(neighbors), dtype=np.int64)
                 for i, ag in enumerate(neighbors):
                     other_pos[i, 0] = ag.pose.x
                     other_pos[i, 1] = ag.pose.y
+                    nbr_cls[i] = ag.kind
 
                 diff = np.array([cur_x, cur_y]) - other_pos
                 dists = np.maximum(np.linalg.norm(diff, axis=1), _EPS)
                 normals = diff / dists[:, np.newaxis]
 
+                obs_cls = int(agent.state.kind)
+                self._ensure_gain_classes(max(obs_cls, int(nbr_cls.max())) + 1)
+                n_cls = self._gain_strength_scale.shape[0]
+                obs_cls = min(max(obs_cls, 0), n_cls - 1)
+                nbr_cls = np.clip(nbr_cls, 0, n_cls - 1)
+                s_scale = self._gain_strength_scale[obs_cls, nbr_cls]
+                r_scale = self._gain_range_scale[obs_cls, nbr_cls]
+
                 r_ij = 2.0 * agent_radius
-                magnitudes = lp["repulsion_strength"] * np.exp((r_ij - dists) / lp["repulsion_range"])
+                magnitudes = (lp["repulsion_strength"] * s_scale) * np.exp((r_ij - dists) / (lp["repulsion_range"] * r_scale))
 
                 cos_phi = -normals[:, 0] * e_goal_x + -normals[:, 1] * e_goal_y
                 w = lp["anisotropy"] + (1.0 - lp["anisotropy"]) * 0.5 * (1.0 + cos_phi)

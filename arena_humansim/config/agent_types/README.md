@@ -24,7 +24,29 @@ Perception (`perception:`):
 
 Local planner (`local_planner_params:`):
 
-Schema is taken from the active planner's `PARAM_DEFAULTS` (`sfm`: `relaxation_time`, `repulsion_strength`, `repulsion_range`, `anisotropy`. `hsfm` adds `lateral_gain`, `lateral_damping`, `angular_gain`, `angular_damping`. Other planners take none). yaml entries override individual keys, unset ones keep the planner's default distribution. Full per-planner key table: [../../arena_humansim/local_planner/README.md](../../arena_humansim/local_planner/README.md).
+Schema is taken from the active planner's `PARAM_DEFAULTS` (`sfm`: `relaxation_time`, `repulsion_strength`, `repulsion_range`, `anisotropy`. `hsfm` adds `lateral_gain`, `lateral_damping`, `angular_gain`, `angular_damping`, `heading_source`. the other force models declare their own keys, the rest take none). yaml entries override individual keys, unset ones keep the planner's default distribution. Full per-planner key table: [../../arena_humansim/local_planner/README.md](../../arena_humansim/local_planner/README.md).
+
+`heading_source` (hsfm) also accepts the words `attraction` (= `0.0`, the body turns toward the goal attraction force) and `total` (= `1.0`, the body turns toward the total force including repulsion, held within 90 degrees either side of the goal bearing, so a pushed agent swings aside without turning its back on the goal). A number below `0.5` acts as `attraction`, any other as `total`.
+
+Locomotion (`locomotion:`, optional):
+
+Declaring the block at all (even empty) activates the locomotion profile for the type, every sub-field has a default. Without it the type moves as before: holonomic, no gait phase on the wire, no recovery.
+
+- `kinematics` (name, not a distribution) - `holonomic` (default, velocity is free) or `along_heading` (velocity is projected onto the body heading every tick, so the agent drives like a wheelchair or a cart: forward only, turns are rate-limited by `pivot_angular_velocity` and `min_turning_radius`).
+- `cadence: {base, per_speed, min, max}` (Hz, Hz per m/s, Hz, Hz) - gait cycle rate `clip(base + per_speed * speed, min, max)`. Defaults match the renderer's walk cycle (`0.4`, `0.55`, `0.4`, `2.2`).
+- `phase_warp: {split}` - fraction of the cycle period taken by the first half-cycle (`0.5` = symmetric). The stored phase stays monotonic, the warp applies when the profiles read it.
+- `speed_profile: {harmonics: [[amp, phase], ...], amplitude_scale}` - up to 3 harmonics (literal floats, not distributions) of a zero-mean speed modulation `s = sum_k amp_k * sin(k * phase + phase_k)`. The integrated and published velocity is the planner velocity times `1 + amplitude_scale * s` (floored at 0.05). The factor is laid over the velocity for one tick and taken out again before the planners run, so planner state never sees it and the mean speed over whole cycles stays the commanded speed. `amplitude_scale` is a distribution.
+- `lateral_profile: {harmonics: [...]}` - same form, added as a lateral (body-perpendicular) sway `speed * l(phase)` to the integrated and published velocity of `holonomic` types, ignored under `along_heading`.
+- `footprint_length` (m) - length of a capsule footprint along the heading, `0` = plain disk. Fills `pool.axial_offset = max(0, footprint_length / 2 - agent_radius)` for the planners and the collision resolver.
+- `recovery: {stall_after_s, reverse_m}` - stall recovery. `stall_after_s = 0` (default) turns it off. When the distance to the current goal has not improved by 5 cm for `stall_after_s`, the agent stops and pivots toward the goal bearing, then drives again with a 2 s cooldown. A re-stall (no improvement for 1 s) inside the cooldown with `reverse_m > 0` backs up `reverse_m` at 0.3 m/s before pivoting again. The speed and lateral profiles pause while the agent pivots or backs up.
+
+The zero-means-off fields (`footprint_length`, `recovery.*`) take a bare number for `0`, since the dict form's `clip_low` default of `0.01` would lift a `{mean: 0}` to `0.01`.
+
+Pose (`pose:`, optional): passed through untouched to the renderer (task_generator's human animation), humansim never reads it. Per-state (`walk`, `idle`, `run`) joint profiles keyed to the published gait phase, see the renderer's profile docs.
+
+Interaction class (`interaction_class:`, optional name string): social-force class of the type for the local planners' per-class gain matrices. Unset = `human`, robots are always `robot`, any other word (e.g. `wheelchair`) registers a new class on first sight, see [../../arena_humansim/core/interaction_classes.py](../../arena_humansim/core/interaction_classes.py).
+
+Assets (`assets:`, optional list of ASA tags): tag query that selects the visual model of a source-spawned agent, e.g. `human::mobility::wheelchair`. Passed through to the renderer (task_generator), humansim never reads it.
 
 Module selection (name strings, not distributions):
 
@@ -43,7 +65,7 @@ extends: elder
 desired_velocity: {mean: 0.5, std: 0.08, clip_low: 0.2, clip_high: 0.8}
 ```
 
-`extends:` pulls in the parent's full field set, then this file's fields override. Nested structures (`perception`, `local_planner_params`) merge field-by-field, not as whole replacements. Inheritance chains resolve in the loader, see [../../arena_humansim/core/agents/loader.py](../../arena_humansim/core/agents/loader.py) (`resolve_extends`).
+`extends:` pulls in the parent's full field set, then this file's fields override. Nested structures (`perception`, `local_planner_params`) merge field-by-field, not as whole replacements, and `locomotion` / `pose` merge recursively (a child's `cadence: {max: 1.2}` keeps the parent's other cadence fields). Inheritance chains resolve in the loader, see [../../arena_humansim/core/agents/loader.py](../../arena_humansim/core/agents/loader.py) (`resolve_extends`).
 
 When a scenario references a type by path (`agent_type: ./doctor.yaml`, the normal case for a `dynamic:` entry - see [task_generator human README](../../../../task_generator/task_generator/simulators/human/README.md)), that single file is loaded on its own and `extends:` can only reach the types shipped here (`adult`, `elder`, `robot`) - it cannot reach a sibling file in the same scenario's directory. Extending another scenario-local type only works when the whole directory is loaded together (e.g. by tooling that calls `load_agent_types(scenario_dir)`).
 
@@ -77,7 +99,7 @@ Candidate actions the autonomous selector can pick from. Fields:
 | Field | Meaning |
 |---|---|
 | `when` | `{need: {below\|above: X}}` - preconditions gating the action. |
-| `interaction` | One of `TALK_TO`, `GROUP_CONVERSATION`, `SIT_ON`, `LIE_ON`, `USE`, `QUEUE_USE`, `WAVE_AT`, `BLOCK`, `SERVICE`. Omit for nav-only. |
+| `interaction` | One of `TALK_TO`, `GROUP_CONVERSATION`, `GROUP_WALK`, `SIT_ON`, `LIE_ON`, `USE`, `QUEUE_USE`, `WAVE_AT`, `BLOCK`, `SERVICE`. Omit for nav-only. |
 | `target` | Object id / object type / service tag / agent id, per the interaction's handle kind. |
 | `duration` | Distribution (seconds). |
 | `patience` | Distribution (seconds) capping the whole action (nav + execute). |
@@ -133,13 +155,13 @@ Each step is either a `StepDef` (interaction, pure-wait, cancel) or a `GoToStepD
 
 | Field | Meaning |
 |---|---|
-| `interaction` | `TALK_TO` / `GROUP_CONVERSATION` / `WAVE_AT` / `SIT_ON` / `LIE_ON` / `USE` / `QUEUE_USE` / `BLOCK` / `SERVICE`. Omit for a pure-wait step. |
+| `interaction` | `TALK_TO` / `GROUP_CONVERSATION` / `GROUP_WALK` / `WAVE_AT` / `SIT_ON` / `LIE_ON` / `USE` / `QUEUE_USE` / `BLOCK` / `SERVICE`. Omit for a pure-wait step. |
 | `target` | Interpreted per the interaction's handle kind: object id/type for `OBJECT`, service tag (str) for `SERVICE`, agent id (int) for `BLOCK`, omit for symmetric types. |
 | `offer` | SERVICE provider side. `true` makes this step create-and-wait rather than find-and-join. Required when a SERVICE interaction has no existing provider. |
 | `cancel` | `true` => emit STOP with `reason=CANCELED` on the agent's current interaction. Mutually exclusive with `interaction:`. |
 | `queueable` | Provider-side override (SERVICE with `offer: true`) - admit seekers into a FIFO queue when full. |
 | `min_participants` / `max_participants` | Provider-side overrides on the contract. Count the provider itself. |
-| `formation_spec` | Provider-side formation override: `{type, params, anchor_kind, anchor_ref, anchor_pose}`. `type` is one of `line`, `cluster`, `f_formation`, `dyad`. `anchor_kind` is one of `object`, `agent`, `provider`, `pose`, `centroid` (default `object`). `anchor_ref` names the object/agent to anchor on when `anchor_kind` needs one. `anchor_pose: {x, y, theta}` is used with `anchor_kind: pose`. |
+| `formation_spec` | Provider-side formation override: `{type, params, anchor_kind, anchor_ref, anchor_pose}`. `type` is one of `line`, `cluster`, `f_formation`, `dyad`, `walk`. `anchor_kind` is one of `object`, `agent`, `provider`, `pose`, `centroid`, `leader` (default `object`). `anchor_ref` names the object/agent to anchor on when `anchor_kind` needs one. `anchor_pose: {x, y, theta}` is used with `anchor_kind: pose`. |
 | `duration` | Distribution (seconds). With `interaction:` -> contract-level timeout (outcome `COMPLETED`). On a pure-wait step -> `HoldNode` duration (NAVIGATE-to-self). |
 | `patience` | Distribution (seconds). Covers nav + seek + wait-for-ACTIVE + hold. |
 | `satisfies` | `{need: amount}` applied on SUCCESS. |
@@ -211,3 +233,5 @@ For a `dynamic:` scenario entry, `ArenaHumanDynamicObstacle.sample_params` (in [
 - `adult` - nominal pedestrian (desired 1.1 m/s, 5 m vision, 180deg FOV).
 - `elder` - slower, narrower FOV, longer SFM relaxation. Demonstrates how heterogeneity drops out of a handful of distribution tweaks.
 - `robot` - fixed (non-distribution) values for a robot-driven agent: zero `min_turning_radius`, 360deg FOV, no `idle_gaze_rate`.
+- `wheelchair_manual` - manually propelled wheelchair user: `extends: adult`, `along_heading` kinematics on `hsfm` with `heading_source: total`, a 1.1 m capsule footprint, push-stroke speed modulation (two harmonics), stall recovery with a 0.3 m reverse, seated pose with arm push strokes and the `human::mobility::wheelchair` asset. Every number in the file is a placeholder pending literature values (push cadence, stroke speed profile, footprint), not a measured profile.
+- `adult_limp_right` - adult with a right-leg limp: `extends: adult`, uneven cycle timing (`phase_warp.split`), one speed dip and one lateral lurch per cycle, and an asymmetric walk pose (stiff right knee, shortened right hip swing, trunk lean). Every number in the file is a placeholder pending a fitted profile.

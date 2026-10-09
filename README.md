@@ -10,7 +10,7 @@ AgentManager (ROS 2 Node)                    [core/]
 ├── Perception         KDTree neighbor queries + FOV filtering       [perception/]
 ├── Behavior Trees     py_trees decision making + needs system       [core/behavior/]
 ├── Global Planner     A* pathfinding on inflated occupancy grid     [global_planner/]
-├── Local Planner      SFM/HSFM/ORCA/SocialGAIL collision avoidance  [local_planner/]
+├── Local Planner      Force, velocity-obstacle, learned avoidance   [local_planner/]
 ├── Animation          Kinematic forward integration                 [animation/]
 ├── Collision          Wall projection overlap resolution            [collision/]
 ├── SpawnScheduler     Poisson-process agent spawning at sources
@@ -30,12 +30,12 @@ Each simulation step follows a fixed pipeline:
 2. **Sense** — build neighbor graph (KDTree + FOV pruning → CSR sparse matrix)
 3. **Decide** — tick behavior trees (every N ticks), emit high-level commands
 4. **Global Plan** — A* pathfinding with LOS simplification and wall push-back
-5. **Local Plan** — SFM / ORCA velocity computation (vectorized over pool)
+5. **Local Plan** — local planner velocity computation (vectorized over pool)
 6. **Interact** — update social interaction state machines
 7. **Kinematics** — enforce acceleration, speed, and turning-radius limits
 8. **Animate** — forward-integrate position and heading
 9. **Collide** — resolve agent-wall overlaps
-10. **Publish** — broadcast `AgentStates` message + optional RViz markers
+10. **Publish** - broadcast the flat `AgentFrame`, latched meta and gestures on change, and the `AgentViz` marker inputs
 
 ## Modules
 
@@ -44,7 +44,7 @@ All modules are swappable via a plugin registry.
 | Layer | Options | Default |
 |---|---|---|
 | [Global Planner](arena_humansim/arena_humansim/global_planner/README.md) | `navmesh`, `astar`, `dijkstra` | `navmesh` |
-| [Local Planner](arena_humansim/arena_humansim/local_planner/README.md) | `sfm`, `hsfm`, `orca`, `straight`, `socialgail` | `sfm` |
+| [Local Planner](arena_humansim/arena_humansim/local_planner/README.md) | `sfm`, `hsfm`, `helbing`, `johansson`, `karamouzas`, `zanlungo`, `gcf`, `orca`, `pedvo`, `straight`, `nsp`, `socialgail` | `sfm` |
 | [Perception](arena_humansim/arena_humansim/perception/README.md) | `default` | `default` |
 | [Animation](arena_humansim/arena_humansim/animation/README.md) | `noop`, `kinematic` | `noop` |
 | [Collision](arena_humansim/arena_humansim/collision/README.md) | `wall_projection`, `noop` | `wall_projection` |
@@ -95,6 +95,7 @@ Matcher semantics (seek dispatch by handle kind, visibility gating, queueing, se
 |---|---|---|---|
 | `TALK_TO` | NONE | 2 | Face-to-face conversation |
 | `GROUP_CONVERSATION` | NONE | 2+ | Multi-agent group talk |
+| `GROUP_WALK` | NONE | 2+ | Group walking with its first participant: abreast on the leader's trail, a V trailing back from the leader in moderate crowds, single file in dense crowds or where walls leave no width, circling up when the leader stops (`circle_on_stop`). Bind members at spawn with an `interaction_scripts` entry |
 | `WAVE_AT` | NONE | 2 | Symmetric greeting |
 | `SIT_ON` / `LIE_ON` | OBJECT | 1 | Occupy furniture (FIFO queue) |
 | `USE` | OBJECT | 1 | Use a world object (FIFO queue) |
@@ -208,10 +209,14 @@ Re-seating moves every live agent that follows the defaults onto the current loc
 ### ROS Interface
 
 **Publishes:**
-- `agent_states` (`AgentStatesMsg`) — all agent positions, velocities, states
+- `agent_states` (`AgentFrame`) - per-tick positions, velocities, radii, kinds, animation states and policy indices of the engine's own agents, one array per field
+- `agent_meta` (`AgentMeta`, latched) - policy table plus name and handedness per agent, sent when it changes and at every reset, stamped like the frame of the same tick
+- `agent_gestures` (`AgentGestures`, latched) - active gestures with their owner, sent when they change
+- `viz_state` (`AgentViz`) - per-tick marker inputs while `publish_markers >= 1`, drawn into `viz` by `arena_humansim_viz_node` (started by the launch file, its `output_topic`, `offset_x` and `offset_y` parameters retarget and shift the markers at runtime, `robot_bodies: false` drops the body and heading of robot-kind agents). One message with `level: 0` clears the markers when the level drops to 0. The engine builds the per-tick message only while the topic has a subscriber, and `arena_humansim_viz_node` subscribes only while its output topic has one (checked once per second)
+- `viz`, `viz_static/<bucket>` (`MarkerArray`) - infrastructure and module markers drawn by the engine itself. Module markers are drawn only while `viz` has a subscriber
 
 **Subscribes:**
-- `world_state` — external robot state updates
+- `world_state` (`AgentStates`) - poses of externally driven robots and possessed pedestrians. A robot fed without a velocity takes the one between its last two poses, from their header stamps: zero when the stamps are more than 0.2 s apart or do not advance, or when the pose jumped faster than 10 m/s. It keeps that velocity for 0.2 s after the last message. A robot declared in the scenario moves by the feed alone while it is fed, and its own policy takes over again 2 s after the last message
 - `/clock` (subsystem mode) drives the tick: every message runs the ticks its sim time has covered since the epoch, so a held clock cannot starve the engine
 
 **Services:**
