@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import urllib.request
 from collections.abc import Sequence
 from pathlib import Path
@@ -115,10 +116,11 @@ class NSPPlanner(LocalPlanner):
         if path != _DEFAULT_CHECKPOINT:
             raise FileNotFoundError(f"NSP checkpoint not found at {path}")
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
+        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+        tmp = Path(tmp_name)
         self._logger.info(f"Fetching NSP checkpoint from {_UPSTREAM_CHECKPOINT_URL} -> {path}")
         try:
-            with urllib.request.urlopen(_UPSTREAM_CHECKPOINT_URL, timeout=_FETCH_TIMEOUT_SECONDS) as resp, open(tmp, "wb") as f:
+            with os.fdopen(fd, "wb") as f, urllib.request.urlopen(_UPSTREAM_CHECKPOINT_URL, timeout=_FETCH_TIMEOUT_SECONDS) as resp:
                 while True:
                     chunk = resp.read(1 << 16)
                     if not chunk:
