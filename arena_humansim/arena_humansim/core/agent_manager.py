@@ -18,6 +18,9 @@ from arena_humansim_msgs.msg import AgentState as AgentStateMsg
 from arena_humansim_msgs.msg import AgentStates as AgentStatesMsg
 from arena_humansim_msgs.msg import AgentViz as AgentVizMsg
 from arena_humansim_msgs.msg import Gesture as GestureMsg
+from arena_humansim_msgs.msg import InteractionEvent as InteractionEventMsg
+from arena_humansim_msgs.msg import Interactions as InteractionsMsg
+from arena_humansim_msgs.msg import InteractionStatus as InteractionStatusMsg
 from arena_humansim_msgs.msg import ObstacleConfig as ObstacleConfigMsg
 from arena_humansim_msgs.msg import Shape as ShapeMsg
 from arena_humansim_msgs.msg import SinkConfig as SinkConfigMsg
@@ -75,7 +78,7 @@ from arena_humansim.core.behavior.compiler import BehaviorTreeFactory
 from arena_humansim.core.despawn_monitor import DespawnMonitor
 from arena_humansim.core.formation.clearance import Clearance
 from arena_humansim.core.interaction_kinds import InteractionType
-from arena_humansim.core.interaction_manager import InteractionManager
+from arena_humansim.core.interaction_manager import CONTACT_ENABLED, DEFAULT_STANDING_DISTANCE, GESTURE_ENABLED, GESTURE_MODES, InteractionManager
 from arena_humansim.core.locomotion import LocomotionExtension
 from arena_humansim.core.logger import SimulationLogger
 from arena_humansim.core.pool import KIND_ROBOT, AgentPool, PoolAware
@@ -149,6 +152,9 @@ _RECONFIGURABLE_PARAMS = _TUNABLE_PARAMS | {
     "local_planner",
     "publish_markers",
     "rtf",
+    "contact_mode",
+    "locomotion_standing_distance",
+    "gesture_mode",
 }
 
 _EXTERNAL_TIMEOUT_S = 2.0
@@ -308,6 +314,12 @@ class AgentManager(Node):
         self.declare_parameter("time", 0.0)
         self.declare_parameter("rtf", 1.0, ParameterDescriptor(floating_point_range=[FloatingPointRange(from_value=0.0, to_value=1000.0)]))
         self.declare_parameter("subsystem_overrun_policy", "lag")
+        # motion-matched control arm: contact kinds hold at locomotion_standing_distance with no clip, settable per episode
+        self.declare_parameter("contact_mode", CONTACT_ENABLED)
+        self.declare_parameter("locomotion_standing_distance", DEFAULT_STANDING_DISTANCE)
+        # gesture-off control arm: the agents behave the same but publish no gesture, so nothing is rendered and
+        # no consumer can read one. The pedestrian is then what a simulator without the layer offers: a body that walks.
+        self.declare_parameter("gesture_mode", GESTURE_ENABLED)
         self._static_params = frozenset(self.list_parameters([], 0).names) - inherited - _RECONFIGURABLE_PARAMS
 
         seed = self.get_parameter("seed").value
@@ -387,6 +399,12 @@ class AgentManager(Node):
         self._policy_name_to_idx = {self._module_selections["local_planner"]: 0}
         self._policies = [self._local_planner]
         self._interaction_manager = InteractionManager(rng_manager=self._rng)
+        self._interaction_manager.set_contact_mode(
+            str(self.get_parameter("contact_mode").value),
+            float(self.get_parameter("locomotion_standing_distance").value),
+        )
+        self._gesture_mode = str(self.get_parameter("gesture_mode").value)
+        self.add_on_set_parameters_callback(self._on_contact_params)
         self._animation = MotionAnimation.create(
             self._module_selections["animation"],
         )
@@ -488,6 +506,13 @@ class AgentManager(Node):
             AgentVizMsg,
             "viz_state",
             QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.VOLATILE),
+        )
+
+        # lifecycle edges ride on this, a dropped message loses an edge: keep it reliable
+        self._interactions_pub = self.create_publisher(
+            InteractionsMsg,
+            "interactions",
+            QoSProfile(depth=50, reliability=ReliabilityPolicy.RELIABLE),
         )
 
         self._world_geometry_pub = self.create_publisher(
@@ -1617,6 +1642,7 @@ class AgentManager(Node):
             self._publish_agent_meta(frame.header)
         if self._gestures_dirty or is_bt_tick:
             self._publish_agent_gestures(frame.header)
+        self._interactions_pub.publish(self._build_interactions_msg(interactions, frame.header))
 
         if self._marker_pub is not None and self._publish_markers > 0:
             pool.sync_back(agents)
@@ -2303,6 +2329,12 @@ class AgentManager(Node):
         gait_phase, gait_cadence = self._locomotion.frame_arrays(rows)
         msg.gait_phase = _flat("d", gait_phase)
         msg.gait_cadence = _flat("d", gait_cadence)
+        # group-aware consumers (arena_social_cost_layer) read the active interaction per agent; gesture_mode=disabled
+        # withholds it like the gestures
+        im = self._interaction_manager
+        active = [im.active_interaction(aid) for aid in pool.agent_ids[rows].tolist()] if self._gesture_mode == GESTURE_ENABLED else [None] * len(rows)
+        msg.interaction_id = array.array("i", [a[0] if a is not None else -1 for a in active])
+        msg.interaction_type = array.array("B", [int(a[1]) if a is not None else 0 for a in active])
         return msg
 
     def _publish_agent_meta(self, header: Header) -> None:
@@ -2337,7 +2369,9 @@ class AgentManager(Node):
         for aid in self._pool.agent_ids[self._own_rows()].tolist():
             agent = self._agents.get(aid)
             mv = agent.movement if agent is not None else None
-            if isinstance(mv, BehaviorTreeMovement):
+            # gesture_mode=disabled is the no-layer control: the agents behave the same, but nothing they do while
+            # interacting reaches a consumer, neither the clip nor the interaction id (see _build_agent_frame)
+            if isinstance(mv, BehaviorTreeMovement) and self._gesture_mode == GESTURE_ENABLED:
                 owned.extend((aid, g) for g in mv.gestures)
         if owned == self._gestures_published:
             return
@@ -2502,6 +2536,59 @@ class AgentManager(Node):
         msg.wp_y = array.array("d", wp_y)
         msg.wp_active = array.array("I", wp_active)
         msg.wp_active_radius = array.array("d", wp_active_radius)
+        return msg
+
+    def _on_contact_params(self, params: list[Parameter]) -> SetParametersResult:
+        """Validate and apply contact_mode / locomotion_standing_distance / gesture_mode, other params pass through."""
+        mode = self._interaction_manager.contact_mode
+        distance: float | None = None
+        gesture_mode = self._gesture_mode
+        for p in params:
+            if p.name == "contact_mode":
+                mode = str(p.value)
+            elif p.name == "locomotion_standing_distance":
+                distance = float(p.value)
+            elif p.name == "gesture_mode":
+                gesture_mode = str(p.value)
+        if gesture_mode not in GESTURE_MODES:
+            return SetParametersResult(successful=False, reason=f"gesture_mode must be one of {GESTURE_MODES}, got {gesture_mode!r}")
+        try:
+            self._interaction_manager.set_contact_mode(mode, distance)
+        except ValueError as e:
+            return SetParametersResult(successful=False, reason=str(e))
+        if gesture_mode != self._gesture_mode:
+            self._gesture_mode = gesture_mode
+            self._gestures_dirty = True  # the latched gestures go out again, empty when disabled
+        return SetParametersResult(successful=True)
+
+    def _build_interactions_msg(self, interactions: dict[int, Any], header: Any) -> InteractionsMsg:  # noqa: ANN401
+        """Live interactions plus the lifecycle edges fired this tick, stamped like the agent states."""
+        im = self._interaction_manager
+        msg = InteractionsMsg()
+        msg.header = header
+        for iid in sorted(interactions):
+            interaction = interactions[iid]
+            if interaction.outcome not in (InteractionOutcome.FORMING, InteractionOutcome.ACTIVE):
+                continue
+            contract = interaction.contract
+            status = InteractionStatusMsg()
+            status.interaction_id = int(iid)
+            status.interaction_type = int(interaction.type)
+            status.outcome = int(interaction.outcome)
+            status.participants = [int(p) for p in interaction.participants]
+            status.queue = [int(q) for q in contract.queue]
+            status.arrived = im.all_arrived(interaction)
+            status.holding = im.is_holding(interaction)
+            status.hold_elapsed = float(contract.elapsed)
+            status.duration = float(contract.duration) if contract.duration is not None else -1.0
+            msg.interactions.append(status)
+        for edge in im.drain_edges():
+            event = InteractionEventMsg()
+            event.interaction_id = int(edge.interaction_id)
+            event.interaction_type = int(edge.interaction_type)
+            event.event = int(edge.edge)
+            event.participants = [int(p) for p in edge.participants]
+            msg.events.append(event)
         return msg
 
     def _spawn_agents_callback(
