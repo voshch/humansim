@@ -188,7 +188,8 @@ def compute_pairwise_table(df: pd.DataFrame) -> pd.DataFrame:
                     "hausdorff": d,
                 }
             )
-    return pd.DataFrame(rows)
+    columns = ["bucket", "scenario", "robot_policy", "seed", "agent_id", "p1", "p2", "class1", "class2", "same_class", "hausdorff"]
+    return pd.DataFrame(rows, columns=columns)
 
 
 def _scenario_equal_weight(slice_df: pd.DataFrame) -> float:
@@ -333,7 +334,8 @@ def headline(pairwise_df: pd.DataFrame, n_bootstrap: int = 1000, ci_seed: int = 
     if not pooled.empty:
         rows.append(_agg(pooled, "all"))
 
-    return pd.DataFrame(rows)
+    columns = ["bucket", "within_class_mean", "across_class_mean", "ratio_K", "K_lo", "K_hi", "n_pairs", "n_scenarios"]
+    return pd.DataFrame(rows, columns=columns)
 
 
 def run_analysis(
