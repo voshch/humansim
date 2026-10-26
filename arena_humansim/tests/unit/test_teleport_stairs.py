@@ -233,13 +233,14 @@ def test_pedestrian_short_of_the_seam_trigger_is_not_teleported(agent_factory: C
     assert tz.hold(pool, 0, 1000, 0.05) == []
 
 
-def test_landing_on_an_occupied_spot_holds_at_the_seam_until_it_clears(agent_factory: Callable[..., BaseAgent]) -> None:
+def test_landing_on_an_occupied_spot_holds_on_the_trigger_line_until_it_clears(agent_factory: Callable[..., BaseAgent]) -> None:
     tz = _zones([_up("escalator", 0.5), _up_b("escalator", -0.5, ())])
-    pool = _pool(agent_factory, (1, 9.6, 5.2), (2, 22.8, 0.7))
+    pool = _pool(agent_factory, (1, 9.9, 5.3), (2, 22.8, 0.7))
     tz.transfers[1] = Transfer(goal=(GOAL_B.x, GOAL_B.y), zone="up", destination="up_b")
     pool.vel[0] = (0.5, 0.0)
     pool.desired_vel[0] = 1.2
     assert tz.hold(pool, 0, 1000, 0.05) == []
+    assert tuple(pool.pos[0]) == pytest.approx((9.55, 5.3))
     tz.carry(pool)
     assert not pool.vel[0].any()
     assert pool.desired_vel[0] == 0.0
@@ -256,11 +257,14 @@ def test_two_crossings_in_one_tick_do_not_land_on_each_other(agent_factory: Call
     assert [aid for aid, *_ in landed] == [1]
 
 
-def test_belt_rider_without_a_transfer_crosses_but_a_stair_walker_without_one_does_not(agent_factory: Callable[..., BaseAgent]) -> None:
+def test_pedestrian_past_the_seam_without_a_transfer_crosses_unless_the_half_can_only_be_left(agent_factory: Callable[..., BaseAgent]) -> None:
     belt = _zones([_up("escalator", 0.5), _up_b("escalator", -0.5, ())])
     assert [aid for aid, *_ in belt.hold(_pool(agent_factory, (1, 9.6, 5.2)), 0, 1000, 0.05)] == [1]
+    assert belt.hold(_pool(agent_factory, (1, 22.8, 0.3)), 0, 1000, 0.05) == []
     stairs = _zones([_up(), _up_b()])
-    assert stairs.hold(_pool(agent_factory, (1, 9.6, 5.2)), 0, 1000, 0.05) == []
+    [(aid, x, y, _)] = stairs.hold(_pool(agent_factory, (1, 22.8, 0.3)), 0, 1000, 0.05)
+    assert aid == 1
+    assert (x, y) == pytest.approx((9.55 - LANDING_BACKOFF, 5.2))
 
 
 def test_robot_on_a_stair_is_neither_carried_nor_teleported(agent_factory: Callable[..., BaseAgent]) -> None:

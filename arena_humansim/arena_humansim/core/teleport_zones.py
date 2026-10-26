@@ -296,15 +296,14 @@ class TeleportZones:
                 continue
             aid = int(pool.agent_ids[i])
             transfer = self.transfers.get(aid)
-            if transfer is not None and transfer.zone == zone.name:
-                dest = transfer.destination
-            elif zone.belt > 0.0:
-                dest = zone.destinations[0]
-            else:
-                continue
+            dest = transfer.destination if transfer is not None and transfer.zone == zone.name else zone.destinations[0]
             lx, ly, theta = self._landing(zone, self.zones[dest], x, y, float(pool.theta[i]))
             if self._occupied(pool, i, lx, ly, landed):
                 self._held.add(aid)
+                ax, ay = zone.axis
+                excess = zone.along(x, y) - zone.along(zone.hold.x, zone.hold.y)
+                pool.pos[i, 0] = x - excess * ax
+                pool.pos[i, 1] = y - excess * ay
                 pool.vel[i] = 0.0
                 pool.prev_vel[i] = 0.0
                 pool.desired_vel[i] = 0.0
