@@ -48,6 +48,8 @@ Interaction class (`interaction_class:`, optional name string): social-force cla
 
 Assets (`assets:`, optional list of ASA tags): tag query that selects the visual model of a source-spawned agent, e.g. `human::mobility::wheelchair`. Passed through to the renderer (task_generator), humansim never reads it.
 
+Climbs (`climbs:`, optional list among `stairs` and `escalator`, default both): the teleport zone stair kinds the type is routed over, see the [teleport zones](../../../README.md#stairs) section. A pedestrian whose type does not climb a kind takes a route over cabins and other stairs, or stays on its level when none exists. `wheelchair_manual` climbs `[]`. Any other word rejects the type.
+
 Module selection (name strings, not distributions):
 
 - `local_planner` - one of [local_planner/README.md](../../arena_humansim/local_planner/README.md)'s `Available` table (default: launch param, normally `sfm`).

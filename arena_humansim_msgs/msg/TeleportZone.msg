@@ -7,3 +7,5 @@ geometry_msgs/Pose2D hold            # fallback spot inside, heading riders hold
 geometry_msgs/Point32[] footprint    # zone polygon, z unused
 bool open                            # passable when added
 float64 delay                        # s until a holder self-teleports, <0 never
+string kind                          # empty for a cabin, stairs or escalator for a stair half walked from entry to hold
+float64 belt                         # m/s along entry to hold a stair carries its riders, <0 back
