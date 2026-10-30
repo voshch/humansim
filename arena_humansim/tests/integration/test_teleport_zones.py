@@ -477,6 +477,62 @@ def test_boarding_rider_steps_back_to_waiting_when_a_robot_takes_the_zone(manage
     assert transfers[1].slot == -1
 
 
+def _alighting_manager(manager_factory: Callable[..., AgentManager], name: str, let_out: float) -> AgentManager:
+    agents = [
+        AgentConfig(agent_id=1, spawn_pose=Pose2D(x=1.0, y=3.0), goal_sequence=[Pose2D(x=SINK.x, y=SINK.y)], desired_velocity=1.2, agent_radius=0.25),
+        AgentConfig(agent_id=2, spawn_pose=Pose2D(x=1.0, y=1.0), goal_sequence=[Pose2D(x=1.0, y=1.0)], desired_velocity=1.2, agent_radius=0.25),
+    ]
+    params = [Parameter("zone_let_out_timeout", Parameter.Type.DOUBLE, let_out)]
+    mgr = manager_factory(attrs.evolve(_scenario(name, "navmesh"), flow=None, agents=agents), node_name=f"test_{name}", extra_params=params)
+    zones = [_zone("big_a", "big_b", 0.0, 3.0, half=1.0), _zone("big_b", "big_a", ROOM_B_X, 3.0, half=1.0)]
+    assert _set_zones(mgr, zones).success
+    transfers = mgr._zones.transfers
+    _tick_until(mgr, lambda: 1 in transfers and transfers[1].phase == Phase.WAIT, 300)
+    assert _teleport(mgr, [2], [(5.6, 3.0)]).success
+    assert _set_access(mgr, "big_a", True).success
+    return mgr
+
+
+def _inside(mgr: AgentManager, zone: str, aid: int) -> bool:
+    return mgr._zones.zones[zone].contains(*_pos(mgr, aid))
+
+
+def test_waiting_rider_boards_only_once_the_arrived_pedestrian_has_left_the_zone(manager_factory: Callable[..., AgentManager]) -> None:
+    mgr = _alighting_manager(manager_factory, "zone_let_out", 10.0)
+    transfers = mgr._zones.transfers
+    for _ in range(200):
+        if transfers[1].phase == Phase.BOARD:
+            break
+        assert transfers[1].phase == Phase.WAIT
+        mgr.tick()
+    else:
+        raise AssertionError("rider never boarded")
+    assert not _inside(mgr, "big_a", 2)
+
+
+def test_zero_let_out_timeout_boards_while_the_arrived_pedestrian_is_still_inside(manager_factory: Callable[..., AgentManager]) -> None:
+    mgr = _alighting_manager(manager_factory, "zone_no_let_out", 0.0)
+    mgr.tick()
+    assert mgr._zones.transfers[1].phase == Phase.BOARD
+    assert _inside(mgr, "big_a", 2)
+
+
+def test_waiting_rider_boards_past_a_robot_that_stays_in_the_zone_after_the_let_out_timeout(manager_factory: Callable[..., AgentManager]) -> None:
+    center = Pose2D(x=5.6, y=3.0)
+    agents = [
+        AgentConfig(agent_id=-1, kind=1, policy="", agent_type="robot", agent_radius=0.1, spawn_pose=center, goal_sequence=[center], desired_velocity=1.0),
+        AgentConfig(agent_id=1, spawn_pose=Pose2D(x=1.0, y=3.0), goal_sequence=[Pose2D(x=SINK.x, y=SINK.y)], desired_velocity=1.2, agent_radius=0.25),
+    ]
+    params = [Parameter("zone_let_out_timeout", Parameter.Type.DOUBLE, 1.0)]
+    mgr = manager_factory(attrs.evolve(_scenario("zone_let_out_robot", "navmesh"), flow=None, agents=agents), node_name="test_zone_let_out_robot", extra_params=params)
+    assert _set_zones(mgr, [_zone("big_a", "big_b", 0.0, 3.0, half=1.0), _zone("big_b", "big_a", ROOM_B_X, 3.0, half=1.0)]).success
+    transfers = mgr._zones.transfers
+    _tick_until(mgr, lambda: 1 in transfers and transfers[1].phase == Phase.WAIT, 300)
+    assert _set_access(mgr, "big_a", True).success
+    assert _tick_until(mgr, lambda: transfers[1].phase == Phase.BOARD, 100) == round(1.0 / 0.05) + 1
+    assert _inside(mgr, "big_a", -1)
+
+
 def test_teleport_zones_from_scenario_yaml_reach_the_manager_open_with_zero_delay(manager_factory: Callable[..., AgentManager], tmp_path: Path) -> None:
     walls = [{"name": w.name, "start": {"x": w.start.x, "y": w.start.y}, "end": {"x": w.end.x, "y": w.end.y}} for w in _room("a", 0.0) + _room("b", ROOM_B_X)]
     footprint = [{"x": 4.6, "y": 4.0}, {"x": 5.8, "y": 4.0}, {"x": 5.8, "y": 5.2}, {"x": 4.6, "y": 5.2}]

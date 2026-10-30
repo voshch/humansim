@@ -211,7 +211,7 @@ def test_crossing_the_seam_lands_mirrored_past_the_partner_seam_keeping_side_and
     pool = _pool(agent_factory, (1, 9.6, 5.4))
     pool.theta[0] = 0.1
     tz.transfers[1] = Transfer(goal=(GOAL_B.x, GOAL_B.y), zone="up", destination="up_b")
-    [(aid, x, y, theta)] = tz.hold(pool, 0, 1000, 0.05)
+    [(aid, x, y, theta)] = tz.hold(pool, 0, 1000, 0.05, 0)
     assert aid == 1
     assert (x, y) == pytest.approx((22.8 - 0.2, 0.45 + LANDING_BACKOFF))
     assert theta == pytest.approx(HALF_PI + 0.1)
@@ -222,7 +222,7 @@ def test_landing_offset_outside_the_partner_footprint_falls_back_to_its_center_l
     tz = _zones([_up(), narrow])
     pool = _pool(agent_factory, (1, 9.6, 5.8))
     tz.transfers[1] = Transfer(goal=(GOAL_B.x, GOAL_B.y), zone="up", destination="up_b")
-    [(_, x, y, _)] = tz.hold(pool, 0, 1000, 0.05)
+    [(_, x, y, _)] = tz.hold(pool, 0, 1000, 0.05, 0)
     assert (x, y) == pytest.approx((22.8, 0.45 + LANDING_BACKOFF))
 
 
@@ -230,7 +230,7 @@ def test_pedestrian_short_of_the_seam_trigger_is_not_teleported(agent_factory: C
     tz = _zones([_up(), _up_b()])
     pool = _pool(agent_factory, (1, 9.4, 5.2))
     tz.transfers[1] = Transfer(goal=(GOAL_B.x, GOAL_B.y), zone="up", destination="up_b")
-    assert tz.hold(pool, 0, 1000, 0.05) == []
+    assert tz.hold(pool, 0, 1000, 0.05, 0) == []
 
 
 def test_landing_on_an_occupied_spot_holds_on_the_trigger_line_until_it_clears(agent_factory: Callable[..., BaseAgent]) -> None:
@@ -239,30 +239,30 @@ def test_landing_on_an_occupied_spot_holds_on_the_trigger_line_until_it_clears(a
     tz.transfers[1] = Transfer(goal=(GOAL_B.x, GOAL_B.y), zone="up", destination="up_b")
     pool.vel[0] = (0.5, 0.0)
     pool.desired_vel[0] = 1.2
-    assert tz.hold(pool, 0, 1000, 0.05) == []
+    assert tz.hold(pool, 0, 1000, 0.05, 0) == []
     assert tuple(pool.pos[0]) == pytest.approx((9.55, 5.3))
     tz.carry(pool)
     assert not pool.vel[0].any()
     assert pool.desired_vel[0] == 0.0
     assert tz.standing(pool)[0]
     pool.pos[1] = (22.8, 2.5)
-    [(aid, *_)] = tz.hold(pool, 1, 1000, 0.05)
+    [(aid, *_)] = tz.hold(pool, 1, 1000, 0.05, 0)
     assert aid == 1
 
 
 def test_two_crossings_in_one_tick_do_not_land_on_each_other(agent_factory: Callable[..., BaseAgent]) -> None:
     tz = _zones([_up("escalator", 0.5), _up_b("escalator", -0.5, ())])
     pool = _pool(agent_factory, (1, 9.6, 5.2), (2, 9.7, 5.25))
-    landed = tz.hold(pool, 0, 1000, 0.05)
+    landed = tz.hold(pool, 0, 1000, 0.05, 0)
     assert [aid for aid, *_ in landed] == [1]
 
 
 def test_pedestrian_past_the_seam_without_a_transfer_crosses_unless_the_half_can_only_be_left(agent_factory: Callable[..., BaseAgent]) -> None:
     belt = _zones([_up("escalator", 0.5), _up_b("escalator", -0.5, ())])
-    assert [aid for aid, *_ in belt.hold(_pool(agent_factory, (1, 9.6, 5.2)), 0, 1000, 0.05)] == [1]
-    assert belt.hold(_pool(agent_factory, (1, 22.8, 0.3)), 0, 1000, 0.05) == []
+    assert [aid for aid, *_ in belt.hold(_pool(agent_factory, (1, 9.6, 5.2)), 0, 1000, 0.05, 0)] == [1]
+    assert belt.hold(_pool(agent_factory, (1, 22.8, 0.3)), 0, 1000, 0.05, 0) == []
     stairs = _zones([_up(), _up_b()])
-    [(aid, x, y, _)] = stairs.hold(_pool(agent_factory, (1, 22.8, 0.3)), 0, 1000, 0.05)
+    [(aid, x, y, _)] = stairs.hold(_pool(agent_factory, (1, 22.8, 0.3)), 0, 1000, 0.05, 0)
     assert aid == 1
     assert (x, y) == pytest.approx((9.55 - LANDING_BACKOFF, 5.2))
 
@@ -272,7 +272,7 @@ def test_robot_on_a_stair_is_neither_carried_nor_teleported(agent_factory: Calla
     pool = _pool(agent_factory, (-1, 9.6, 5.2), (-2, 6.0, 5.2))
     pool.kind[:2] = KIND_ROBOT
     pool.vel[1] = (0.0, 0.3)
-    assert tz.hold(pool, 0, 1000, 0.05) == []
+    assert tz.hold(pool, 0, 1000, 0.05, 0) == []
     tz.carry(pool)
     assert np.allclose(pool.vel[1], (0.0, 0.3))
     assert not tz.riders

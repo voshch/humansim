@@ -151,6 +151,7 @@ _TUNABLE_PARAMS = frozenset(
         "arrival_r_exit",
         "arrival_tau_brake",
         "zone_wait_timeout",
+        "zone_let_out_timeout",
         "profile_phases",
         "profile_interval",
     }
@@ -360,6 +361,7 @@ class AgentManager(Node):
         self.declare_parameter("arrival_r_exit", 0.30)
         self.declare_parameter("arrival_tau_brake", 0.15)
         self.declare_parameter("zone_wait_timeout", 30.0)
+        self.declare_parameter("zone_let_out_timeout", 10.0)
         self.declare_parameter("publish_markers", 0, ParameterDescriptor(integer_range=[IntegerRange(from_value=0, to_value=2)]))
         self.declare_parameter("profile_phases", False)
         self.declare_parameter("profile_interval", 0)
@@ -810,6 +812,7 @@ class AgentManager(Node):
             self._logger.warning(f"arrival_tau_brake ({self._arrival_tau_brake}) < dt ({self._dt}), clamping to dt")
             self._arrival_tau_brake = float(self._dt)
         self._zone_wait_ticks = max(1, int(round(self._float_param("zone_wait_timeout") / self._dt)))
+        self._zone_let_out_ticks = max(0, int(round(self._float_param("zone_let_out_timeout") / self._dt)))
         self._profile_phases = self.get_parameter("profile_phases").value
         self._profile_interval = self._int_param("profile_interval")
 
@@ -1699,7 +1702,7 @@ class AgentManager(Node):
                 desired_velocity=agent.state.desired_velocity,
             )
         self._apply_desired_speeds(agents, pool)
-        for aid, x, y, theta in self._zones.hold(pool, self._tick_count, self._zone_wait_ticks, self._dt):
+        for aid, x, y, theta in self._zones.hold(pool, self._tick_count, self._zone_wait_ticks, self._dt, self._zone_let_out_ticks):
             idx = pool.idx(aid)
             self._teleport_agent(aid, x, y, theta, float(pool.agent_radius[idx]))
             self._zones.forget(aid)
