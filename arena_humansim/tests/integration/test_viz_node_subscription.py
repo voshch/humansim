@@ -18,14 +18,16 @@ from ._capture import STREAM, settle, spin_until
 NS = "/viz_node_subscription"
 
 
-def test_viz_node_subscribes_only_while_its_output_is_watched(rclpy_context: object) -> None:  # noqa: ARG001
+def test_viz_node_subscribes_only_while_its_output_is_watched() -> None:
     try:
         prefix = get_package_prefix("arena_humansim_viz")
     except PackageNotFoundError:
         pytest.skip("arena_humansim_viz is not built")
+    context = rclpy.Context()
+    rclpy.init(context=context)
     proc = subprocess.Popen([f"{prefix}/lib/arena_humansim_viz/arena_humansim_viz_node", "--ros-args", "-r", f"__ns:={NS}"])
-    node = rclpy.create_node("viz_node_subscription_probe")
-    executor = SingleThreadedExecutor()
+    node = rclpy.create_node("viz_node_subscription_probe", context=context)
+    executor = SingleThreadedExecutor(context=context)
     executor.add_node(node)
     try:
         state = node.create_publisher(AgentVizMsg, f"{NS}/viz_state", STREAM)
@@ -43,3 +45,5 @@ def test_viz_node_subscribes_only_while_its_output_is_watched(rclpy_context: obj
         proc.wait(timeout=10.0)
         executor.remove_node(node)
         node.destroy_node()
+        executor.shutdown()
+        rclpy.shutdown(context=context)
