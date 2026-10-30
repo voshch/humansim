@@ -174,6 +174,8 @@ class TeleportZoneConfig:
     footprint: list[Pose2D] = attrs.Factory(list)
     open: bool = True
     delay: float = 0.0
+    kind: str = ""
+    belt: float = 0.0
 
 
 @attrs.define

@@ -269,17 +269,18 @@ class LocomotionExtension(PoolAware):
         max_d = pool.pivot_angular_velocity[rec] * dt
         pool.theta[rec[owned]] = (heading + np.where(rotating, np.clip(err, -max_d, max_d), 0.0))[owned]
 
-    def overlay(self, pool: AgentPool, dt: float) -> None:
-        """Advance the gait phase and lay the speed and sway profiles over pool.vel for this tick's integration only."""
+    def overlay(self, pool: AgentPool, dt: float, standing: np.ndarray | None = None) -> None:
+        """Advance the gait phase and lay the speed and sway profiles over pool.vel for this tick's integration only, `standing` rows gaiting as at rest and moved unprofiled."""
         rows = self._rows()
         if rows.size == 0:
             return
         vel = pool.vel[rows]
         speed = np.hypot(vel[:, 0], vel[:, 1])
-        cadence = np.clip(self.cadence_base[rows] + self.cadence_per_speed[rows] * speed, self.cadence_min[rows], self.cadence_max[rows])
+        still = np.zeros(rows.size, dtype=np.bool_) if standing is None else standing[rows]
+        cadence = np.clip(self.cadence_base[rows] + self.cadence_per_speed[rows] * np.where(still, 0.0, speed), self.cadence_min[rows], self.cadence_max[rows])
         self.cadence[rows] = cadence
         self.phase[rows] += _TWO_PI * cadence * dt
-        normal = self.mode[rows] == MODE_NORMAL
+        normal = (self.mode[rows] == MODE_NORMAL) & ~still
         factor = np.where(normal, np.maximum(1.0 + self.speed_scale[rows] * self._profile(rows, self.speed_amp, self.speed_phase, self.speed_bias), MIN_SPEED_FACTOR), 1.0)
         lateral = np.where(normal & (self.kinematics[rows] == 0), speed * self._profile(rows, self.lateral_amp, self.lateral_phase, self.lateral_bias), 0.0)
         theta = pool.theta[rows]
