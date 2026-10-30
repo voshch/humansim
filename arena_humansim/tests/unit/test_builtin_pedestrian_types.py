@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from arena_humansim.core.agents import loader
-from arena_humansim.core.agents.types import AgentType, sample_agent_type
+from arena_humansim.core.agents.types import STAIRS_KINDS, AgentType, sample_agent_type
 from arena_humansim.utils.scenario_loader import converter
 
 KINEMATIC = ("adult", "elder", "child", "hurried", "distracted")
@@ -65,3 +65,18 @@ def test_every_type_samples(types: dict[str, AgentType]) -> None:
         t = types[name]
         assert t.desired_velocity.clip_low <= p.desired_velocity <= t.desired_velocity.clip_high
         assert t.agent_radius.clip_low <= p.agent_radius <= t.agent_radius.clip_high
+
+
+def test_walkers_climb_every_stair_kind_and_the_manual_wheelchair_none(types: dict[str, AgentType]) -> None:
+    rng = np.random.default_rng(3)
+    for name in KINEMATIC:
+        assert types[name].climbs == STAIRS_KINDS, name
+    assert types["wheelchair_manual"].climbs == ()
+    assert sample_agent_type(types["wheelchair_manual"], rng).climbs == ()
+    assert sample_agent_type(types["adult"], rng).climbs == STAIRS_KINDS
+
+
+def test_climbs_rejects_an_unknown_stair_kind() -> None:
+    assert converter.structure({"name": "x", "climbs": ["stairs"]}, AgentType).climbs == ("stairs",)
+    with pytest.raises(ValueError, match="ladder"):
+        converter.structure({"name": "x", "climbs": ["ladder"]}, AgentType)

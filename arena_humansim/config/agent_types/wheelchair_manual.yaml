@@ -2,6 +2,7 @@ name: wheelchair_manual
 extends: adult
 interaction_class: wheelchair
 assets: [human::mobility::wheelchair]
+climbs: []
 
 agent_radius: 0.325
 desired_velocity: {mean: 0.9, std: 0.15, clip_low: 0.3, clip_high: 1.4}

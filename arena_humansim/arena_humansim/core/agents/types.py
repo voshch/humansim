@@ -8,6 +8,7 @@ __all__ = [
     "ChannelDef",
     "ClipDef",
     "ConditionalTune",
+    "STAIRS_KINDS",
     "GoToStepDef",
     "HEADING_SOURCES",
     "KINEMATICS",
@@ -288,6 +289,7 @@ class PerceptionDist:
 
 
 KINEMATICS = ("holonomic", "along_heading")
+STAIRS_KINDS = ("stairs", "escalator")
 HEADING_SOURCES = {"attraction": 0.0, "total": 1.0}
 MAX_HARMONICS = 3
 
@@ -355,6 +357,7 @@ class AgentType:
     pose: dict = attrs.Factory(dict)
     interaction_class: str = ""
     assets: tuple[str, ...] = ()
+    climbs: tuple[str, ...] = attrs.field(default=STAIRS_KINDS, converter=tuple, validator=attrs.validators.deep_iterable(attrs.validators.in_(STAIRS_KINDS)))
 
     perception_stack: tuple[str, ...] = ("default",)
     local_planner: str | None = None
@@ -423,6 +426,7 @@ class SampledParams:
     local_planner_params: dict[str, float] = attrs.Factory(dict)
     locomotion: SampledLocomotion = attrs.Factory(SampledLocomotion)
     interaction_class: str = ""
+    climbs: tuple[str, ...] = STAIRS_KINDS
 
     perception_stack: tuple[str, ...] = ("default",)
     local_planner: str | None = None
@@ -537,6 +541,7 @@ def sample_agent_type(
         local_planner_params=sampled_lp,
         locomotion=locomotion,
         interaction_class=agent_type.interaction_class,
+        climbs=agent_type.climbs,
         perception_stack=agent_type.perception_stack,
         local_planner=agent_type.local_planner,
         global_planner=agent_type.global_planner,

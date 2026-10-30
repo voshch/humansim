@@ -9,7 +9,8 @@ import py_trees
 import pytest
 import yaml
 from arena_humansim.core.agent_manager import AgentManager
-from arena_humansim.core.teleport_zones import HOLD_RADIUS, WAIT_RADIUS, Phase
+from arena_humansim.core.animation_kinds import AnimationType
+from arena_humansim.core.teleport_zones import HOLD_RADIUS, LANDING_BACKOFF, STAIR_SPEED, WAIT_RADIUS, Phase
 from arena_humansim.utils import DISTANCE_TOLERANCE
 from arena_humansim.utils.scenario import (
     AgentConfig,
@@ -220,7 +221,7 @@ def test_holding_rider_pushed_out_of_an_open_zone_boards_again(manager_factory: 
 def test_wait_timeout_moves_waiting_rider_to_the_next_zone_then_back_to_the_first(manager_factory: Callable[..., AgentManager], planner: str) -> None:
     params = [*PLANNERS[planner], Parameter("zone_wait_timeout", Parameter.Type.DOUBLE, 1.0)]
     mgr = manager_factory(_scenario(f"zone_timeout_{planner}", planner), node_name=f"test_zone_timeout_{planner}", extra_params=params)
-    zones = _zone_pair("a") + [_zone("b_a", "b_b", 0.0, 1.4), _zone("b_b", "b_a", ROOM_B_X, 1.4)]
+    zones = _zone_pair("a") + [_zone("b_a", "b_b", 0.0, 1.0), _zone("b_b", "b_a", ROOM_B_X, 1.0)]
     assert _set_zones(mgr, zones).success
     aid = _rider(mgr)
 
@@ -229,7 +230,7 @@ def test_wait_timeout_moves_waiting_rider_to_the_next_zone_then_back_to_the_firs
     _tick_until(mgr, lambda: aid in mgr._zones.transfers and mgr._zones.transfers[aid].zone == "b_a", 60)
     _tick_until(mgr, lambda: mgr._zones.transfers[aid].phase == Phase.WAIT, 300)
     i = mgr._pool.idx(aid)
-    assert math.hypot(mgr._pool.pos[i, 0] - 3.4, mgr._pool.pos[i, 1] - 1.4) <= WAIT_RADIUS + 0.3
+    assert math.hypot(mgr._pool.pos[i, 0] - 3.4, mgr._pool.pos[i, 1] - 1.0) <= WAIT_RADIUS + 0.3
     _tick_until(mgr, lambda: aid in mgr._zones.transfers and mgr._zones.transfers[aid].zone == "a_a", 60)
     _tick_until(mgr, lambda: mgr._zones.transfers[aid].phase == Phase.WAIT, 300)
     i = mgr._pool.idx(aid)
@@ -476,6 +477,62 @@ def test_boarding_rider_steps_back_to_waiting_when_a_robot_takes_the_zone(manage
     assert transfers[1].slot == -1
 
 
+def _alighting_manager(manager_factory: Callable[..., AgentManager], name: str, let_out: float) -> AgentManager:
+    agents = [
+        AgentConfig(agent_id=1, spawn_pose=Pose2D(x=1.0, y=3.0), goal_sequence=[Pose2D(x=SINK.x, y=SINK.y)], desired_velocity=1.2, agent_radius=0.25),
+        AgentConfig(agent_id=2, spawn_pose=Pose2D(x=1.0, y=1.0), goal_sequence=[Pose2D(x=1.0, y=1.0)], desired_velocity=1.2, agent_radius=0.25),
+    ]
+    params = [Parameter("zone_let_out_timeout", Parameter.Type.DOUBLE, let_out)]
+    mgr = manager_factory(attrs.evolve(_scenario(name, "navmesh"), flow=None, agents=agents), node_name=f"test_{name}", extra_params=params)
+    zones = [_zone("big_a", "big_b", 0.0, 3.0, half=1.0), _zone("big_b", "big_a", ROOM_B_X, 3.0, half=1.0)]
+    assert _set_zones(mgr, zones).success
+    transfers = mgr._zones.transfers
+    _tick_until(mgr, lambda: 1 in transfers and transfers[1].phase == Phase.WAIT, 300)
+    assert _teleport(mgr, [2], [(5.6, 3.0)]).success
+    assert _set_access(mgr, "big_a", True).success
+    return mgr
+
+
+def _inside(mgr: AgentManager, zone: str, aid: int) -> bool:
+    return mgr._zones.zones[zone].contains(*_pos(mgr, aid))
+
+
+def test_waiting_rider_boards_only_once_the_arrived_pedestrian_has_left_the_zone(manager_factory: Callable[..., AgentManager]) -> None:
+    mgr = _alighting_manager(manager_factory, "zone_let_out", 10.0)
+    transfers = mgr._zones.transfers
+    for _ in range(200):
+        if transfers[1].phase == Phase.BOARD:
+            break
+        assert transfers[1].phase == Phase.WAIT
+        mgr.tick()
+    else:
+        raise AssertionError("rider never boarded")
+    assert not _inside(mgr, "big_a", 2)
+
+
+def test_zero_let_out_timeout_boards_while_the_arrived_pedestrian_is_still_inside(manager_factory: Callable[..., AgentManager]) -> None:
+    mgr = _alighting_manager(manager_factory, "zone_no_let_out", 0.0)
+    mgr.tick()
+    assert mgr._zones.transfers[1].phase == Phase.BOARD
+    assert _inside(mgr, "big_a", 2)
+
+
+def test_waiting_rider_boards_past_a_robot_that_stays_in_the_zone_after_the_let_out_timeout(manager_factory: Callable[..., AgentManager]) -> None:
+    center = Pose2D(x=5.6, y=3.0)
+    agents = [
+        AgentConfig(agent_id=-1, kind=1, policy="", agent_type="robot", agent_radius=0.1, spawn_pose=center, goal_sequence=[center], desired_velocity=1.0),
+        AgentConfig(agent_id=1, spawn_pose=Pose2D(x=1.0, y=3.0), goal_sequence=[Pose2D(x=SINK.x, y=SINK.y)], desired_velocity=1.2, agent_radius=0.25),
+    ]
+    params = [Parameter("zone_let_out_timeout", Parameter.Type.DOUBLE, 1.0)]
+    mgr = manager_factory(attrs.evolve(_scenario("zone_let_out_robot", "navmesh"), flow=None, agents=agents), node_name="test_zone_let_out_robot", extra_params=params)
+    assert _set_zones(mgr, [_zone("big_a", "big_b", 0.0, 3.0, half=1.0), _zone("big_b", "big_a", ROOM_B_X, 3.0, half=1.0)]).success
+    transfers = mgr._zones.transfers
+    _tick_until(mgr, lambda: 1 in transfers and transfers[1].phase == Phase.WAIT, 300)
+    assert _set_access(mgr, "big_a", True).success
+    assert _tick_until(mgr, lambda: transfers[1].phase == Phase.BOARD, 100) == round(1.0 / 0.05) + 1
+    assert _inside(mgr, "big_a", -1)
+
+
 def test_teleport_zones_from_scenario_yaml_reach_the_manager_open_with_zero_delay(manager_factory: Callable[..., AgentManager], tmp_path: Path) -> None:
     walls = [{"name": w.name, "start": {"x": w.start.x, "y": w.start.y}, "end": {"x": w.end.x, "y": w.end.y}} for w in _room("a", 0.0) + _room("b", ROOM_B_X)]
     footprint = [{"x": 4.6, "y": 4.0}, {"x": 5.8, "y": 4.0}, {"x": 5.8, "y": 5.2}, {"x": 4.6, "y": 5.2}]
@@ -485,7 +542,7 @@ def test_teleport_zones_from_scenario_yaml_reach_the_manager_open_with_zero_dela
         "modules": {"global_planner": "navmesh"},
         "walls": walls,
         "teleport_zones": [
-            {"name": "up", "destinations": ["down"], "entry": {"x": 4.0, "y": 4.6}, "wait": {"x": 3.4, "y": 4.6}, "hold": {"x": 5.2, "y": 4.6, "theta": 1.5}, "footprint": footprint},
+            {"name": "up", "destinations": ["down"], "entry": {"x": 4.0, "y": 4.6}, "wait": {"x": 3.4, "y": 4.6}, "hold": {"x": 5.2, "y": 4.6, "theta": 1.5}, "footprint": footprint, "kind": "escalator", "belt": 0.5},
             {"name": "down", "entry": {"x": ROOM_B_X + 4.0, "y": 4.6}, "wait": {"x": ROOM_B_X + 3.4, "y": 4.6}, "hold": {"x": ROOM_B_X + 5.2, "y": 4.6}, "open": False, "delay": -1.0},
         ],
     }
@@ -502,3 +559,149 @@ def test_teleport_zones_from_scenario_yaml_reach_the_manager_open_with_zero_dela
     assert zones["up"].hold == Pose2D(x=5.2, y=4.6, theta=1.5)
     assert zones["up"].footprint == ((4.6, 4.0), (5.8, 4.0), (5.8, 5.2), (4.6, 5.2))
     assert zones["down"].footprint == ()
+    assert (zones["up"].kind, zones["up"].belt, zones["down"].kind, zones["down"].belt) == ("escalator", 0.5, "", 0.0)
+
+
+def test_set_teleport_zones_rejects_an_unknown_kind_and_a_stair_without_a_footprint(manager_factory: Callable[..., AgentManager]) -> None:
+    mgr = manager_factory(_scenario("zone_kinds", "navmesh"), node_name="test_zone_kinds")
+    ladder = _zone("ladder", "", 0.0, 1.4)
+    ladder.kind = "ladder"
+    bare = _zone("bare", "", 0.0, 4.6)
+    bare.kind = "stairs"
+    bare.footprint = []
+    rejected = _set_zones(mgr, [ladder, bare])
+    assert not rejected.success
+    assert "'ladder'" in rejected.message and "'bare'" in rejected.message
+    assert mgr._zones.zones == {}
+
+
+STAIRS_WALLS = [
+    WallConfig(name="stair_a", start=Pose2D(x=2.5, y=4.4), end=Pose2D(x=ROOM, y=4.4)),
+    WallConfig(name="stair_b", start=Pose2D(x=ROOM_B_X, y=4.4), end=Pose2D(x=ROOM_B_X + 3.5, y=4.4)),
+]
+
+
+def _stair_half(name: str, destination: str, kind: str, belt: float, b_side: bool, is_open: bool = True) -> TeleportZone:
+    z = TeleportZone()
+    z.name = name
+    z.destinations = [destination] if destination else []
+    if b_side:
+        z.entry = Pose2DMsg(x=ROOM_B_X + 3.5, y=5.2, theta=math.pi)
+        z.wait = Pose2DMsg(x=ROOM_B_X + 4.3, y=5.2, theta=math.pi)
+        z.hold = Pose2DMsg(x=ROOM_B_X + 0.45, y=5.2, theta=math.pi)
+        corners = ((ROOM_B_X, 4.4), (ROOM_B_X + 3.5, 4.4), (ROOM_B_X + 3.5, ROOM), (ROOM_B_X, ROOM))
+    else:
+        z.entry = Pose2DMsg(x=2.5, y=5.2, theta=0.0)
+        z.wait = Pose2DMsg(x=1.7, y=5.2, theta=0.0)
+        z.hold = Pose2DMsg(x=ROOM - 0.45, y=5.2, theta=0.0)
+        corners = ((2.5, 4.4), (ROOM, 4.4), (ROOM, ROOM), (2.5, ROOM))
+    z.footprint = [Point32(x=x, y=y, z=0.0) for x, y in corners]
+    z.open = is_open
+    z.delay = 0.0
+    z.kind = kind
+    z.belt = belt
+    return z
+
+
+def _stair_manager(manager_factory: Callable[..., AgentManager], name: str, planner: str, zones: list[TeleportZone], agents: list[AgentConfig] | None = None) -> AgentManager:
+    scenario = _scenario(name, planner)
+    scenario = attrs.evolve(scenario, walls=scenario.walls + STAIRS_WALLS)
+    if agents is not None:
+        scenario = attrs.evolve(scenario, flow=None, agents=agents)
+    mgr = manager_factory(scenario, node_name=f"test_{name}", extra_params=PLANNERS[planner])
+    assert _set_zones(mgr, zones).success
+    return mgr
+
+
+def _ride(mgr: AgentManager, aid: int, on_stair: Callable[[int], None], limit: int = 600) -> tuple[tuple[float, float], tuple[float, float, float]]:
+    """Tick until the rider lands on the other level, return its last pose on the stair and its first one after."""
+    zone = mgr._zones.zones["st_a"]
+    last = (0.0, 0.0)
+    for _ in range(limit):
+        i = mgr._pool.idx(aid)
+        x, y = float(mgr._pool.pos[i, 0]), float(mgr._pool.pos[i, 1])
+        if x > ROOM_B_X:
+            return last, (x, y, float(mgr._pool.theta[i]))
+        last = (x, y)
+        if zone.contains(x, y):
+            on_stair(i)
+        mgr.tick()
+    raise AssertionError("rider never crossed the stair")
+
+
+@pytest.mark.parametrize("planner", sorted(PLANNERS))
+def test_pedestrian_walks_a_stair_stair_capped_lands_past_the_partner_seam_and_reaches_the_sink(manager_factory: Callable[..., AgentManager], planner: str) -> None:
+    zones = [_stair_half("st_a", "st_b", "stairs", 0.0, b_side=False), _stair_half("st_b", "st_a", "stairs", 0.0, b_side=True)]
+    mgr = _stair_manager(manager_factory, f"stairs_walk_{planner}", planner, zones)
+    aid = _rider(mgr)
+    pool = mgr._pool
+    _tick_until(mgr, lambda: aid in mgr._zones.transfers, 40)
+    assert mgr._zones.transfers[aid].zone == "st_a"
+    speeds: list[float] = []
+
+    def on_stairs(i: int) -> None:
+        speeds.append(math.hypot(*pool.vel[i]))
+
+    (x, y), (lx, ly, theta) = _ride(mgr, aid, on_stairs)
+    assert len(speeds) > 10
+    assert max(speeds[1:]) <= STAIR_SPEED + 1e-9
+    assert x >= ROOM - 0.45 - 0.2
+    assert lx == pytest.approx(ROOM_B_X + 0.45 + LANDING_BACKOFF)
+    assert ly == pytest.approx(y, abs=0.05)
+    assert abs(math.remainder(theta, math.tau)) < 0.5
+    assert aid not in mgr._zones.transfers
+
+    _tick_until(mgr, lambda: aid not in mgr._agents, 400)
+
+
+def test_escalator_rider_stands_on_the_belt_is_carried_over_both_halves_and_reports_idle(manager_factory: Callable[..., AgentManager]) -> None:
+    zones = [_stair_half("st_a", "st_b", "escalator", 0.6, b_side=False), _stair_half("st_b", "", "escalator", -0.6, b_side=True)]
+    mgr = _stair_manager(manager_factory, "escalator_ride", "navmesh", zones)
+    aid = _rider(mgr)
+    pool = mgr._pool
+    carried: list[int] = []
+
+    def on_belt(i: int) -> None:
+        carried.append(i)
+        if len(carried) > 1:
+            assert pool.vel[i] == pytest.approx((0.6, 0.0))
+            assert pool.desired_vel[i] == 0.0
+            assert pool.animation_state[i] == AnimationType.IDLE
+
+    _ride(mgr, aid, on_belt)
+    assert len(carried) > 10
+    exit_half = mgr._zones.zones["st_b"]
+    on_exit = 0
+    for _ in range(100):
+        mgr.tick()
+        if aid not in mgr._agents:
+            break
+        j = pool.idx(aid)
+        if exit_half.contains(*pool.pos[j]):
+            on_exit += 1
+            assert pool.vel[j] == pytest.approx((0.6, 0.0))
+            assert pool.animation_state[j] == AnimationType.IDLE
+    assert on_exit > 0
+    _tick_until(mgr, lambda: aid not in mgr._agents, 400)
+
+
+def test_manual_wheelchair_never_boards_a_stair_stair_and_hard_reset_clears_stair_transfers(manager_factory: Callable[..., AgentManager]) -> None:
+    goal = [Pose2D(x=SINK.x, y=SINK.y)]
+    agents = [
+        AgentConfig(agent_id=1, agent_type="wheelchair_manual", spawn_pose=Pose2D(x=1.0, y=3.0), goal_sequence=goal, desired_velocity=0.9),
+        AgentConfig(agent_id=2, spawn_pose=Pose2D(x=1.0, y=2.0), goal_sequence=goal, desired_velocity=1.2),
+    ]
+    zones = [_stair_half("st_a", "st_b", "stairs", 0.0, b_side=False), _stair_half("st_b", "st_a", "stairs", 0.0, b_side=True)]
+    mgr = _stair_manager(manager_factory, "stairs_wheelchair", "navmesh", zones, agents)
+    assert mgr._agents[1].params.climbs == ()
+    stair = mgr._zones.zones["st_a"]
+    for _ in range(200):
+        mgr.tick()
+        assert 1 not in mgr._zones.transfers
+        assert not stair.contains(*mgr._pool.pos[mgr._pool.idx(1)])
+        if 2 in mgr._zones.transfers:
+            break
+    assert mgr._zones.transfers[2].zone == "st_a"
+    assert mgr._reset_callback(ResetSimulation.Request(soft=False), ResetSimulation.Response()).success
+    assert not mgr._zones.transfers
+    assert mgr._zones.zones == {}

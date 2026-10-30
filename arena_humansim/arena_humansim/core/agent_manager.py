@@ -81,8 +81,8 @@ from arena_humansim.core.agents import (
     spawn_params,
 )
 from arena_humansim.core.agents.loader import resolve_agent_type_name
-from arena_humansim.core.agents.types import ATTENTION_KEYWORDS, ParamDist
-from arena_humansim.core.animation_kinds import locomotion_states
+from arena_humansim.core.agents.types import ATTENTION_KEYWORDS, STAIRS_KINDS, ParamDist
+from arena_humansim.core.animation_kinds import AnimationType, locomotion_states
 from arena_humansim.core.behavior.compiler import BehaviorTreeFactory
 from arena_humansim.core.despawn_monitor import DespawnMonitor
 from arena_humansim.core.formation.clearance import Clearance
@@ -151,6 +151,7 @@ _TUNABLE_PARAMS = frozenset(
         "arrival_r_exit",
         "arrival_tau_brake",
         "zone_wait_timeout",
+        "zone_let_out_timeout",
         "profile_phases",
         "profile_interval",
     }
@@ -360,6 +361,7 @@ class AgentManager(Node):
         self.declare_parameter("arrival_r_exit", 0.30)
         self.declare_parameter("arrival_tau_brake", 0.15)
         self.declare_parameter("zone_wait_timeout", 30.0)
+        self.declare_parameter("zone_let_out_timeout", 10.0)
         self.declare_parameter("publish_markers", 0, ParameterDescriptor(integer_range=[IntegerRange(from_value=0, to_value=2)]))
         self.declare_parameter("profile_phases", False)
         self.declare_parameter("profile_interval", 0)
@@ -810,6 +812,7 @@ class AgentManager(Node):
             self._logger.warning(f"arrival_tau_brake ({self._arrival_tau_brake}) < dt ({self._dt}), clamping to dt")
             self._arrival_tau_brake = float(self._dt)
         self._zone_wait_ticks = max(1, int(round(self._float_param("zone_wait_timeout") / self._dt)))
+        self._zone_let_out_ticks = max(0, int(round(self._float_param("zone_let_out_timeout") / self._dt)))
         self._profile_phases = self.get_parameter("profile_phases").value
         self._profile_interval = self._int_param("profile_interval")
 
@@ -1091,6 +1094,8 @@ class AgentManager(Node):
                 m.footprint = [Point32(x=float(p.x), y=float(p.y), z=0.0) for p in z.footprint]
                 m.open = bool(z.open)
                 m.delay = float(z.delay)
+                m.kind = z.kind
+                m.belt = float(z.belt)
                 zones_req.zones.append(m)  # pyright: ignore[reportAttributeAccessIssue]
             resp = self._set_teleport_zones_callback(zones_req, SetTeleportZones.Response())
             if not resp.success:
@@ -1697,9 +1702,9 @@ class AgentManager(Node):
                 desired_velocity=agent.state.desired_velocity,
             )
         self._apply_desired_speeds(agents, pool)
-        for aid, x, y in self._zones.hold(pool, self._tick_count, self._zone_wait_ticks, self._dt):
+        for aid, x, y, theta in self._zones.hold(pool, self._tick_count, self._zone_wait_ticks, self._dt, self._zone_let_out_ticks):
             idx = pool.idx(aid)
-            self._teleport_agent(aid, x, y, float(pool.theta[idx]), float(pool.agent_radius[idx]))
+            self._teleport_agent(aid, x, y, theta, float(pool.agent_radius[idx]))
             self._zones.forget(aid)
         heading_goals = dict(self._interaction_manager.formation_headings())
         for aid, agent in self._agents.items():
@@ -1744,6 +1749,7 @@ class AgentManager(Node):
         self._apply_kinematic_constraints_vectorized(pool)
         self._locomotion.constrain(pool, self._dt, self._provides_heading_mask(pool))
         self._apply_external_velocity_pins()
+        self._zones.carry(pool)
         self._phase_end("kinematics", t0)
 
         t0 = time.perf_counter()
@@ -1959,7 +1965,7 @@ class AgentManager(Node):
         moving = speed > self._min_speed_for_heading
         vel_theta = np.arctan2(vel[:, 1], vel[:, 0])
 
-        self._locomotion.overlay(pool, dt)
+        self._locomotion.overlay(pool, dt, self._zones.standing(pool))
         pos += vel * dt
 
         provides_heading = self._provides_heading_mask(pool)
@@ -2416,6 +2422,7 @@ class AgentManager(Node):
         pool = self._pool
         n = pool.n
         pool.animation_state[:n] = locomotion_states(pool.vel[:n], pool.has_goal[:n], pool.desired_vel[:n])
+        pool.animation_state[:n][self._zones.standing(pool)] = AnimationType.IDLE
 
     def _mark_roster_dirty(self) -> None:
         self._meta_dirty = True
@@ -3197,9 +3204,11 @@ class AgentManager(Node):
         names = [z.name for z in request.zones]
         duplicates = sorted({n for n in names if names.count(n) > 1})
         missing = sorted({d for z in request.zones for d in z.destinations if d not in names})
-        if duplicates or missing:
+        kinds = sorted({z.kind for z in request.zones if z.kind and z.kind not in STAIRS_KINDS})
+        bare = sorted({z.name for z in request.zones if z.kind and len(z.footprint) < 3})
+        if duplicates or missing or kinds or bare:
             response.success = False
-            response.message = f"Rejected teleport zones: duplicate name(s) {duplicates}, unknown destination(s) {missing}"
+            response.message = f"Rejected teleport zones: duplicate name(s) {duplicates}, unknown destination(s) {missing}, unknown kind(s) {kinds}, stair(s) without a footprint {bare}"
             self._logger.error(response.message)
             return response
         zones = [
@@ -3211,6 +3220,8 @@ class AgentManager(Node):
                 hold=Pose2D(x=z.hold.x, y=z.hold.y, theta=z.hold.theta),
                 footprint=tuple((float(p.x), float(p.y)) for p in z.footprint),
                 delay=float(z.delay),
+                kind=z.kind,
+                belt=float(z.belt),
             )
             for z in request.zones
         ]
