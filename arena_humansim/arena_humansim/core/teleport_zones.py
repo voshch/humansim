@@ -92,6 +92,7 @@ class Transfer:
     since: int = 0
     slot: int = -1
     held: int = 0
+    yielded: int = 0
 
 
 @attrs.frozen
@@ -161,9 +162,10 @@ class TeleportZones:
                 out[aid] = attrs.evolve(cmd, target_pose=z.wait if transfer.phase in (Phase.WALK, Phase.WAIT) else z.slots[transfer.slot])
         return out
 
-    def hold(self, pool: AgentPool, tick: int, timeout_ticks: int, dt: float) -> list[tuple[int, float, float]]:
+    def hold(self, pool: AgentPool, tick: int, timeout_ticks: int, dt: float, let_out_ticks: int) -> list[tuple[int, float, float]]:
         """Advance every pedestrian's phase, slow the waiting ones to desired speed 0, stand the holding ones still and return the due self-teleports as id, x, y."""
         robots = self._zone_robots(pool)
+        alighting = self._alighting(pool) if let_out_ticks > 0 else set()
         teleports: list[tuple[int, float, float]] = []
         for aid in list(self.transfers):
             transfer = self.transfers[aid]
@@ -183,10 +185,15 @@ class TeleportZones:
                     transfer.phase, transfer.slot = Phase.WAIT, -1
                 else:
                     transfer.slot = slot
+            if transfer.phase == Phase.WAIT and not is_open:
+                transfer.yielded = 0
             if transfer.phase == Phase.WAIT and is_open:
-                slot = self._free_slot(zone, covered)
-                if slot is not None:
-                    transfer.phase, transfer.slot, transfer.since = Phase.BOARD, slot, tick
+                if zone.name in alighting and transfer.yielded < let_out_ticks:
+                    transfer.yielded += 1
+                else:
+                    slot = self._free_slot(zone, covered)
+                    if slot is not None:
+                        transfer.phase, transfer.slot, transfer.since = Phase.BOARD, slot, tick
             elif transfer.phase == Phase.BOARD and self._at_slot(zone, transfer, x, y):
                 transfer.phase, transfer.held = Phase.HOLD, tick
             elif transfer.phase == Phase.BOARD and not is_open and not zone.contains(x, y):
@@ -211,6 +218,19 @@ class TeleportZones:
     def _free_slot(self, zone: Zone, covered: set[int]) -> int | None:
         taken = {t.slot for t in self.transfers.values() if t.zone == zone.name and t.phase in (Phase.BOARD, Phase.HOLD)} | covered
         return next((i for i in range(len(zone.slots)) if i not in taken), None)
+
+    def _alighting(self, pool: AgentPool) -> set[str]:
+        """Zones someone stands in who is not waiting for, boarding or holding in that zone."""
+        out: set[str] = set()
+        for i in range(pool.n):
+            transfer = self.transfers.get(int(pool.agent_ids[i]))
+            x, y = float(pool.pos[i, 0]), float(pool.pos[i, 1])
+            for zone in self.zones.values():
+                if zone.name in out or (transfer is not None and transfer.zone == zone.name and transfer.phase != Phase.WALK):
+                    continue
+                if zone.contains(x, y):
+                    out.add(zone.name)
+        return out
 
     def _zone_robots(self, pool: AgentPool) -> dict[str, list[tuple[float, float, float]]]:
         """Robots standing in each zone as x, y, radius."""
