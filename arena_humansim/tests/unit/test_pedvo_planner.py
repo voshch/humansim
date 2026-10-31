@@ -15,6 +15,7 @@ from arena_humansim.local_planner.pedvo import (
     _linear_program3_turning,
 )
 from arena_humansim.utils.types import Pose2D, Segments
+from ._helpers import wall_clearance
 
 _DT = 0.05
 
@@ -46,16 +47,6 @@ def _run(planner: ORCAPlanner, pool: AgentPool, steps: int) -> tuple[np.ndarray,
         pool.prev_vel[:n] = pool.vel[:n]
         traj.append(pool.pos[:n].copy())
     return np.array(traj), np.array(vels)
-
-
-def _wall_clearance(points: np.ndarray, walls: Segments) -> np.ndarray:
-    seg = np.asarray(walls, dtype=np.float64).reshape(-1, 4)
-    a = seg[:, :2]
-    ab = seg[:, 2:] - a
-    p = points.reshape(-1, 1, 2)
-    t = np.clip(np.sum((p - a) * ab, axis=-1) / np.sum(ab * ab, axis=-1), 0.0, 1.0)
-    closest = a + t[..., None] * ab
-    return np.linalg.norm(p - closest, axis=-1).min(axis=1).reshape(points.shape[:-1])
 
 
 def _random_lines(rng: np.random.Generator, n: int) -> np.ndarray:
@@ -225,7 +216,7 @@ def test_pedvo_agent_driven_into_wall_does_not_cross(agent_factory: Callable[...
     radius = float(pool.agent_radius[0])
     traj, _ = _run(planner, pool, 300)
     assert np.all(traj[:, 0, 1] < 1.0)
-    assert _wall_clearance(traj, walls).min() >= radius - 1e-3
+    assert wall_clearance(traj, walls).min() >= radius - 1e-3
     assert traj[-1, 0, 1] > 0.5
 
 

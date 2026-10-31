@@ -13,7 +13,6 @@ from arena_humansim.core.agents.types import NeedCondition, SequenceDef, Transit
 from arena_humansim.core.behavior.nodes import SequenceStateMachine
 from arena_humansim.core.interaction_kinds import InteractionType
 from arena_humansim.core.interaction_manager import InteractionManager
-from arena_humansim.utils.rng import RNG
 from arena_humansim.utils.types import (
     AgentKind,
     AgentState,
@@ -22,8 +21,8 @@ from arena_humansim.utils.types import (
     NeedsState,
     NeedState,
     Pose2D,
-    SeekSpec,
 )
+from ._helpers import make_manager, seed_active
 
 
 @dataclass
@@ -39,25 +38,6 @@ class _FakeAgent:
         self.movement = BehaviorTreeMovement()
         self.needs: NeedsState | None = None
         self.tunes = Tunes()
-
-
-def _mk_mgr(agents: dict[int, Any]) -> InteractionManager:
-    mgr = InteractionManager(RNG(0))
-    mgr.set_context(
-        agent_lookup=lambda aid: agents.get(aid),  # type: ignore[arg-type]
-        visibility_lookup=lambda aid: set(agents) - {aid},
-    )
-    return mgr
-
-
-def _seed_active(mgr: InteractionManager, participants: list[int], itype: InteractionType) -> int:
-    spec = SeekSpec(interaction_type=itype)
-    interaction = mgr._create_interaction(creator_id=participants[0], spec=spec)
-    for pid in participants[1:]:
-        mgr.accept(pid, interaction.id)
-    interaction.outcome = InteractionOutcome.ACTIVE
-    interaction.contract.formation = None
-    return interaction.id
 
 
 def _mk_sm(agent: _FakeAgent, sequences: dict[str, py_trees.behaviour.Behaviour], sequence_defs: dict[str, SequenceDef], initial: str, im: InteractionManager | None = None) -> SequenceStateMachine:
@@ -78,8 +58,8 @@ def test_goto_writes_force_stop_command() -> None:
         agent_id: _FakeAgent(agent_id),
         other_id: _FakeAgent(other_id, x=0.2),
     }
-    mgr = _mk_mgr(agents)
-    _seed_active(mgr, [agent_id, other_id], InteractionType.GROUP_CONVERSATION)
+    mgr = make_manager(agents)
+    seed_active(mgr, [agent_id, other_id], InteractionType.GROUP_CONVERSATION)
     assert mgr.is_bound(agent_id)
 
     agent: _FakeAgent = agents[agent_id]
@@ -106,8 +86,8 @@ def test_need_transition_evicts_agent_from_existing_interaction() -> None:
         agent_id: _FakeAgent(agent_id, x=0.0),
         other_id: _FakeAgent(other_id, x=0.2),
     }
-    mgr = _mk_mgr(agents)
-    _seed_active(mgr, [agent_id, other_id], InteractionType.GROUP_CONVERSATION)
+    mgr = make_manager(agents)
+    seed_active(mgr, [agent_id, other_id], InteractionType.GROUP_CONVERSATION)
 
     assert mgr.is_bound(agent_id)
 
@@ -143,8 +123,8 @@ def test_self_loop_via_then_does_not_evict() -> None:
         agent_id: _FakeAgent(agent_id, x=0.0),
         other_id: _FakeAgent(other_id, x=0.2),
     }
-    mgr = _mk_mgr(agents)
-    _seed_active(mgr, [agent_id, other_id], InteractionType.GROUP_CONVERSATION)
+    mgr = make_manager(agents)
+    seed_active(mgr, [agent_id, other_id], InteractionType.GROUP_CONVERSATION)
 
     assert mgr.is_bound(agent_id)
 
@@ -167,8 +147,8 @@ def test_success_transition_via_then_also_evicts() -> None:
         agent_id: _FakeAgent(agent_id, x=0.0),
         other_id: _FakeAgent(other_id, x=0.2),
     }
-    mgr = _mk_mgr(agents)
-    _seed_active(mgr, [agent_id, other_id], InteractionType.GROUP_CONVERSATION)
+    mgr = make_manager(agents)
+    seed_active(mgr, [agent_id, other_id], InteractionType.GROUP_CONVERSATION)
 
     assert mgr.is_bound(agent_id)
 

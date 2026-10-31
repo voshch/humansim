@@ -37,10 +37,8 @@ def node(rclpy_context):
         n.destroy_node()
 
 
-def test_default_record_dir_under_cwd(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    d = default_record_dir()
-    assert d.parent == tmp_path / "recordings"
+def test_default_record_dir_under_cwd() -> None:
+    assert default_record_dir().parent == Path.cwd() / "recordings"
 
 
 def test_recorder_writes_messages(node: Node, tmp_path: Path) -> None:

@@ -10,6 +10,7 @@ from arena_humansim.core.agents.types import SampledParams, SampledPerception
 from arena_humansim.perception.default import DefaultPerception
 from arena_humansim.core.pool import AgentPool
 from arena_humansim.utils.types import AgentState, Pose2D
+from ._helpers import pool_from
 
 
 def _params(vision_range: float, vision_fov: float, proximity_sense: float = 0.0) -> SampledParams:
@@ -62,21 +63,13 @@ def _make_agent(
     )
 
 
-def _pool_from(agents: list[BaseAgent]) -> AgentPool:
-    pool = AgentPool(capacity=max(8, len(agents)))
-    for ag in agents:
-        pool.add_agent(ag)
-    return pool
-
-
 def _csr_neighbors(pool: AgentPool, row: int) -> list[int]:
     indptr = pool.neighbor_indptr
     indices = pool.neighbor_indices
     return [int(x) for x in indices[indptr[row] : indptr[row + 1]]]
 
 
-def test_compute_pool_kdtree_builds_csr_with_range_filter(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(DefaultPerception, "_SMALL_N_THRESHOLD", 4)
+def test_compute_pool_kdtree_builds_csr_with_range_filter() -> None:
 
     agents = [
         _make_agent(1, 0.0, 0.0, vision_range=5.0, vision_fov=360.0),
@@ -85,8 +78,8 @@ def test_compute_pool_kdtree_builds_csr_with_range_filter(monkeypatch: pytest.Mo
         _make_agent(4, 100.0, 0.0, vision_range=5.0, vision_fov=360.0),
         _make_agent(5, -1.5, 0.0, vision_range=5.0, vision_fov=360.0),
     ]
-    pool = _pool_from(agents)
-    perception = DefaultPerception()
+    pool = pool_from(agents)
+    perception = DefaultPerception(small_n_threshold=4)
 
     perception.compute_pool(pool)
 
@@ -109,8 +102,7 @@ def test_compute_pool_kdtree_builds_csr_with_range_filter(monkeypatch: pytest.Mo
     assert neighbors_of_3 == []
 
 
-def test_compute_pool_kdtree_empty_after_mask_sets_empty_csr(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(DefaultPerception, "_SMALL_N_THRESHOLD", 4)
+def test_compute_pool_kdtree_empty_after_mask_sets_empty_csr() -> None:
 
     agents = [
         _make_agent(1, 0.0, 0.0, vision_range=0.1, vision_fov=360.0),
@@ -119,8 +111,8 @@ def test_compute_pool_kdtree_empty_after_mask_sets_empty_csr(monkeypatch: pytest
         _make_agent(4, 150.0, 0.0, vision_range=0.1, vision_fov=360.0),
         _make_agent(5, 200.0, 0.0, vision_range=0.1, vision_fov=360.0),
     ]
-    pool = _pool_from(agents)
-    perception = DefaultPerception()
+    pool = pool_from(agents)
+    perception = DefaultPerception(small_n_threshold=4)
 
     perception.compute_pool(pool)
 
@@ -129,8 +121,7 @@ def test_compute_pool_kdtree_empty_after_mask_sets_empty_csr(monkeypatch: pytest
     assert pool.neighbor_indices.size == 0
 
 
-def test_compute_pool_kdtree_fov_filters_back_neighbors(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(DefaultPerception, "_SMALL_N_THRESHOLD", 4)
+def test_compute_pool_kdtree_fov_filters_back_neighbors() -> None:
 
     agents = [
         _make_agent(1, 0.0, 0.0, theta=0.0, vision_range=5.0, vision_fov=90.0),
@@ -139,8 +130,8 @@ def test_compute_pool_kdtree_fov_filters_back_neighbors(monkeypatch: pytest.Monk
         _make_agent(4, 0.0, 2.0, theta=0.0, vision_range=5.0, vision_fov=360.0),
         _make_agent(5, 2.0, 0.1, theta=0.0, vision_range=5.0, vision_fov=360.0),
     ]
-    pool = _pool_from(agents)
-    perception = DefaultPerception()
+    pool = pool_from(agents)
+    perception = DefaultPerception(small_n_threshold=4)
 
     perception.compute_pool(pool)
 
@@ -159,7 +150,7 @@ def test_compute_pool_dense_fov_mixed_omni_and_narrow() -> None:
         _make_agent(3, 1.0, 0.0, theta=0.0, vision_range=5.0, vision_fov=360.0),
         _make_agent(4, -1.0, 0.0, theta=0.0, vision_range=5.0, vision_fov=360.0),
     ]
-    pool = _pool_from(agents)
+    pool = pool_from(agents)
     pool.pos[0, 0] = 0.0
     pool.pos[0, 1] = 0.0
     pool.pos[1, 0] = 0.0
@@ -190,7 +181,7 @@ def test_proximity_sense_unions_with_fov_back_neighbour() -> None:
         _make_agent(1, 0.0, 0.0, theta=0.0, vision_range=5.0, vision_fov=90.0, proximity_sense=1.2),
         _make_agent(2, -0.8, 0.0, theta=0.0, vision_range=5.0, vision_fov=90.0, proximity_sense=1.2),
     ]
-    pool = _pool_from(agents)
+    pool = pool_from(agents)
     perception = DefaultPerception()
     perception.compute_pool(pool)
 
@@ -198,8 +189,7 @@ def test_proximity_sense_unions_with_fov_back_neighbour() -> None:
     assert 0 in set(_csr_neighbors(pool, 1))
 
 
-def test_proximity_sense_does_not_override_out_of_range(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(DefaultPerception, "_SMALL_N_THRESHOLD", 4)
+def test_proximity_sense_does_not_override_out_of_range() -> None:
     agents = [
         _make_agent(1, 0.0, 0.0, theta=0.0, vision_range=5.0, vision_fov=90.0, proximity_sense=1.2),
         _make_agent(2, 10.0, 0.0, theta=3.14159, vision_range=5.0, vision_fov=90.0, proximity_sense=1.2),
@@ -207,8 +197,8 @@ def test_proximity_sense_does_not_override_out_of_range(monkeypatch: pytest.Monk
         _make_agent(4, 30.0, 0.0, vision_range=5.0, vision_fov=360.0, proximity_sense=1.2),
         _make_agent(5, 40.0, 0.0, vision_range=5.0, vision_fov=360.0, proximity_sense=1.2),
     ]
-    pool = _pool_from(agents)
-    perception = DefaultPerception()
+    pool = pool_from(agents)
+    perception = DefaultPerception(small_n_threshold=4)
     perception.compute_pool(pool)
 
     assert 1 not in set(_csr_neighbors(pool, 0))
@@ -221,7 +211,7 @@ def test_fov_neighbour_outside_proximity_still_visible() -> None:
         _make_agent(1, 0.0, 0.0, theta=0.0, vision_range=5.0, vision_fov=360.0, proximity_sense=1.2),
         _make_agent(2, 3.0, 0.0, theta=0.0, vision_range=5.0, vision_fov=360.0, proximity_sense=1.2),
     ]
-    pool = _pool_from(agents)
+    pool = pool_from(agents)
     perception = DefaultPerception()
     perception.compute_pool(pool)
 
@@ -291,7 +281,7 @@ def test_compute_pool_fov_matches_arctan2_reference(n: int, extent: float, seed:
         )
         for i in range(n)
     ]
-    pool = _pool_from(agents)
+    pool = pool_from(agents)
     DefaultPerception().compute_pool(pool)
 
     reference = _arctan2_reference_neighbors(pos, theta, vision_range, vision_fov, proximity_sense)
@@ -310,7 +300,7 @@ def test_far_agent_leaves_neighbor_order_unchanged() -> None:
     def neighbors(robot: bool) -> dict[int, list[int]]:
         agents = [_make_agent(-1, 100.0, 100.0)] if robot else []
         agents += [_make_agent(k + 1, float(x), float(y)) for k, (x, y) in enumerate(positions)]
-        pool = _pool_from(agents)
+        pool = pool_from(agents)
         DefaultPerception().compute_pool(pool)
         ids = pool.agent_ids
         return {int(ids[r]): [int(ids[c]) for c in _csr_neighbors(pool, r)] for r in range(pool.n) if ids[r] > 0}

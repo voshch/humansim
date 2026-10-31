@@ -13,6 +13,7 @@ from arena_humansim.occlusion.bitmap import BitmapOccluder
 from arena_humansim.perception.default import DefaultPerception
 from arena_humansim.utils.benchmark import generate_maze
 from arena_humansim.utils.types import AgentState, Pose2D, Segments
+from ._helpers import pool_from
 
 
 # ---------------------------------------------------------------------------
@@ -82,13 +83,6 @@ def _make_agent(
     )
 
 
-def _pool_from(agents: list[BaseAgent]) -> AgentPool:
-    pool = AgentPool(capacity=max(8, len(agents)))
-    for ag in agents:
-        pool.add_agent(ag)
-    return pool
-
-
 def _neighbors(pool: AgentPool, row: int) -> set[int]:
     indptr = pool.neighbor_indptr
     indices = pool.neighbor_indices
@@ -111,7 +105,7 @@ def test_no_occluder_matches_baseline_dense() -> None:
         _make_agent(2, 2.0, 0.0, vision_range=10.0, vision_fov=360.0),
         _make_agent(3, 20.0, 0.0, vision_range=10.0, vision_fov=360.0),
     ]
-    pool = _pool_from(agents)
+    pool = pool_from(agents)
     DefaultPerception().compute_pool(pool)
 
     assert 1 in _neighbors(pool, 0)
@@ -121,8 +115,7 @@ def test_no_occluder_matches_baseline_dense() -> None:
     assert 2 not in _neighbors(pool, 1)
 
 
-def test_no_occluder_matches_baseline_kdtree(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(DefaultPerception, "_SMALL_N_THRESHOLD", 4)
+def test_no_occluder_matches_baseline_kdtree() -> None:
     agents = [
         _make_agent(1, 0.0, 0.0, vision_range=10.0, vision_fov=360.0),
         _make_agent(2, 2.0, 0.0, vision_range=10.0, vision_fov=360.0),
@@ -130,8 +123,8 @@ def test_no_occluder_matches_baseline_kdtree(monkeypatch: pytest.MonkeyPatch) ->
         _make_agent(4, 6.0, 0.0, vision_range=10.0, vision_fov=360.0),
         _make_agent(5, 50.0, 0.0, vision_range=10.0, vision_fov=360.0),
     ]
-    pool = _pool_from(agents)
-    DefaultPerception().compute_pool(pool)
+    pool = pool_from(agents)
+    DefaultPerception(small_n_threshold=4).compute_pool(pool)
 
     assert 1 in _neighbors(pool, 0)
     assert 0 in _neighbors(pool, 1)
@@ -153,7 +146,7 @@ def test_wall_blocks_agents_in_range_and_fov_dense() -> None:
         _make_agent(1, -2.0, 0.0, vision_range=10.0, vision_fov=360.0),
         _make_agent(2, 2.0, 0.0, vision_range=10.0, vision_fov=360.0),
     ]
-    pool = _pool_from(agents)
+    pool = pool_from(agents)
     DefaultPerception(occluder=occ).compute_pool(pool)
 
     assert 1 not in _neighbors(pool, 0)
@@ -167,7 +160,7 @@ def test_wall_does_not_block_agents_on_same_side_dense() -> None:
         _make_agent(1, 0.0, 0.0, vision_range=10.0, vision_fov=360.0),
         _make_agent(2, 3.0, 0.0, vision_range=10.0, vision_fov=360.0),
     ]
-    pool = _pool_from(agents)
+    pool = pool_from(agents)
     DefaultPerception(occluder=occ).compute_pool(pool)
 
     assert 1 in _neighbors(pool, 0)
@@ -187,7 +180,7 @@ def test_prox_within_wall_not_visible_dense() -> None:
         _make_agent(1, -0.3, 0.0, vision_range=10.0, vision_fov=360.0, proximity_sense=1.5),
         _make_agent(2, 0.3, 0.0, vision_range=10.0, vision_fov=360.0, proximity_sense=1.5),
     ]
-    pool = _pool_from(agents)
+    pool = pool_from(agents)
     DefaultPerception(occluder=occ).compute_pool(pool)
 
     assert 1 not in _neighbors(pool, 0)
@@ -200,7 +193,7 @@ def test_prox_no_wall_visible_dense() -> None:
         _make_agent(1, -0.3, 0.0, theta=0.0, vision_range=5.0, vision_fov=60.0, proximity_sense=1.5),
         _make_agent(2, 0.3, 0.0, theta=0.0, vision_range=5.0, vision_fov=60.0, proximity_sense=1.5),
     ]
-    pool = _pool_from(agents)
+    pool = pool_from(agents)
     DefaultPerception().compute_pool(pool)
 
     assert 1 in _neighbors(pool, 0)
@@ -218,12 +211,12 @@ def test_bitmap_empty_walls_matches_no_occluder() -> None:
         _make_agent(2, 3.0, 0.0, vision_range=10.0, vision_fov=360.0),
     ]
 
-    pool_none = _pool_from(agents)
+    pool_none = pool_from(agents)
     DefaultPerception().compute_pool(pool_none)
 
     occ = BitmapOccluder()
     occ.set_walls([])
-    pool_occ = _pool_from(agents)
+    pool_occ = pool_from(agents)
     DefaultPerception(occluder=occ).compute_pool(pool_occ)
 
     np.testing.assert_array_equal(pool_none.neighbor_indptr, pool_occ.neighbor_indptr)
@@ -245,7 +238,7 @@ def test_vision_occlusion_false_agent_sees_through_wall_dense() -> None:
         _make_agent(1, -2.0, 0.0, vision_range=10.0, vision_fov=360.0, vision_occlusion=False),
         _make_agent(2, 2.0, 0.0, vision_range=10.0, vision_fov=360.0, vision_occlusion=True),
     ]
-    pool = _pool_from(agents)
+    pool = pool_from(agents)
     DefaultPerception(occluder=occ).compute_pool(pool)
 
     # Agent 1 (idx 0) sees through walls - agent 2 must be in its neighbors.
@@ -254,9 +247,7 @@ def test_vision_occlusion_false_agent_sees_through_wall_dense() -> None:
     assert 0 not in _neighbors(pool, 1)
 
 
-def test_vision_occlusion_false_agent_sees_through_wall_kdtree(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Same scene, forced kdtree path (N > 64 threshold set to 4).
-    monkeypatch.setattr(DefaultPerception, "_SMALL_N_THRESHOLD", 4)
+def test_vision_occlusion_false_agent_sees_through_wall_kdtree() -> None:
     occ = BitmapOccluder()
     occ.set_walls(_wall_at_x(0.0))
     agents = [
@@ -266,8 +257,8 @@ def test_vision_occlusion_false_agent_sees_through_wall_kdtree(monkeypatch: pyte
         _make_agent(4, 4.0, 0.0, vision_range=10.0, vision_fov=360.0, vision_occlusion=True),
         _make_agent(5, -6.0, 0.0, vision_range=10.0, vision_fov=360.0, vision_occlusion=True),
     ]
-    pool = _pool_from(agents)
-    DefaultPerception(occluder=occ).compute_pool(pool)
+    pool = pool_from(agents)
+    DefaultPerception(occluder=occ, small_n_threshold=4).compute_pool(pool)
 
     # Agent 1 (idx 0, vision_occlusion=False) must see agents on the other side.
     assert 1 in _neighbors(pool, 0)
@@ -280,7 +271,7 @@ def test_vision_occlusion_false_agent_sees_through_wall_kdtree(monkeypatch: pyte
 # ---------------------------------------------------------------------------
 
 
-def test_dense_kdtree_agreement_with_occlusion(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_dense_kdtree_agreement_with_occlusion() -> None:
     # 5 agents: wall at x=0 separates left (negative x) from right (positive x).
     # Force dense path first, then kdtree path; neighbor sets must agree.
     wall = _wall_at_x(0.0)
@@ -295,16 +286,14 @@ def test_dense_kdtree_agreement_with_occlusion(monkeypatch: pytest.MonkeyPatch) 
 
     occ_dense = BitmapOccluder()
     occ_dense.set_walls(wall)
-    pool_dense = _pool_from(agents)
+    pool_dense = pool_from(agents)
     # N=5 <= default threshold (64): dense path
     DefaultPerception(occluder=occ_dense).compute_pool(pool_dense)
 
     occ_kdtree = BitmapOccluder()
     occ_kdtree.set_walls(wall)
-    pool_kdtree = _pool_from(agents)
-    monkeypatch.setattr(DefaultPerception, "_SMALL_N_THRESHOLD", 4)
-    # N=5 > patched threshold (4): kdtree path
-    DefaultPerception(occluder=occ_kdtree).compute_pool(pool_kdtree)
+    pool_kdtree = pool_from(agents)
+    DefaultPerception(occluder=occ_kdtree, small_n_threshold=4).compute_pool(pool_kdtree)
 
     for row in range(len(agents)):
         dense_nb = _neighbors(pool_dense, row)
@@ -317,8 +306,7 @@ def test_dense_kdtree_agreement_with_occlusion(monkeypatch: pytest.MonkeyPatch) 
 # ---------------------------------------------------------------------------
 
 
-def test_wall_blocks_across_kdtree(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(DefaultPerception, "_SMALL_N_THRESHOLD", 4)
+def test_wall_blocks_across_kdtree() -> None:
     occ = BitmapOccluder()
     occ.set_walls(_wall_at_x(0.0))
     agents = [
@@ -328,8 +316,8 @@ def test_wall_blocks_across_kdtree(monkeypatch: pytest.MonkeyPatch) -> None:
         _make_agent(4, 4.0, 0.0, vision_range=10.0, vision_fov=360.0),
         _make_agent(5, -6.0, 0.0, vision_range=10.0, vision_fov=360.0),
     ]
-    pool = _pool_from(agents)
-    DefaultPerception(occluder=occ).compute_pool(pool)
+    pool = pool_from(agents)
+    DefaultPerception(occluder=occ, small_n_threshold=4).compute_pool(pool)
 
     # Agents on opposite sides of the wall must not be neighbors.
     assert 1 not in _neighbors(pool, 0)  # agent 1 (left) cannot see agent 2 (right)
@@ -340,8 +328,7 @@ def test_wall_blocks_across_kdtree(monkeypatch: pytest.MonkeyPatch) -> None:
     assert 0 in _neighbors(pool, 2)
 
 
-def test_same_side_wall_visible_kdtree(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(DefaultPerception, "_SMALL_N_THRESHOLD", 4)
+def test_same_side_wall_visible_kdtree() -> None:
     occ = BitmapOccluder()
     occ.set_walls(_wall_at_x(10.0))  # wall far to the right, not between the agents
     agents = [
@@ -351,8 +338,8 @@ def test_same_side_wall_visible_kdtree(monkeypatch: pytest.MonkeyPatch) -> None:
         _make_agent(4, -3.0, 0.0, vision_range=10.0, vision_fov=360.0),
         _make_agent(5, -6.0, 0.0, vision_range=10.0, vision_fov=360.0),
     ]
-    pool = _pool_from(agents)
-    DefaultPerception(occluder=occ).compute_pool(pool)
+    pool = pool_from(agents)
+    DefaultPerception(occluder=occ, small_n_threshold=4).compute_pool(pool)
 
     assert 1 in _neighbors(pool, 0)
     assert 0 in _neighbors(pool, 1)
@@ -402,13 +389,13 @@ def test_line_of_sight_cast_once_per_unordered_pair_and_gates_occluding_observer
         for i in range(n)
     ]
 
-    pool_free = _pool_from(agents)
+    pool_free = pool_from(agents)
     DefaultPerception().compute_pool(pool_free)
 
     inner = BitmapOccluder()
     recorder = _RecordingOccluder(inner)
     recorder.set_walls(_maze_segments())
-    pool = _pool_from(agents)
+    pool = pool_from(agents)
     DefaultPerception(occluder=recorder).compute_pool(pool)
 
     index_of = {(float(pos[i, 0]), float(pos[i, 1])): i for i in range(n)}

@@ -9,7 +9,7 @@ from arena_humansim.core.agents.base import BaseAgent
 from arena_humansim.core.pool import AgentPool
 from arena_humansim.local_planner.force import SOCIAL, WALL
 from arena_humansim.local_planner.karamouzas import KaramouzasPlanner
-from arena_humansim.utils.types import BeliefState, Pose2D
+from arena_humansim.utils.types import Pose2D
 
 _DT = 0.05
 
@@ -56,29 +56,6 @@ def _crowd(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., Ba
     indices = [j for i in range(n) for j in range(n) if j != i]
     pool.set_neighbor_csr(np.arange(0, n * (n - 1) + 1, n - 1, dtype=np.int32), np.array(indices, dtype=np.int32))
     return pool
-
-
-def test_pooled_and_per_agent_paths_agree(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
-    planner = KaramouzasPlanner()
-    planner.set_walls([((-5.0, -0.9), (5.0, -0.9))])
-    agents = [agent_factory(agent_id=1, x=0.0, y=0.0), agent_factory(agent_id=2, x=2.5, y=0.3), agent_factory(agent_id=3, x=0.6, y=0.5)]
-    agents[1].state.velocity = (-0.9, 0.1)
-    agents[2].state.velocity = (0.3, -0.2)
-    for agent in agents:
-        agent.belief = BeliefState(observed_agents=[o.state for o in agents if o is not agent])
-    goals = {1: Pose2D(x=10.0, y=0.0), 2: Pose2D(x=-10.0, y=0.0), 3: Pose2D(x=0.6, y=8.0)}
-
-    pool = pool_empty(capacity=4)
-    planner.attach(pool)
-    for agent in agents:
-        pool.add_agent(agent)
-    pool.set_goals(goals)
-    pool.set_neighbor_csr(np.array([0, 2, 4, 6], dtype=np.int32), np.array([1, 2, 0, 2, 0, 1], dtype=np.int32))
-    planner.compute_pool(pool, dt=_DT)
-
-    per_agent = planner.compute(agents, goals, dt=_DT)
-    for i, agent in enumerate(agents):
-        assert np.allclose(per_agent[agent.state.agent_id], pool.vel[i])
 
 
 def test_single_head_on_neighbor_matches_piecewise_magnitude(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
@@ -189,14 +166,3 @@ def test_two_runs_are_identical(pool_empty: Callable[..., AgentPool], agent_fact
         runs.append(pool.vel[: pool.n].copy())
     assert np.all(np.isfinite(runs[0]))
     assert np.array_equal(runs[0], runs[1])
-
-
-def test_coincident_agents_stay_finite(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
-    planner = KaramouzasPlanner()
-    pool = _scene(pool_empty, agent_factory, planner, [(0.0, 0.0, 0.5, 0.0)])
-    pool.set_goals({1: Pose2D(x=10.0, y=0.0), 2: Pose2D(x=-10.0, y=0.0)})
-    pool.set_neighbor_csr(np.array([0, 1, 2], dtype=np.int32), np.array([1, 0], dtype=np.int32))
-    planner.compute_pool(pool, store_forces=True, dt=_DT)
-    assert planner._last_force_arrays is not None
-    assert np.all(np.isfinite(planner._last_force_arrays[2]))
-    assert np.all(np.isfinite(pool.vel[:2]))

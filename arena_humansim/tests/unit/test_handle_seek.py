@@ -22,6 +22,7 @@ from arena_humansim.utils.types import (
     Pose2D,
     SeekSpec,
 )
+from ._helpers import seek_command
 
 
 @dataclass
@@ -48,18 +49,10 @@ def _mk_mgr(agents: dict[int, Any], *, world: WorldKnowledge | None = None, visi
     return mgr
 
 
-def _seek(agent_id: int, itype: InteractionType, *, target: str | int | None = None, offer: bool = False) -> HighLevelCommand:
-    return HighLevelCommand(
-        agent_id=agent_id,
-        type=CommandType.SEEK,
-        spec=SeekSpec(interaction_type=itype, target=target, offer=offer),
-    )
-
-
 def test_none_strategy_creates_symmetric_interaction_with_no_peer() -> None:
     agents = {1: _FakeAgent(1)}
     mgr = _mk_mgr(agents)
-    mgr.update({1: _seek(1, InteractionType.TALK_TO)})
+    mgr.update({1: seek_command(1, InteractionType.TALK_TO)})
     assert len(mgr.interactions) == 1
     interaction = next(iter(mgr.interactions.values()))
     assert interaction.participants == [1]
@@ -69,7 +62,7 @@ def test_none_strategy_creates_symmetric_interaction_with_no_peer() -> None:
 def test_none_strategy_joins_visible_existing_interaction() -> None:
     agents = {1: _FakeAgent(1, x=0.0), 2: _FakeAgent(2, x=1.0)}
     mgr = _mk_mgr(agents)
-    mgr.update({1: _seek(1, InteractionType.GROUP_CONVERSATION), 2: _seek(2, InteractionType.GROUP_CONVERSATION)})
+    mgr.update({1: seek_command(1, InteractionType.GROUP_CONVERSATION), 2: seek_command(2, InteractionType.GROUP_CONVERSATION)})
     assert len(mgr.interactions) == 1
     interaction = next(iter(mgr.interactions.values()))
     assert set(interaction.participants) == {1, 2}
@@ -79,7 +72,7 @@ def test_tag_strategy_requires_offer_to_create() -> None:
     agents = {1: _FakeAgent(1)}
     mgr = _mk_mgr(agents)
     # Seeker (offer=False) without matching provider -> nothing created.
-    mgr.update({1: _seek(1, InteractionType.SERVICE, target="water")})
+    mgr.update({1: seek_command(1, InteractionType.SERVICE, target="water")})
     assert len(mgr.interactions) == 0
 
 
@@ -88,8 +81,8 @@ def test_tag_strategy_provider_creates_and_seeker_joins() -> None:
     mgr = _mk_mgr(agents)
     mgr.update(
         {
-            1: _seek(1, InteractionType.SERVICE, target="water", offer=True),
-            2: _seek(2, InteractionType.SERVICE, target="water"),
+            1: seek_command(1, InteractionType.SERVICE, target="water", offer=True),
+            2: seek_command(2, InteractionType.SERVICE, target="water"),
         }
     )
     assert len(mgr.interactions) == 1
@@ -104,8 +97,8 @@ def test_tag_strategy_ignores_mismatched_tag() -> None:
     mgr = _mk_mgr(agents)
     mgr.update(
         {
-            1: _seek(1, InteractionType.SERVICE, target="water", offer=True),
-            2: _seek(2, InteractionType.SERVICE, target="coffee"),
+            1: seek_command(1, InteractionType.SERVICE, target="water", offer=True),
+            2: seek_command(2, InteractionType.SERVICE, target="coffee"),
         }
     )
     # Provider's interaction is "water"; seeker wanted "coffee" -> can't match, can't create (no offer).
@@ -117,7 +110,7 @@ def test_tag_strategy_ignores_mismatched_tag() -> None:
 def test_agent_strategy_requires_integer_target() -> None:
     agents = {1: _FakeAgent(1), 5: _FakeAgent(5)}
     mgr = _mk_mgr(agents)
-    mgr.update({1: _seek(1, InteractionType.BLOCK, target=5)})
+    mgr.update({1: seek_command(1, InteractionType.BLOCK, target=5)})
     assert len(mgr.interactions) == 1
     interaction = next(iter(mgr.interactions.values()))
     assert interaction.target_agent == 5
@@ -127,7 +120,7 @@ def test_agent_strategy_requires_integer_target() -> None:
 def test_agent_strategy_zero_target_rejected() -> None:
     agents = {1: _FakeAgent(1)}
     mgr = _mk_mgr(agents)
-    mgr.update({1: _seek(1, InteractionType.BLOCK, target=0)})
+    mgr.update({1: seek_command(1, InteractionType.BLOCK, target=0)})
     assert len(mgr.interactions) == 0
 
 
@@ -136,7 +129,7 @@ def test_object_strategy_requires_world_resolution() -> None:
     agents = {1: _FakeAgent(1)}
     mgr = _mk_mgr(agents, world=wk)
     # No matching object in world -> can_create False, no interaction.
-    mgr.update({1: _seek(1, InteractionType.USE, target="atm")})
+    mgr.update({1: seek_command(1, InteractionType.USE, target="atm")})
     assert len(mgr.interactions) == 0
 
 
@@ -145,7 +138,7 @@ def test_object_strategy_resolves_by_type_to_concrete_id() -> None:
     wk.add_object(WorldObject(object_id="atm_1", type="atm", pose=Pose2D()))
     agents = {1: _FakeAgent(1)}
     mgr = _mk_mgr(agents, world=wk)
-    mgr.update({1: _seek(1, InteractionType.USE, target="atm")})
+    mgr.update({1: seek_command(1, InteractionType.USE, target="atm")})
     assert len(mgr.interactions) == 1
     interaction = next(iter(mgr.interactions.values()))
     # spec.target was "atm" (type); stored object_id is the concrete resolved id.
@@ -157,8 +150,8 @@ def test_object_strategy_dedups_same_object_same_type() -> None:
     wk.add_object(WorldObject(object_id="atm_1", type="atm", pose=Pose2D()))
     agents = {1: _FakeAgent(1), 2: _FakeAgent(2)}
     mgr = _mk_mgr(agents, world=wk)
-    mgr.update({1: _seek(1, InteractionType.USE, target="atm_1")})
-    mgr.update({2: _seek(2, InteractionType.USE, target="atm_1")})
+    mgr.update({1: seek_command(1, InteractionType.USE, target="atm_1")})
+    mgr.update({2: seek_command(2, InteractionType.USE, target="atm_1")})
     assert len(mgr.interactions) == 1
 
 
@@ -167,17 +160,17 @@ def test_object_strategy_separate_interactions_for_different_types_same_object()
     wk.add_object(WorldObject(object_id="kiosk", type="kiosk", pose=Pose2D()))
     agents = {1: _FakeAgent(1), 2: _FakeAgent(2)}
     mgr = _mk_mgr(agents, world=wk)
-    mgr.update({1: _seek(1, InteractionType.USE, target="kiosk")})
-    mgr.update({2: _seek(2, InteractionType.SIT_ON, target="kiosk")})
+    mgr.update({1: seek_command(1, InteractionType.USE, target="kiosk")})
+    mgr.update({2: seek_command(2, InteractionType.SIT_ON, target="kiosk")})
     assert len(mgr.interactions) == 2
 
 
 def test_seek_is_noop_when_agent_already_in_matching_interaction() -> None:
     agents = {1: _FakeAgent(1)}
     mgr = _mk_mgr(agents)
-    mgr.update({1: _seek(1, InteractionType.TALK_TO)})
+    mgr.update({1: seek_command(1, InteractionType.TALK_TO)})
     assert len(mgr.interactions) == 1
-    mgr.update({1: _seek(1, InteractionType.TALK_TO)})
+    mgr.update({1: seek_command(1, InteractionType.TALK_TO)})
     assert len(mgr.interactions) == 1
 
 
@@ -196,8 +189,8 @@ def test_two_providers_same_tag_do_not_merge() -> None:
     mgr = _mk_mgr(agents)
     mgr.update(
         {
-            1: _seek(1, InteractionType.SERVICE, target="escort", offer=True),
-            2: _seek(2, InteractionType.SERVICE, target="escort", offer=True),
+            1: seek_command(1, InteractionType.SERVICE, target="escort", offer=True),
+            2: seek_command(2, InteractionType.SERVICE, target="escort", offer=True),
         }
     )
     assert len(mgr.interactions) == 2
@@ -212,8 +205,8 @@ def test_offers_process_before_seekers_in_same_tick() -> None:
     mgr = _mk_mgr(agents)
     mgr.update(
         {
-            2: _seek(2, InteractionType.SERVICE, target="water"),
-            1: _seek(1, InteractionType.SERVICE, target="water", offer=True),
+            2: seek_command(2, InteractionType.SERVICE, target="water"),
+            1: seek_command(1, InteractionType.SERVICE, target="water", offer=True),
         }
     )
     assert len(mgr.interactions) == 1
@@ -279,7 +272,7 @@ def test_symmetric_seek_merges_via_perception_proximity() -> None:
         agent_lookup=lambda aid: agents.get(aid),
         visibility_lookup=pool.visible_agent_ids,
     )
-    mgr.update({1: _seek(1, InteractionType.GROUP_CONVERSATION), 2: _seek(2, InteractionType.GROUP_CONVERSATION)})
+    mgr.update({1: seek_command(1, InteractionType.GROUP_CONVERSATION), 2: seek_command(2, InteractionType.GROUP_CONVERSATION)})
     assert len(mgr.interactions) == 1
     interaction = next(iter(mgr.interactions.values()))
     assert set(interaction.participants) == {1, 2}

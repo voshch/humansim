@@ -17,8 +17,9 @@ if TYPE_CHECKING:
 class DefaultPerception(Perception):
     supports_pool: bool = True
 
-    def __init__(self, occluder: Occluder | None = None) -> None:
+    def __init__(self, occluder: Occluder | None = None, small_n_threshold: int = 64) -> None:
         self._occluder = occluder
+        self._small_n_threshold = small_n_threshold
         self._shared_tree: cKDTree | None = None
         self._shared_ids: list[int] | None = None
         self._shared_positions: list[tuple[float, float]] | None = None
@@ -48,8 +49,6 @@ class DefaultPerception(Perception):
     def shared_positions(self) -> list[tuple[float, float]] | None:
         return self._shared_positions
 
-    _SMALL_N_THRESHOLD = 64
-
     def compute_pool(self, pool: AgentPool) -> None:
         n = pool.n
         if n <= 1:
@@ -61,7 +60,7 @@ class DefaultPerception(Perception):
 
         positions = pool.pos[:n]
 
-        if n <= self._SMALL_N_THRESHOLD:
+        if n <= self._small_n_threshold:
             self._compute_pool_dense(pool, positions, n)
         else:
             self._compute_pool_kdtree(pool, positions, n)

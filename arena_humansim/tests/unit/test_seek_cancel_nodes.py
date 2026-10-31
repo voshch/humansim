@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 import pytest
@@ -17,8 +17,6 @@ from arena_humansim.core.agents.types import ParamDist
 from arena_humansim.core.behavior.nodes import CancelNode, SeekNode
 from arena_humansim.core.behavior.step_context import StepContext
 from arena_humansim.core.interaction_kinds import InteractionType
-from arena_humansim.core.interaction_manager import InteractionManager
-from arena_humansim.utils.rng import RNG
 from arena_humansim.utils.types import (
     AgentKind,
     AgentState,
@@ -29,6 +27,7 @@ from arena_humansim.utils.types import (
     Pose2D,
     SeekSpec,
 )
+from ._helpers import make_manager, movement_of, seed_active, with_bt
 
 
 @dataclass
@@ -45,25 +44,6 @@ class _FakeAgent:
         self.needs = None
 
 
-def _mk_mgr(agents: dict[int, Any]) -> InteractionManager:
-    mgr = InteractionManager(RNG(0))
-    mgr.set_context(
-        agent_lookup=lambda aid: agents.get(aid),  # type: ignore[arg-type]
-        visibility_lookup=lambda aid: set(agents) - {aid},
-    )
-    return mgr
-
-
-def _seed_active(mgr: InteractionManager, participants: list[int], itype: InteractionType) -> int:
-    spec = SeekSpec(interaction_type=itype)
-    interaction = mgr._create_interaction(creator_id=participants[0], spec=spec)
-    for pid in participants[1:]:
-        mgr.accept(pid, interaction.id)
-    interaction.outcome = InteractionOutcome.ACTIVE
-    interaction.contract.formation = None
-    return interaction.id
-
-
 @pytest.fixture(autouse=True)
 def _clear_blackboard() -> None:
     py_trees.blackboard.Blackboard.clear()
@@ -72,15 +52,6 @@ def _clear_blackboard() -> None:
 @pytest.fixture
 def rng_np() -> np.random.Generator:
     return np.random.default_rng(123)
-
-
-def _mv(agent: BaseAgent) -> BehaviorTreeMovement:
-    return cast(BehaviorTreeMovement, agent.movement)
-
-
-def _with_bt(agent: BaseAgent) -> BaseAgent:
-    agent.movement = BehaviorTreeMovement()
-    return agent
 
 
 def _mk_seek(agent: BaseAgent, *, interaction: InteractionType, target: str | int | None = None, offer: bool = False, duration: ParamDist | None = None, rng: np.random.Generator, bound: bool = False, ctx: StepContext | None = None) -> SeekNode:
@@ -110,7 +81,7 @@ def test_seek_calls_im_seek_with_threaded_spec(
 ) -> None:
     agent = _FakeAgent(agent_id=1)
     agents: dict[int, Any] = {1: agent}
-    mgr = _mk_mgr(agents)
+    mgr = make_manager(agents)
     spec = SeekSpec(interaction_type=interaction, target=target, offer=offer)
     ctx = StepContext(im=mgr, is_bound_lookup=mgr.is_bound)
     node = SeekNode("seek", agent, spec=spec, ctx=ctx, duration_source=None, rng=rng_np)  # type: ignore[arg-type]
@@ -129,36 +100,36 @@ def test_seek_calls_im_seek_with_threaded_spec(
 
 
 def test_seek_bound_short_circuits_to_success(agent_factory: Callable[..., BaseAgent], rng_np: np.random.Generator) -> None:
-    agent = _with_bt(agent_factory(agent_id=1))
+    agent = with_bt(agent_factory(agent_id=1))
     node = _mk_seek(agent, interaction=InteractionType.TALK_TO, rng=rng_np, bound=True)
     node.tick_once()
     assert node.status == py_trees.common.Status.SUCCESS
 
 
 def test_seek_completed_outcome_returns_success(agent_factory: Callable[..., BaseAgent], rng_np: np.random.Generator) -> None:
-    agent = _with_bt(agent_factory(agent_id=3))
+    agent = with_bt(agent_factory(agent_id=3))
     node = _mk_seek(agent, interaction=InteractionType.TALK_TO, rng=rng_np)
     node.tick_once()
-    _mv(agent).last_outcome = InteractionOutcome.COMPLETED
+    movement_of(agent).last_outcome = InteractionOutcome.COMPLETED
     node.tick_once()
     assert node.status == py_trees.common.Status.SUCCESS
-    assert _mv(agent).last_outcome is None
+    assert movement_of(agent).last_outcome is None
 
 
 def test_seek_canceled_outcome_returns_success(agent_factory: Callable[..., BaseAgent], rng_np: np.random.Generator) -> None:
-    agent = _with_bt(agent_factory(agent_id=3))
+    agent = with_bt(agent_factory(agent_id=3))
     node = _mk_seek(agent, interaction=InteractionType.TALK_TO, rng=rng_np)
     node.tick_once()
-    _mv(agent).last_outcome = InteractionOutcome.CANCELED
+    movement_of(agent).last_outcome = InteractionOutcome.CANCELED
     node.tick_once()
     assert node.status == py_trees.common.Status.SUCCESS
 
 
 def test_seek_interrupted_outcome_returns_failure(agent_factory: Callable[..., BaseAgent], rng_np: np.random.Generator) -> None:
-    agent = _with_bt(agent_factory(agent_id=4))
+    agent = with_bt(agent_factory(agent_id=4))
     node = _mk_seek(agent, interaction=InteractionType.TALK_TO, rng=rng_np)
     node.tick_once()
-    _mv(agent).last_outcome = InteractionOutcome.INTERRUPTED
+    movement_of(agent).last_outcome = InteractionOutcome.INTERRUPTED
     node.tick_once()
     assert node.status == py_trees.common.Status.FAILURE
 
@@ -166,7 +137,7 @@ def test_seek_interrupted_outcome_returns_failure(agent_factory: Callable[..., B
 def test_seek_duration_is_sampled_on_initialise(rng_np: np.random.Generator) -> None:
     agent = _FakeAgent(agent_id=5)
     agents: dict[int, Any] = {5: agent}
-    mgr = _mk_mgr(agents)
+    mgr = make_manager(agents)
     spec = SeekSpec(interaction_type=InteractionType.TALK_TO)
     ctx = StepContext(im=mgr, is_bound_lookup=mgr.is_bound)
     node = SeekNode("seek", agent, spec=spec, ctx=ctx, duration_source=ParamDist(3.5), rng=rng_np)  # type: ignore[arg-type]
@@ -183,7 +154,7 @@ def test_seek_returns_success_once_bound_matching(rng_np: np.random.Generator) -
         agent_id: _FakeAgent(agent_id),
         other_id: _FakeAgent(other_id, x=0.2),
     }
-    mgr = _mk_mgr(agents)
+    mgr = make_manager(agents)
     spec = SeekSpec(interaction_type=InteractionType.TALK_TO)
     ctx = StepContext(im=mgr, is_bound_lookup=mgr.is_bound)
     node = SeekNode("seek", agents[agent_id], spec=spec, ctx=ctx, duration_source=None, rng=rng_np)  # type: ignore[arg-type]
@@ -207,8 +178,8 @@ def test_cancel_stops_bound_interaction_via_im() -> None:
         agent_id: _FakeAgent(agent_id),
         other_id: _FakeAgent(other_id, x=0.2),
     }
-    mgr = _mk_mgr(agents)
-    iid = _seed_active(mgr, [agent_id, other_id], InteractionType.GROUP_CONVERSATION)
+    mgr = make_manager(agents)
+    iid = seed_active(mgr, [agent_id, other_id], InteractionType.GROUP_CONVERSATION)
     assert mgr.is_bound(agent_id)
     agent: _FakeAgent = agents[agent_id]
     agent.movement.interaction_id = iid
@@ -222,7 +193,7 @@ def test_cancel_stops_bound_interaction_via_im() -> None:
 def test_cancel_without_bound_interaction_force_stops_via_im() -> None:
     agent_id = 8
     agents: dict[int, Any] = {agent_id: _FakeAgent(agent_id)}
-    mgr = _mk_mgr(agents)
+    mgr = make_manager(agents)
     agent: _FakeAgent = agents[agent_id]
     agent.movement.interaction_id = None
     node = CancelNode("cancel", agent, im=mgr)  # type: ignore[arg-type]
@@ -235,30 +206,30 @@ def test_seek_when_bound_preserves_formation_navigate(agent_factory: Callable[..
     # The IM writes NAVIGATE to participants' movement.command after each tick (formation).
     # On the next BT tick the SeekNode must NOT overwrite that NAVIGATE with a new SEEK
     # (or with None), otherwise bound followers stop tracking the leader.
-    agent = _with_bt(agent_factory(agent_id=9))
+    agent = with_bt(agent_factory(agent_id=9))
     ctx = StepContext(is_bound_lookup=lambda _aid: True)
     spec = SeekSpec(interaction_type=InteractionType.SERVICE, target="escort")
     node = SeekNode("seek", agent, spec=spec, ctx=ctx, duration_source=None, rng=rng_np)
     formation_nav = HighLevelCommand(agent_id=9, type=CommandType.NAVIGATE, target_pose=Pose2D(x=4.2, y=0.1))
-    _mv(agent).command = formation_nav
+    movement_of(agent).command = formation_nav
     node.tick_once()
     assert node.status == py_trees.common.Status.SUCCESS
-    assert _mv(agent).command is formation_nav
+    assert movement_of(agent).command is formation_nav
 
 
 def test_seek_reinitialised_after_loop_still_sees_bound(agent_factory: Callable[..., BaseAgent], rng_np: np.random.Generator) -> None:
     # After a hail -> then: default loop, the SeekNode is initialise()'d again. It must
     # re-check is_bound and short-circuit to SUCCESS without emitting a fresh SEEK that
     # would clobber the formation NAVIGATE from the previous tick.
-    agent = _with_bt(agent_factory(agent_id=11))
+    agent = with_bt(agent_factory(agent_id=11))
     ctx = StepContext(is_bound_lookup=lambda _aid: True)
     spec = SeekSpec(interaction_type=InteractionType.SERVICE, target="escort")
     node = SeekNode("seek", agent, spec=spec, ctx=ctx, duration_source=None, rng=rng_np)
     formation_nav = HighLevelCommand(agent_id=11, type=CommandType.NAVIGATE, target_pose=Pose2D(x=1.0))
-    _mv(agent).command = formation_nav
+    movement_of(agent).command = formation_nav
     node.tick_once()
     # Simulate sequence loop: re-initialise mimics a fresh `hail` after SUCCESS.
     node.initialise()
     node.tick_once()
     assert node.status == py_trees.common.Status.SUCCESS
-    assert _mv(agent).command is formation_nav
+    assert movement_of(agent).command is formation_nav

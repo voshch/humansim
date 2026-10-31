@@ -9,9 +9,10 @@ import pytest
 
 from arena_humansim.core.agents.base import BaseAgent
 from arena_humansim.core.pool import AgentPool
-from arena_humansim.local_planner.force import GOAL, SOCIAL, WALL, _preferred_velocity
+from arena_humansim.local_planner.force import GOAL, SOCIAL, WALL
 from arena_humansim.local_planner.karamouzas import KaramouzasPlanner, _magnitude
 from arena_humansim.utils.types import Pose2D
+from ._force import kernel_forces
 
 
 def _pool(
@@ -40,32 +41,6 @@ def _pool(
     return pool
 
 
-def _forces(planner: KaramouzasPlanner, pool: AgentPool, dt: float = 0.05) -> np.ndarray:
-    n = pool.n
-    pref, _ = _preferred_velocity(pool, n)
-    grid = planner._grid
-    out = np.zeros((n, 3, 2))
-    type(planner)._kernel.py_func(
-        pool.pos[:n].copy(),
-        pool.prev_vel[:n].copy(),
-        pool.theta[:n].copy(),
-        pool.agent_radius[:n].copy(),
-        pref,
-        pool.max_acceleration[:n].copy(),
-        pool.neighbor_indptr.astype(np.int64),
-        pool.neighbor_indices.astype(np.int64),
-        planner._params[:n].copy(),
-        planner._seg,
-        (grid.cell_start, grid.cell_walls, grid.wall_cx0, grid.wall_cy0, grid.origin_x, grid.origin_y, grid.cell, grid.nx, grid.ny),
-        dt,
-        out,
-    )
-    planner.compute_pool(pool, store_forces=True, dt=dt)
-    assert planner._last_force_arrays is not None
-    assert out == pytest.approx(planner._last_force_arrays[2], rel=1e-12, abs=1e-12)
-    return out
-
-
 @pytest.mark.parametrize(("d", "expected"), [(0.5, 6.0), (1.0, 3.0), (5.0, 3.0), (8.0, 3.0), (9.0, 1.5), (10.0, 0.0), (12.0, 0.0)])
 def test_magnitude_is_inverse_then_flat_then_linear_then_zero(d: float, expected: float) -> None:
     assert _magnitude.py_func(d, 1.0, 8.0, 10.0, 3.0) == pytest.approx(expected)
@@ -79,7 +54,7 @@ def test_magnitude_is_continuous_at_the_breakpoints() -> None:
 
 def test_goal_term_is_zero_at_preferred_velocity(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
     planner = KaramouzasPlanner()
-    out = _forces(planner, _pool(pool_empty, agent_factory, planner, [], []))
+    out = kernel_forces(planner, _pool(pool_empty, agent_factory, planner, [], []))
     assert out[0].tolist() == [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
 
 
@@ -87,7 +62,7 @@ def test_wall_force_inside_safe_distance_only(pool_empty: Callable[..., AgentPoo
     planner = KaramouzasPlanner()
     planner.set_walls([((-5.0, -1.0), (5.0, -1.0)), ((-5.0, -3.0), (5.0, -3.0))])
     pool = _pool(pool_empty, agent_factory, planner, [(3.0, -1.0, 0.0, 0.0)], [])
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     assert out[0, WALL] == pytest.approx((0.0, 1.25 / 0.75**2))
     assert out[1, WALL] == pytest.approx((0.0, 0.25 / 1.75**2))
 
@@ -95,21 +70,21 @@ def test_wall_force_inside_safe_distance_only(pool_empty: Callable[..., AgentPoo
 def test_colliding_neighbor_force_is_capped_and_masks_predictions(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
     planner = KaramouzasPlanner()
     pool = _pool(pool_empty, agent_factory, planner, [(0.0, 0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0), (3.0, 0.0, -1.0, 0.0)], [1, 2, 3])
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     assert out[0, SOCIAL] == pytest.approx((-1.5, 0.0))
 
 
 def test_colliding_neighbor_below_cap_follows_inverse_magnitude(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
     planner = KaramouzasPlanner()
     pool = _pool(pool_empty, agent_factory, planner, [(0.0, 1.2, 0.0, 0.0)], [1], agent_force=0.5)
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     assert out[0, SOCIAL] == pytest.approx((0.0, -0.5 / 0.7))
 
 
 def test_predicted_collision_pushes_with_flat_magnitude(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
     planner = KaramouzasPlanner()
     pool = _pool(pool_empty, agent_factory, planner, [(4.0, 0.0, 0.0, 0.0)], [1], agent_force=0.5)
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     assert out[0, GOAL].tolist() == [0.0, 0.0]
     assert out[0, SOCIAL] == pytest.approx((-0.5, 0.0))
 
@@ -118,7 +93,7 @@ def test_only_most_imminent_predictions_count_with_decaying_weight(pool_empty: C
     planner = KaramouzasPlanner()
     others = [(x, 0.0, 0.0, 0.0) for x in (3.5, 2.0, 3.0, 2.5, 4.0)]
     pool = _pool(pool_empty, agent_factory, planner, others, [1, 2, 3, 4, 5], colliding_count=2.0, d_mid=1.6, d_max=3.5, agent_force=0.5)
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     assert out[0, SOCIAL] == pytest.approx((-0.5 * (1.0 + 0.8 * 1.5 / 1.9), 0.0))
 
 
@@ -133,7 +108,7 @@ def test_only_most_imminent_predictions_count_with_decaying_weight(pool_empty: C
 )
 def test_neighbors_outside_view_horizon_or_range_exert_nothing(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent], other: tuple[float, float, float, float], params: dict[str, float]) -> None:
     planner = KaramouzasPlanner()
-    out = _forces(planner, _pool(pool_empty, agent_factory, planner, [other], [1], **params))
+    out = kernel_forces(planner, _pool(pool_empty, agent_factory, planner, [other], [1], **params))
     assert out[0, SOCIAL].tolist() == [0.0, 0.0]
 
 
@@ -141,7 +116,7 @@ def test_predicted_exact_overlap_of_point_neighbor_is_skipped(pool_empty: Callab
     planner = KaramouzasPlanner()
     pool = _pool(pool_empty, agent_factory, planner, [(2.0, 0.0, 0.0, 0.0)], [1], personal_space=0.0)
     pool.agent_radius[1] = 0.0
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     assert out[0, SOCIAL].tolist() == [0.0, 0.0]
 
 
@@ -155,6 +130,6 @@ def test_python_kernel_matches_compiled_in_crowd(pool_empty: Callable[..., Agent
     n = pool.n
     indices = [j for i in range(n) for j in range(n) if j != i]
     pool.set_neighbor_csr(np.arange(0, n * (n - 1) + 1, n - 1, dtype=np.int32), np.array(indices, dtype=np.int32))
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     assert np.all(np.isfinite(out))
     assert np.all(np.hypot(out[:, SOCIAL, 0], out[:, SOCIAL, 1]) <= pool.max_acceleration[:n] + 1e-12)
