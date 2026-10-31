@@ -158,6 +158,26 @@ def test_shipped_wheelchair_manual_profile() -> None:
     assert params.interaction_class == "wheelchair"
 
 
+def test_shipped_wheelchair_electric_profile() -> None:
+    at = load_agent_type_from_file(CONFIG_DIR / "wheelchair_electric.yaml")
+    assert at.name == "wheelchair_electric"
+    assert at.locomotion_active is True
+    assert at.locomotion.kinematics == "along_heading"
+    assert at.locomotion.footprint_length.mean == 1.1
+    assert at.interaction_class == "wheelchair"
+    assert at.assets == ("human::propulsion::electric",)
+    assert at.climbs == ()
+    assert at.local_planner == "hsfm"
+    assert at.local_planner_params["lateral_gain"].mean == 0.0
+    assert at.pose["walk"] == {"base": "seated_wheelchair_electric"}
+    assert at.pose["idle"] == {"base": "seated_wheelchair_electric"}
+    assert at.pose["run"] == {"same_as": "walk", "gain": {"factor": 1.0}}
+    params = sample_agent_type(at, np.random.default_rng(1))
+    assert params.climbs == ()
+    assert params.locomotion.speed_profile == ()
+    assert params.locomotion.lateral_profile == ()
+
+
 def test_shipped_adult_limp_right_profile() -> None:
     limp = load_agent_type_from_file(CONFIG_DIR / "adult_limp_right.yaml")
     assert limp.locomotion_active
@@ -173,7 +193,7 @@ def test_shipped_adult_limp_right_profile() -> None:
     assert sampled.locomotion.recovery_stall_after_s == 0.0
 
 
-@pytest.mark.parametrize("name", ["wheelchair_manual", "adult_limp_right"])
+@pytest.mark.parametrize("name", ["wheelchair_manual", "wheelchair_electric", "adult_limp_right"])
 def test_builtin_registry_resolves_extends_like_the_file_loader(name: str) -> None:
     from_file = load_agent_type_from_file(CONFIG_DIR / f"{name}.yaml")
     assert attrs.evolve(BUILTIN_AGENTS[name], source_path=from_file.source_path) == from_file

@@ -4,6 +4,7 @@ name: wheelchair_electric
 extends: adult
 interaction_class: wheelchair
 assets: [human::propulsion::electric]
+climbs: []
 
 agent_radius: 0.325
 desired_velocity: 0.9
