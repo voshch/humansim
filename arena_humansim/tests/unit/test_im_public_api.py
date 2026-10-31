@@ -9,7 +9,6 @@ pytest.importorskip("rclpy")
 
 from arena_humansim.core.interaction_kinds import InteractionType, MembershipRole
 from arena_humansim.core.interaction_manager import InteractionManager
-from arena_humansim.utils.rng import RNG
 from arena_humansim.utils.types import (
     AgentKind,
     AgentState,
@@ -18,6 +17,7 @@ from arena_humansim.utils.types import (
     Pose2D,
     SeekSpec,
 )
+from ._helpers import make_manager, seed_active
 
 
 @dataclass
@@ -33,25 +33,6 @@ class _FakeAgent:
         self.movement = BehaviorTreeMovement()
 
 
-def _mk_mgr(agents: dict[int, Any]) -> InteractionManager:
-    mgr = InteractionManager(RNG(0))
-    mgr.set_context(
-        agent_lookup=lambda aid: agents.get(aid),  # type: ignore[arg-type]
-        visibility_lookup=lambda aid: set(agents) - {aid},
-    )
-    return mgr
-
-
-def _seed_active(mgr: InteractionManager, participants: list[int], itype: InteractionType) -> int:
-    spec = SeekSpec(interaction_type=itype)
-    interaction = mgr._create_interaction(creator_id=participants[0], spec=spec)
-    for pid in participants[1:]:
-        mgr.accept(pid, interaction.id)
-    interaction.outcome = InteractionOutcome.ACTIVE
-    interaction.contract.formation = None
-    return interaction.id
-
-
 def _seed_forming(mgr: InteractionManager, participant: int, itype: InteractionType) -> int:
     spec = SeekSpec(interaction_type=itype)
     interaction = mgr._create_interaction(creator_id=participant, spec=spec)
@@ -62,7 +43,7 @@ def _seed_forming(mgr: InteractionManager, participant: int, itype: InteractionT
 
 def test_seek_creates_matching_interaction_when_none_exists() -> None:
     agents: dict[int, Any] = {1: _FakeAgent(1, x=0.0)}
-    mgr = _mk_mgr(agents)
+    mgr = make_manager(agents)
 
     spec = SeekSpec(interaction_type=InteractionType.GROUP_CONVERSATION)
     iid = mgr.seek(1, spec)
@@ -76,7 +57,7 @@ def test_seek_creates_matching_interaction_when_none_exists() -> None:
 
 def test_seek_joins_existing_matching_interaction() -> None:
     agents: dict[int, Any] = {1: _FakeAgent(1, x=0.0), 2: _FakeAgent(2, x=0.5)}
-    mgr = _mk_mgr(agents)
+    mgr = make_manager(agents)
 
     # Agent 1 creates a FORMING interaction (min_participants=2 so stays FORMING alone).
     iid = _seed_forming(mgr, 1, InteractionType.GROUP_CONVERSATION)
@@ -94,7 +75,7 @@ def test_seek_joins_existing_matching_interaction() -> None:
 def test_seek_returns_none_when_no_match_and_cannot_create() -> None:
     # SERVICE requires offer=True to create; no existing provider interaction.
     agents: dict[int, Any] = {1: _FakeAgent(1, x=0.0)}
-    mgr = _mk_mgr(agents)
+    mgr = make_manager(agents)
 
     spec = SeekSpec(interaction_type=InteractionType.SERVICE, offer=False)
     result = mgr.seek(1, spec)
@@ -105,9 +86,9 @@ def test_seek_returns_none_when_no_match_and_cannot_create() -> None:
 
 def test_seek_enforces_at_most_one_participant_membership() -> None:
     agents: dict[int, Any] = {1: _FakeAgent(1, x=0.0), 2: _FakeAgent(2, x=0.2)}
-    mgr = _mk_mgr(agents)
+    mgr = make_manager(agents)
 
-    group_iid = _seed_active(mgr, [1, 2], InteractionType.GROUP_CONVERSATION)
+    group_iid = seed_active(mgr, [1, 2], InteractionType.GROUP_CONVERSATION)
     assert 1 in mgr.interactions[group_iid].participants
 
     # Seek a different interaction type - SIT_ON with no world_knowledge means can_create
@@ -126,9 +107,9 @@ def test_seek_enforces_at_most_one_participant_membership() -> None:
 
 def test_seek_preserves_matching_membership() -> None:
     agents: dict[int, Any] = {1: _FakeAgent(1, x=0.0), 2: _FakeAgent(2, x=0.2)}
-    mgr = _mk_mgr(agents)
+    mgr = make_manager(agents)
 
-    group_iid = _seed_active(mgr, [1, 2], InteractionType.GROUP_CONVERSATION)
+    group_iid = seed_active(mgr, [1, 2], InteractionType.GROUP_CONVERSATION)
 
     group_spec = SeekSpec(interaction_type=InteractionType.GROUP_CONVERSATION)
     returned_iid = mgr.seek(1, group_spec)
@@ -142,8 +123,8 @@ def test_seek_preserves_matching_membership() -> None:
 
 def test_is_bound_matching_returns_true_for_active_matching() -> None:
     agents: dict[int, Any] = {1: _FakeAgent(1, x=0.0), 2: _FakeAgent(2, x=0.2)}
-    mgr = _mk_mgr(agents)
-    _seed_active(mgr, [1, 2], InteractionType.GROUP_CONVERSATION)
+    mgr = make_manager(agents)
+    seed_active(mgr, [1, 2], InteractionType.GROUP_CONVERSATION)
 
     spec = SeekSpec(interaction_type=InteractionType.GROUP_CONVERSATION)
     assert mgr.is_bound_matching(1, spec) is True
@@ -151,7 +132,7 @@ def test_is_bound_matching_returns_true_for_active_matching() -> None:
 
 def test_is_bound_matching_returns_false_for_forming() -> None:
     agents: dict[int, Any] = {1: _FakeAgent(1, x=0.0)}
-    mgr = _mk_mgr(agents)
+    mgr = make_manager(agents)
     iid = _seed_forming(mgr, 1, InteractionType.GROUP_CONVERSATION)
     # Confirm it's still FORMING (min_participants=2, only one agent).
     assert mgr.interactions[iid].outcome == InteractionOutcome.FORMING
@@ -163,8 +144,8 @@ def test_is_bound_matching_returns_false_for_forming() -> None:
 
 def test_is_bound_matching_returns_false_for_different_type() -> None:
     agents: dict[int, Any] = {1: _FakeAgent(1, x=0.0), 2: _FakeAgent(2, x=0.2)}
-    mgr = _mk_mgr(agents)
-    _seed_active(mgr, [1, 2], InteractionType.GROUP_CONVERSATION)
+    mgr = make_manager(agents)
+    seed_active(mgr, [1, 2], InteractionType.GROUP_CONVERSATION)
 
     # Querying with a different interaction type must not match.
     sit_spec = SeekSpec(interaction_type=InteractionType.SIT_ON, target="chair")

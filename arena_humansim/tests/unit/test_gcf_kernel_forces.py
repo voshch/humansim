@@ -9,7 +9,7 @@ import pytest
 
 from arena_humansim.core.agents.base import BaseAgent
 from arena_humansim.core.pool import AgentPool
-from arena_humansim.local_planner.force import GOAL, SOCIAL, WALL, _preferred_velocity
+from arena_humansim.local_planner.force import GOAL, SOCIAL, WALL
 from arena_humansim.local_planner.gcf import (
     GCFPlanner,
     _contact_distance,
@@ -23,6 +23,7 @@ from arena_humansim.local_planner.gcf import (
     polar_radius,
 )
 from arena_humansim.utils.types import Pose2D
+from ._force import kernel_forces
 
 _CIRCLES = {"a_min": 0.25, "a_rate": 0.0, "b_max": 0.25, "b_growth": 0.0}
 
@@ -66,33 +67,8 @@ def _pool(
     return pool
 
 
-def _forces(planner: GCFPlanner, pool: AgentPool, dt: float = 0.05) -> np.ndarray:
-    n = pool.n
-    pref, _ = _preferred_velocity(pool, n)
-    grid = planner._grid
-    out = np.zeros((n, 3, 2))
-    type(planner)._kernel.py_func(
-        pool.pos[:n].copy(),
-        pool.prev_vel[:n].copy(),
-        pool.theta[:n].copy(),
-        pool.agent_radius[:n].copy(),
-        pref,
-        pool.max_acceleration[:n].copy(),
-        pool.neighbor_indptr.astype(np.int64),
-        pool.neighbor_indices.astype(np.int64),
-        planner._params[:n].copy(),
-        planner._seg,
-        (grid.cell_start, grid.cell_walls, grid.wall_cx0, grid.wall_cy0, grid.origin_x, grid.origin_y, grid.cell, grid.nx, grid.ny),
-        dt,
-        out,
-    )
-    planner.compute_pool(pool, store_forces=True, dt=dt)
-    assert planner._last_force_arrays is not None
-    assert out == pytest.approx(planner._last_force_arrays[2], rel=1e-12, abs=1e-12)
-    return out
-
-
 def test_ellipse_axes_grow_along_motion_and_clamp_the_sway_axis() -> None:
+    assert ellipse_axes.py_func(0.18, 0.53, 0.25, 0.05, 0.0) == pytest.approx((0.18, 0.25))
     assert ellipse_axes.py_func(0.18, 0.53, 0.25, 0.05, 1.3) == pytest.approx((0.18 + 0.53 * 1.3, 0.2))
     assert ellipse_axes.py_func(0.18, 0.53, 0.25, 0.05, 100.0)[1] == 0.01
 
@@ -150,6 +126,8 @@ def test_hermite_interpolates_values_and_slopes() -> None:
 def test_distance_response_branches_are_continuous_and_decreasing() -> None:
     max_dist, width, max_force = 2.0, 0.12, 3.0
     peak = 3.0 * max_force
+    for x in (0.0, width, max_dist - width, max_dist):
+        assert distance_response.py_func(x - 1e-9, max_dist, width, max_force) == pytest.approx(distance_response.py_func(x + 1e-9, max_dist, width, max_force), abs=1e-6)
     assert distance_response.py_func(-0.1, max_dist, width, max_force) == peak
     assert distance_response.py_func(0.0, max_dist, width, max_force) == peak
     assert distance_response.py_func(width, max_dist, width, max_force) == pytest.approx(1.0 / width)
@@ -232,7 +210,7 @@ def test_closest_approach_of_near_degenerate_pairs_stays_within_bounds(kind: str
 def test_head_on_circles_follow_the_velocity_squared_law(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
     planner = GCFPlanner()
     pool = _pool(pool_empty, agent_factory, planner, [(0.0, 0.0, 0.0, 1.0, 0.0), (1.5, 0.0, math.pi, -1.0, 0.0)], [[1], [0]], [(10.0, 0.0), (-10.0, 0.0)], **_CIRCLES)
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     scale = 0.3 * pool.desired_vel[0] + 2.0
     assert out[0, SOCIAL] == pytest.approx((-(scale**2), 0.0))
     assert out[1, SOCIAL] == pytest.approx(-out[0, SOCIAL])
@@ -243,14 +221,14 @@ def test_resting_coincident_or_far_neighbors_exert_nothing(pool_empty: Callable[
     planner = GCFPlanner()
     states = [(0.0, 0.0, 0.0, 1.3, 0.0), (0.0, 0.0, 0.0, 0.0, 0.0), (-6.0, 0.0, 0.0, 0.0, 0.0), (-5.0, 0.3, 0.0, 0.0, 0.0)]
     pool = _pool(pool_empty, agent_factory, planner, states, [[1, 2], [], [], [2]], [None] * 4)
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     assert out[:, SOCIAL].tolist() == [[0.0, 0.0]] * 4
 
 
 def test_side_by_side_walkers_are_culled_by_support_distance(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
     planner = GCFPlanner()
     pool = _pool(pool_empty, agent_factory, planner, [(0.0, 0.0, 0.0, 1.3, 0.0), (0.0, -3.0, 0.0, 1.3, 0.0)], [[1], []], [(10.0, 0.0), (10.0, -3.0)])
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     assert out[0, SOCIAL].tolist() == [0.0, 0.0]
 
 
@@ -258,7 +236,7 @@ def test_diagonal_walker_beyond_contact_range_is_culled(pool_empty: Callable[...
     planner = GCFPlanner()
     d = 3.0 / math.sqrt(2.0)
     pool = _pool(pool_empty, agent_factory, planner, [(0.0, 0.0, 0.0, 1.3, 0.0), (-d, -d, 0.0, 1.3, 0.0)], [[1], []], [(10.0, 0.0), (10.0, -d)])
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     assert out[0, SOCIAL].tolist() == [0.0, 0.0]
 
 
@@ -266,7 +244,7 @@ def test_wall_ahead_pushes_back_through_three_samples(pool_empty: Callable[..., 
     planner = GCFPlanner()
     planner.set_walls([((-5.0, -1.0), (5.0, -1.0))])
     pool = _pool(pool_empty, agent_factory, planner, [(0.0, 0.0, -math.pi / 2, 0.0, -1.0)], [[]], [None], **_CIRCLES)
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     side = math.hypot(0.025 * 10.0, 1.0)
     expected = 1.0 / 0.75 + 2.0 * (1.0 / (side - 0.25)) / side
     assert out[0, WALL] == pytest.approx((0.0, expected))
@@ -277,7 +255,7 @@ def test_short_walls_walls_underfoot_and_samples_past_endpoints(pool_empty: Call
     planner.set_walls([((0.0, -1.0), (0.05, -1.0)), ((-5.0, 0.0), (5.0, 0.0)), ((1.0, 2.0), (6.0, 2.0))])
     states = [(0.0, 1.0, 0.0, 0.0, -1.0), (2.0, 0.0, 0.0, 1.0, 0.0), (0.0, 2.0, 0.0, 1.0, 0.0)]
     pool = _pool(pool_empty, agent_factory, planner, states, [[], [], []], [None] * 3, **_CIRCLES)
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     assert out[0, WALL, 1] > 0.0
     assert out[0, WALL, 0] == pytest.approx(0.0, abs=1e-12)
     assert out[1, WALL].tolist() == [0.0, 0.0]
@@ -291,7 +269,7 @@ def test_python_kernel_matches_compiled_in_crowded_corridor(pool_empty: Callable
     xs, ys, ths = rng.uniform(-3, 3, 8), rng.uniform(-0.9, 0.9, 8), rng.uniform(-math.pi, math.pi, 8)
     states = [(float(xs[k]), float(ys[k]), float(ths[k]), 1.1 * math.cos(ths[k]), 1.1 * math.sin(ths[k])) for k in range(8)]
     pool = _pool(pool_empty, agent_factory, planner, states, [[j for j in range(8) if j != i] for i in range(8)], [(4.0, 0.0)] * 8)
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     assert np.all(np.isfinite(out))
     assert np.abs(out[:, SOCIAL]).max() > 0.0
     assert np.abs(out[:, WALL]).max() > 0.0

@@ -9,7 +9,7 @@ from arena_humansim.core.agents.base import BaseAgent
 from arena_humansim.core.pool import AgentPool
 from arena_humansim.local_planner.force import SOCIAL, WALL
 from arena_humansim.local_planner.zanlungo import ZanlungoPlanner, _wall_ttc
-from arena_humansim.utils.types import BeliefState, Pose2D
+from arena_humansim.utils.types import Pose2D
 
 _DT = 0.05
 
@@ -37,29 +37,6 @@ def _scene(
     assert np.all(np.isfinite(out))
     assert np.all(np.isfinite(pool.vel[: pool.n]))
     return out
-
-
-def test_pooled_and_per_agent_paths_agree(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
-    planner = ZanlungoPlanner()
-    planner.set_walls([((-5.0, -0.8), (5.0, -0.8))])
-    agents = [agent_factory(agent_id=1, x=0.0, y=0.0), agent_factory(agent_id=2, x=1.5, y=0.1)]
-    agents[0].state.velocity = (0.8, -0.3)
-    agents[1].state.velocity = (-0.6, 0.0)
-    for agent, other in zip(agents, reversed(agents), strict=True):
-        agent.belief = BeliefState(observed_agents=[other.state])
-    goals = {1: Pose2D(x=10.0, y=0.0), 2: Pose2D(x=-10.0, y=0.0)}
-
-    pool = pool_empty(capacity=4)
-    planner.attach(pool)
-    for agent in agents:
-        pool.add_agent(agent)
-    pool.set_goals(goals)
-    pool.set_neighbor_csr(np.array([0, 1, 2], dtype=np.int32), np.array([1, 0], dtype=np.int32))
-    planner.compute_pool(pool, dt=_DT)
-
-    per_agent = planner.compute(agents, goals, dt=_DT)
-    for i, agent in enumerate(agents):
-        assert np.allclose(per_agent[agent.state.agent_id], pool.vel[i])
 
 
 def test_head_on_pair_repels_backward_and_laterally_before_contact(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:

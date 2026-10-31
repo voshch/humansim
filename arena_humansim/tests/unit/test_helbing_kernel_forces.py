@@ -8,9 +8,10 @@ import pytest
 
 from arena_humansim.core.agents.base import BaseAgent
 from arena_humansim.core.pool import AgentPool
-from arena_humansim.local_planner.force import GOAL, SOCIAL, WALL, _preferred_velocity
+from arena_humansim.local_planner.force import GOAL, SOCIAL, WALL
 from arena_humansim.local_planner.helbing import HelbingPlanner
 from arena_humansim.utils.types import Pose2D
+from ._force import kernel_forces
 
 _TAU, _MASS, _A, _A_WALL, _B, _K, _KAPPA = range(7)
 
@@ -35,36 +36,10 @@ def _pool(
     return pool
 
 
-def _forces(planner: HelbingPlanner, pool: AgentPool, dt: float = 0.05) -> np.ndarray:
-    n = pool.n
-    pref, _ = _preferred_velocity(pool, n)
-    grid = planner._grid
-    out = np.zeros((n, 3, 2))
-    type(planner)._kernel.py_func(
-        pool.pos[:n].copy(),
-        pool.prev_vel[:n].copy(),
-        pool.theta[:n].copy(),
-        pool.agent_radius[:n].copy(),
-        pref,
-        pool.max_acceleration[:n].copy(),
-        pool.neighbor_indptr.astype(np.int64),
-        pool.neighbor_indices.astype(np.int64),
-        planner._params[:n].copy(),
-        planner._seg,
-        (grid.cell_start, grid.cell_walls, grid.wall_cx0, grid.wall_cy0, grid.origin_x, grid.origin_y, grid.cell, grid.nx, grid.ny),
-        dt,
-        out,
-    )
-    planner.compute_pool(pool, store_forces=True, dt=dt)
-    assert planner._last_force_arrays is not None
-    assert out == pytest.approx(planner._last_force_arrays[2], rel=1e-12, abs=1e-12)
-    return out
-
-
 def test_goal_term_is_velocity_error_over_relaxation_time(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
     planner = HelbingPlanner()
     pool = _pool(pool_empty, agent_factory, planner, [(0.0, 0.0, 0.4, -0.2), (5.0, 5.0, 1.0, 0.0)], [[], []], [(0.0, 3.0), None])
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     p = planner._defaults
     assert out[0, GOAL] == pytest.approx(((0.0 - 0.4) / p[_TAU], (pool.desired_vel[0] + 0.2) / p[_TAU]))
     assert out[1, GOAL] == pytest.approx((-1.0 / p[_TAU], 0.0))
@@ -73,7 +48,7 @@ def test_goal_term_is_velocity_error_over_relaxation_time(pool_empty: Callable[.
 def test_separated_pair_feels_equal_and_opposite_exponential_repulsion(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
     planner = HelbingPlanner()
     pool = _pool(pool_empty, agent_factory, planner, [(0.0, 0.0, 0.0, 0.0), (0.6, 0.8, 0.0, 0.0)], [[1], [0]], [None, None])
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     p = planner._defaults
     mag = p[_A] * math.exp((0.5 - 1.0) / p[_B]) / p[_MASS]
     assert out[0, SOCIAL] == pytest.approx((-0.6 * mag, -0.8 * mag))
@@ -83,7 +58,7 @@ def test_separated_pair_feels_equal_and_opposite_exponential_repulsion(pool_empt
 def test_overlapping_pair_adds_body_force_and_sliding_friction(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
     planner = HelbingPlanner()
     pool = _pool(pool_empty, agent_factory, planner, [(0.0, 0.0, 0.0, 0.0), (0.48, 0.0, 0.0, 0.5)], [[1], [0]], [None, None])
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     p = planner._defaults
     g = 0.02
     assert out[0, SOCIAL, 0] == pytest.approx(-(p[_A] * math.exp(g / p[_B]) + p[_K] * g) / p[_MASS])
@@ -95,7 +70,7 @@ def test_wall_contact_pushes_out_and_brakes_sliding_along_the_wall(pool_empty: C
     planner = HelbingPlanner()
     planner.set_walls([((-5.0, 0.0), (5.0, 0.0))])
     pool = _pool(pool_empty, agent_factory, planner, [(0.0, 0.2, 1.0, 0.0), (2.0, 0.6, 1.0, 0.0)], [[], []], [None, None])
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     p = planner._defaults
     g = 0.05
     assert out[0, WALL] == pytest.approx((-p[_KAPPA] * g / p[_MASS], (p[_A_WALL] * math.exp(g / p[_B]) + p[_K] * g) / p[_MASS]))
@@ -106,7 +81,7 @@ def test_coincident_neighbor_and_wall_under_the_agent_exert_nothing(pool_empty: 
     planner = HelbingPlanner()
     planner.set_walls([((-5.0, 0.0), (5.0, 0.0))])
     pool = _pool(pool_empty, agent_factory, planner, [(1.0, 0.0, 0.3, 0.0), (1.0, 0.0, 0.0, 0.0)], [[1], [0]], [None, None])
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     assert out[:, SOCIAL].tolist() == [[0.0, 0.0], [0.0, 0.0]]
     assert out[:, WALL].tolist() == [[0.0, 0.0], [0.0, 0.0]]
 
@@ -118,6 +93,6 @@ def test_python_kernel_matches_compiled_in_crowded_corridor(pool_empty: Callable
     states = [(float(x), float(y), float(vx), float(vy)) for x, y, vx, vy in np.column_stack([rng.uniform(-3, 3, 8), rng.uniform(-0.9, 0.9, 8), rng.normal(0, 1, (8, 2))])]
     neighbors = [[j for j in range(8) if j != i] for i in range(8)]
     pool = _pool(pool_empty, agent_factory, planner, states, neighbors, [(4.0, 0.0)] * 8)
-    out = _forces(planner, pool)
+    out = kernel_forces(planner, pool)
     assert np.all(np.isfinite(out))
     assert np.abs(out[:, SOCIAL]).max() > 0.0

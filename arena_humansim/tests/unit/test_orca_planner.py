@@ -20,27 +20,9 @@ from arena_humansim.local_planner.orca import (
 from arena_humansim.local_planner.pedvo import PedVOPlanner
 from arena_humansim.utils.benchmark import generate_maze
 from arena_humansim.utils.types import Pose2D, Segments
+from ._helpers import line_array, spec_pool, wall_clearance
 
 _DT = 0.05
-
-
-def _lines(*rows: tuple[float, float, float, float]) -> np.ndarray:
-    return np.array(rows, dtype=np.float64).reshape(-1, 4)
-
-
-def _pool(
-    agent_factory: Callable[..., BaseAgent],
-    specs: list[tuple[tuple[float, float], tuple[float, float] | None, tuple[float, float]]],
-) -> AgentPool:
-    pool = AgentPool(capacity=max(len(specs), 1))
-    for i, (pos, goal, vel) in enumerate(specs):
-        agent = agent_factory(agent_id=i + 1, x=pos[0], y=pos[1])
-        agent.state.velocity = vel
-        idx = pool.add_agent(agent)
-        if goal is not None:
-            pool.goal_pos[idx] = goal
-            pool.has_goal[idx] = True
-    return pool
 
 
 def _run(planner: ORCAPlanner, pool: AgentPool, steps: int, external: dict[int, tuple[float, float]] | None = None) -> np.ndarray:
@@ -54,16 +36,6 @@ def _run(planner: ORCAPlanner, pool: AgentPool, steps: int, external: dict[int, 
         pool.prev_vel[:n] = pool.vel[:n]
         traj.append(pool.pos[:n].copy())
     return np.array(traj)
-
-
-def _wall_clearance(points: np.ndarray, walls: Segments) -> np.ndarray:
-    seg = np.asarray(walls, dtype=np.float64).reshape(-1, 4)
-    a = seg[:, :2]
-    ab = seg[:, 2:] - a
-    p = points.reshape(-1, 1, 2)
-    t = np.clip(np.sum((p - a) * ab, axis=-1) / np.sum(ab * ab, axis=-1), 0.0, 1.0)
-    closest = a + t[..., None] * ab
-    return np.linalg.norm(p - closest, axis=-1).min(axis=1).reshape(points.shape[:-1])
 
 
 def _min_pair_distance(traj: np.ndarray) -> float:
@@ -201,13 +173,13 @@ def test_orca_overlapping_agents_move_apart(agent_factory: Callable[..., BaseAge
 
 
 def test_linear_program2_without_lines_clamps_pref_to_max_speed() -> None:
-    fail, rx, ry = _linear_program2(_lines(), 0, 1.5, 10.0, 0.0, False)
+    fail, rx, ry = _linear_program2(line_array(), 0, 1.5, 10.0, 0.0, False)
     assert fail == 0
     assert np.hypot(rx, ry) == pytest.approx(1.5, rel=1e-9)
 
 
 def test_linear_program_line_outside_speed_circle_falls_back_to_least_violation() -> None:
-    lines = _lines((10.0, 0.0, 0.0, -1.0))
+    lines = line_array((10.0, 0.0, 0.0, -1.0))
     fail, rx, ry = _linear_program2(lines, 1, 1.0, 2.0, 0.0, False)
     assert fail == 0
     rx, ry = _linear_program3(lines, 1, 0, fail, 1.0, rx, ry)
@@ -216,7 +188,7 @@ def test_linear_program_line_outside_speed_circle_falls_back_to_least_violation(
 
 
 def test_linear_program_line_outside_speed_circle_with_zero_pref_still_moves_toward_it() -> None:
-    lines = _lines((10.0, 0.0, 0.0, -1.0))
+    lines = line_array((10.0, 0.0, 0.0, -1.0))
     fail, rx, ry = _linear_program2(lines, 1, 1.0, 0.0, 0.0, False)
     assert fail == 0
     assert (rx, ry) == (0.0, 0.0)
@@ -226,13 +198,13 @@ def test_linear_program_line_outside_speed_circle_with_zero_pref_still_moves_tow
 
 
 def test_linear_program1_parallel_lines_with_disjoint_sides_are_infeasible() -> None:
-    lines = _lines((0.0, 0.0, 0.0, 1.0), (0.5, 0.0, 0.0, -1.0))
+    lines = line_array((0.0, 0.0, 0.0, 1.0), (0.5, 0.0, 0.0, -1.0))
     ok, _, _ = _linear_program1(lines, 1, 1.0, 0.6, 0.0, False)
     assert not ok
 
 
 def test_linear_program1_parallel_lines_facing_the_same_way_are_feasible() -> None:
-    lines = _lines((0.0, 10.0, 0.0, -1.0), (0.5, 0.0, 0.0, -1.0))
+    lines = line_array((0.0, 10.0, 0.0, -1.0), (0.5, 0.0, 0.0, -1.0))
     ok, rx, ry = _linear_program1(lines, 1, 2.0, 0.5, 0.5, False)
     assert ok
     assert rx == pytest.approx(0.5, rel=1e-9)
@@ -241,7 +213,7 @@ def test_linear_program1_parallel_lines_facing_the_same_way_are_feasible() -> No
 
 @pytest.mark.parametrize(("pref_y", "expected_y"), [(0.5, 0.5), (0.95, 0.8), (0.0, 0.2)])
 def test_linear_program1_clamps_to_bounds_of_earlier_lines(pref_y: float, expected_y: float) -> None:
-    lines = _lines((0.0, 0.2, 1.0, 0.0), (0.0, 0.8, -1.0, 0.0), (0.0, 0.0, 0.0, -1.0))
+    lines = line_array((0.0, 0.2, 1.0, 0.0), (0.0, 0.8, -1.0, 0.0), (0.0, 0.0, 0.0, -1.0))
     ok, rx, ry = _linear_program1(lines, 2, 1.0, 0.0, pref_y, False)
     assert ok
     assert rx == pytest.approx(0.0, abs=1e-9)
@@ -249,7 +221,7 @@ def test_linear_program1_clamps_to_bounds_of_earlier_lines(pref_y: float, expect
 
 
 def test_linear_program1_single_line_projects_pref_onto_line() -> None:
-    lines = _lines((0.0, 0.0, 0.0, -1.0))
+    lines = line_array((0.0, 0.0, 0.0, -1.0))
     ok, rx, ry = _linear_program1(lines, 0, 2.0, 0.3, 0.7, False)
     assert ok
     assert rx == pytest.approx(0.0, abs=1e-9)
@@ -257,7 +229,7 @@ def test_linear_program1_single_line_projects_pref_onto_line() -> None:
 
 
 def test_linear_program3_keeps_obstacle_lines_hard() -> None:
-    lines = _lines((0.0, 0.0, 0.0, -1.0), (-0.5, 0.0, 0.0, 1.0))
+    lines = line_array((0.0, 0.0, 0.0, -1.0), (-0.5, 0.0, 0.0, 1.0))
     fail, rx, ry = _linear_program2(lines, 2, 1.0, 1.0, 0.0, False)
     assert fail == 1
     rx, ry = _linear_program3(lines, 2, 1, fail, 1.0, rx, ry)
@@ -267,7 +239,7 @@ def test_linear_program3_keeps_obstacle_lines_hard() -> None:
 
 def test_orca_avoids_standing_agent_without_goal(agent_factory: Callable[..., BaseAgent]) -> None:
     planner = ORCAPlanner()
-    pool = _pool(agent_factory, [((0.0, 0.0), (6.0, 0.0), (0.0, 0.0)), ((3.0, 0.15), None, (0.0, 0.0))])
+    pool = spec_pool(agent_factory, [((0.0, 0.0), (6.0, 0.0), (0.0, 0.0)), ((3.0, 0.15), None, (0.0, 0.0))])
     traj = _run(planner, pool, 200)
     assert np.allclose(traj[:, 1], (3.0, 0.15))
     assert _min_pair_distance(traj) >= 0.5 - 0.05
@@ -276,7 +248,7 @@ def test_orca_avoids_standing_agent_without_goal(agent_factory: Callable[..., Ba
 
 def test_orca_avoids_agent_of_other_planner(agent_factory: Callable[..., BaseAgent]) -> None:
     planner = ORCAPlanner()
-    pool = _pool(agent_factory, [((0.0, 0.0), (8.0, 0.0), (0.0, 0.0)), ((8.0, 0.0), None, (-1.0, 0.0))])
+    pool = spec_pool(agent_factory, [((0.0, 0.0), (8.0, 0.0), (0.0, 0.0)), ((8.0, 0.0), None, (-1.0, 0.0))])
     traj = _run(planner, pool, 200, external={1: (-1.0, 0.0)})
     assert _min_pair_distance(traj) >= 0.5 - 0.05
     assert traj[-1, 0, 0] > 6.0
@@ -287,10 +259,10 @@ def test_orca_agent_driven_into_wall_keeps_clearance(agent_factory: Callable[...
     walls: Segments = [((-5.0, 1.0), (5.0, 1.0))]
     planner = ORCAPlanner()
     planner.set_walls(walls)
-    pool = _pool(agent_factory, [((0.0, 0.0), goal, (0.0, 0.0))])
+    pool = spec_pool(agent_factory, [((0.0, 0.0), goal, (0.0, 0.0))])
     radius = float(pool.agent_radius[0])
     traj = _run(planner, pool, 200)
-    assert _wall_clearance(traj, walls).min() >= radius - 1e-3
+    assert wall_clearance(traj, walls).min() >= radius - 1e-3
     assert traj[-1, 0, 1] > 0.5
 
 
@@ -298,7 +270,7 @@ def test_orca_corridor_counterflow_passes_without_penetration(agent_factory: Cal
     walls: Segments = [((-10.0, -1.0), (10.0, -1.0)), ((-10.0, 1.0), (10.0, 1.0))]
     planner = ORCAPlanner()
     planner.set_walls(walls)
-    pool = _pool(
+    pool = spec_pool(
         agent_factory,
         [
             ((-4.0, 0.3), (7.0, 0.3), (0.0, 0.0)),
@@ -309,7 +281,7 @@ def test_orca_corridor_counterflow_passes_without_penetration(agent_factory: Cal
     )
     radius = float(pool.agent_radius[0])
     traj = _run(planner, pool, 400)
-    assert _wall_clearance(traj, walls).min() >= radius - 1e-3
+    assert wall_clearance(traj, walls).min() >= radius - 1e-3
     assert _min_pair_distance(traj) >= 2 * radius - 0.05
     assert np.all(traj[-1, :2, 0] > 4.0)
     assert np.all(traj[-1, 2:, 0] < -4.0)
@@ -319,7 +291,7 @@ def test_orca_crowded_infeasible_case_respects_wall_and_max_speed(agent_factory:
     walls: Segments = [((-5.0, 0.0), (5.0, 0.0))]
     planner = ORCAPlanner(time_horizon_obst=2.0)
     planner.set_walls(walls)
-    pool = _pool(
+    pool = spec_pool(
         agent_factory,
         [
             ((0.0, 0.3), (0.0, 5.0), (0.0, 0.0)),
@@ -394,7 +366,7 @@ def test_orca_wall_grid_candidates_match_single_cell_full_scan(agent_factory: Ca
 def test_agent_following_cornered_path_passes_every_subgoal(planner_cls: type[ORCAPlanner], agent_factory: Callable[..., BaseAgent]) -> None:
     planner = planner_cls()
     waypoints = [Pose2D(x=0.0, y=0.0), Pose2D(x=2.0, y=0.0), Pose2D(x=2.0, y=2.0), Pose2D(x=0.0, y=2.0)]
-    pool = _pool(agent_factory, [((0.0, 0.0), None, (0.0, 0.0))])
+    pool = spec_pool(agent_factory, [((0.0, 0.0), None, (0.0, 0.0))])
     idx = 0
     for _ in range(400):
         here = Pose2D(x=float(pool.pos[0, 0]), y=float(pool.pos[0, 1]))
@@ -413,7 +385,7 @@ def test_agent_following_cornered_path_passes_every_subgoal(planner_cls: type[OR
 @pytest.mark.parametrize("planner_cls", [ORCAPlanner, PedVOPlanner])
 def test_latched_agent_holds_its_slot(planner_cls: type[ORCAPlanner], agent_factory: Callable[..., BaseAgent]) -> None:
     planner = planner_cls()
-    pool = _pool(agent_factory, [((0.0, 0.0), (0.1, 0.0), (0.3, 0.0)), ((3.0, 0.0), (-3.0, 0.0), (0.0, 0.0))])
+    pool = spec_pool(agent_factory, [((0.0, 0.0), (0.1, 0.0), (0.3, 0.0)), ((3.0, 0.0), (-3.0, 0.0), (0.0, 0.0))])
     pool.set_terminals({int(pool.agent_ids[0]): Pose2D(x=0.1, y=0.0)})
     arrival_latch_step(pool, r_enter=0.15, r_exit=0.30)
     planner.compute_pool(pool, dt=_DT)

@@ -22,17 +22,9 @@ from arena_humansim.local_planner.orca import (
     _push_line,
 )
 from arena_humansim.utils.types import Pose2D
+from ._helpers import line_array, random_lines, spec_pool
 
 _DT = 0.05
-
-
-def _lines(*rows: tuple[float, float, float, float]) -> np.ndarray:
-    return np.array(rows, dtype=np.float64).reshape(-1, 4)
-
-
-def _random_lines(rng: np.random.Generator, n: int) -> np.ndarray:
-    ang = rng.uniform(-math.pi, math.pi, n)
-    return np.column_stack([rng.uniform(-2.0, 2.0, (n, 2)), np.cos(ang), np.sin(ang)])
 
 
 def _violation(lines: np.ndarray, vx: float | np.ndarray, vy: float | np.ndarray) -> np.ndarray:
@@ -59,18 +51,6 @@ def _seg_seg_dist(p0: np.ndarray, p1: np.ndarray, q0: np.ndarray, q1: np.ndarray
 def _edge(ax: float, ay: float, bx: float, by: float) -> np.ndarray:
     length = math.hypot(bx - ax, by - ay)
     return np.array([ax, ay, bx, by, (bx - ax) / length, (by - ay) / length])
-
-
-def _pool(agent_factory: Callable[..., BaseAgent], specs: list[tuple[tuple[float, float], tuple[float, float] | None, tuple[float, float]]]) -> AgentPool:
-    pool = AgentPool(capacity=max(len(specs), 1))
-    for i, (pos, goal, vel) in enumerate(specs):
-        agent = agent_factory(agent_id=i + 1, x=pos[0], y=pos[1])
-        agent.state.velocity = vel
-        idx = pool.add_agent(agent)
-        if goal is not None:
-            pool.goal_pos[idx] = goal
-            pool.has_goal[idx] = True
-    return pool
 
 
 def _kernel_both(planner: ORCAPlanner, pool: AgentPool, nbr_idx: np.ndarray | None = None) -> np.ndarray:
@@ -132,14 +112,14 @@ def test_dist_sq_point_segment_known_cases(point: tuple[float, float], expected:
 
 def test_linear_program1_python_matches_compiled_on_documented_cases() -> None:
     cases = [
-        (_lines((0.0, 0.0, 0.0, 1.0), (0.5, 0.0, 0.0, -1.0)), 1, 1.0, 0.6, 0.0, False, (False, 0.0, 0.0)),
-        (_lines((0.0, 10.0, 0.0, -1.0), (0.5, 0.0, 0.0, -1.0)), 1, 2.0, 0.5, 0.5, False, (True, 0.5, 0.5)),
-        (_lines((0.0, 0.2, 1.0, 0.0), (0.0, 0.8, -1.0, 0.0), (0.0, 0.0, 0.0, -1.0)), 2, 1.0, 0.0, 0.95, False, (True, 0.0, 0.8)),
-        (_lines((0.0, 0.2, 1.0, 0.0), (0.0, 0.8, -1.0, 0.0), (0.0, 0.0, 0.0, -1.0)), 2, 1.0, 0.0, 0.0, False, (True, 0.0, 0.2)),
-        (_lines((5.0, 0.0, 0.0, 1.0)), 0, 1.0, 0.0, 0.0, False, (False, 0.0, 0.0)),
-        (_lines((0.0, 0.0, 0.0, -1.0)), 0, 2.0, 0.0, -1.0, True, (True, 0.0, -2.0)),
-        (_lines((0.0, 0.0, 0.0, -1.0)), 0, 2.0, 0.0, 1.0, True, (True, 0.0, 2.0)),
-        (_lines((0.0, 0.5, 1.0, 0.0), (0.0, -0.5, -1.0, 0.0), (0.0, 0.0, 0.0, 1.0)), 2, 1.0, 0.0, 0.0, False, (False, 0.0, 0.0)),
+        (line_array((0.0, 0.0, 0.0, 1.0), (0.5, 0.0, 0.0, -1.0)), 1, 1.0, 0.6, 0.0, False, (False, 0.0, 0.0)),
+        (line_array((0.0, 10.0, 0.0, -1.0), (0.5, 0.0, 0.0, -1.0)), 1, 2.0, 0.5, 0.5, False, (True, 0.5, 0.5)),
+        (line_array((0.0, 0.2, 1.0, 0.0), (0.0, 0.8, -1.0, 0.0), (0.0, 0.0, 0.0, -1.0)), 2, 1.0, 0.0, 0.95, False, (True, 0.0, 0.8)),
+        (line_array((0.0, 0.2, 1.0, 0.0), (0.0, 0.8, -1.0, 0.0), (0.0, 0.0, 0.0, -1.0)), 2, 1.0, 0.0, 0.0, False, (True, 0.0, 0.2)),
+        (line_array((5.0, 0.0, 0.0, 1.0)), 0, 1.0, 0.0, 0.0, False, (False, 0.0, 0.0)),
+        (line_array((0.0, 0.0, 0.0, -1.0)), 0, 2.0, 0.0, -1.0, True, (True, 0.0, -2.0)),
+        (line_array((0.0, 0.0, 0.0, -1.0)), 0, 2.0, 0.0, 1.0, True, (True, 0.0, 2.0)),
+        (line_array((0.0, 0.5, 1.0, 0.0), (0.0, -0.5, -1.0, 0.0), (0.0, 0.0, 0.0, 1.0)), 2, 1.0, 0.0, 0.0, False, (False, 0.0, 0.0)),
     ]
     for lines, line_no, radius, ox, oy, direction_opt, expected in cases:
         got = _linear_program1.py_func(lines, line_no, radius, ox, oy, direction_opt)
@@ -149,15 +129,15 @@ def test_linear_program1_python_matches_compiled_on_documented_cases() -> None:
 
 
 def test_linear_program2_returns_pref_when_feasible_and_clamps_to_speed() -> None:
-    assert _linear_program2.py_func(_lines(), 0, 1.5, 10.0, 0.0, False) == pytest.approx((0, 1.5, 0.0))
-    assert _linear_program2.py_func(_lines(), 0, 1.5, 0.3, -0.4, False) == (0, 0.3, -0.4)
-    assert _linear_program2.py_func(_lines(), 0, 1.5, 0.6, 0.8, True) == pytest.approx((0, 0.9, 1.2))
-    lines = _lines((0.0, -0.5, -1.0, 0.0))
+    assert _linear_program2.py_func(line_array(), 0, 1.5, 10.0, 0.0, False) == pytest.approx((0, 1.5, 0.0))
+    assert _linear_program2.py_func(line_array(), 0, 1.5, 0.3, -0.4, False) == (0, 0.3, -0.4)
+    assert _linear_program2.py_func(line_array(), 0, 1.5, 0.6, 0.8, True) == pytest.approx((0, 0.9, 1.2))
+    lines = line_array((0.0, -0.5, -1.0, 0.0))
     assert _linear_program2.py_func(lines, 1, 2.0, 1.0, 0.0, False) == pytest.approx((1, 1.0, -0.5))
 
 
 def test_linear_program2_reports_first_infeasible_line() -> None:
-    lines = _lines((0.0, 0.0, 0.0, -1.0), (-0.5, 0.0, 0.0, 1.0))
+    lines = line_array((0.0, 0.0, 0.0, -1.0), (-0.5, 0.0, 0.0, 1.0))
     fail, rx, ry = _linear_program2.py_func(lines, 2, 1.0, 1.0, 0.0, False)
     assert fail == 1
     assert (rx, ry) == (1.0, 0.0)
@@ -168,7 +148,7 @@ def test_linear_program2_solution_satisfies_every_line_on_random_problems() -> N
     feasible = 0
     for _ in range(300):
         n = int(rng.integers(1, 7))
-        lines = _random_lines(rng, n)
+        lines = random_lines(rng, n)
         radius = float(rng.uniform(0.8, 2.0))
         ox, oy = (float(v) for v in rng.uniform(-2.5, 2.5, 2))
         fail, rx, ry = _linear_program2.py_func(lines, n, radius, ox, oy, False)
@@ -191,7 +171,7 @@ def test_linear_program3_minimizes_the_worst_violation() -> None:
     checked = 0
     for _ in range(200):
         n = int(rng.integers(2, 7))
-        lines = _random_lines(rng, n)
+        lines = random_lines(rng, n)
         fail, rx, ry = _linear_program2.py_func(lines, n, 1.0, 0.5, 0.5, False)
         if fail >= n:
             continue
@@ -205,7 +185,7 @@ def test_linear_program3_minimizes_the_worst_violation() -> None:
 
 
 def test_linear_program3_keeps_obstacle_lines_hard_and_skips_parallel_projections() -> None:
-    lines = _lines((0.0, 0.0, 0.0, -1.0), (-0.5, 0.0, 0.0, 1.0), (0.0, 0.3, 1.0, 0.0), (0.0, 0.6, 1.0, 0.0), (0.0, -0.6, -1.0, 0.0))
+    lines = line_array((0.0, 0.0, 0.0, -1.0), (-0.5, 0.0, 0.0, 1.0), (0.0, 0.3, 1.0, 0.0), (0.0, 0.6, 1.0, 0.0), (0.0, -0.6, -1.0, 0.0))
     fail, rx, ry = _linear_program2.py_func(lines, 5, 1.0, 1.0, 0.0, False)
     assert fail == 1
     rx, ry = _linear_program3.py_func(lines, 5, 1, fail, 1.0, rx, ry)
@@ -216,7 +196,7 @@ def test_linear_program3_keeps_obstacle_lines_hard_and_skips_parallel_projection
 
 
 def test_linear_program3_skips_parallel_lines_facing_the_same_way() -> None:
-    lines = _lines((0.0, 0.3, 1.0, 0.0), (0.0, -0.3, -1.0, 0.0), (0.0, 0.6, 1.0, 0.0))
+    lines = line_array((0.0, 0.3, 1.0, 0.0), (0.0, -0.3, -1.0, 0.0), (0.0, 0.6, 1.0, 0.0))
     fail, rx, ry = _linear_program2.py_func(lines, 3, 1.0, 0.0, 0.0, False)
     assert fail == 1
     rx, ry = _linear_program3.py_func(lines, 3, 0, fail, 1.0, rx, ry)
@@ -225,7 +205,7 @@ def test_linear_program3_skips_parallel_lines_facing_the_same_way() -> None:
 
 
 def test_linear_program3_with_contradicting_obstacle_lines_keeps_the_last_result() -> None:
-    lines = _lines((0.5, 0.0, 0.0, -1.0), (-0.5, 0.0, 0.0, 1.0), (0.0, 0.3, 1.0, 0.0))
+    lines = line_array((0.5, 0.0, 0.0, -1.0), (-0.5, 0.0, 0.0, 1.0), (0.0, 0.3, 1.0, 0.0))
     fail, rx, ry = _linear_program2.py_func(lines, 3, 1.0, 0.0, 0.0, False)
     assert fail == 1
     assert _linear_program3.py_func(lines, 3, 2, fail, 1.0, rx, ry) == (rx, ry)
@@ -376,7 +356,7 @@ def test_compute_matches_compute_pool(agent_factory: Callable[..., BaseAgent]) -
     agents[0].state.velocity = (0.8, 0.1)
     goals = {7: Pose2D(x=4.0, y=0.0), 9: Pose2D(x=-4.0, y=0.0)}
     per_agent = planner.compute(agents, goals, dt=_DT)
-    pool = _pool(agent_factory, [((0.0, 0.0), (4.0, 0.0), (0.8, 0.1)), ((1.0, -0.2), (-4.0, 0.0), (0.0, 0.0))])
+    pool = spec_pool(agent_factory, [((0.0, 0.0), (4.0, 0.0), (0.8, 0.1)), ((1.0, -0.2), (-4.0, 0.0), (0.0, 0.0))])
     planner.compute_pool(pool, dt=_DT)
     assert per_agent[7] == pytest.approx(tuple(pool.vel[0]), abs=1e-12)
     assert per_agent[9] == pytest.approx(tuple(pool.vel[1]), abs=1e-12)
@@ -392,7 +372,7 @@ def test_kernel_python_matches_compiled_in_walled_crowd(agent_factory: Callable[
     specs = [((float(x), float(y)), (float(-3.5 * np.sign(x)), 0.0), (float(vx), float(vy))) for x, y, vx, vy in np.column_stack([rng.uniform(-3, 3, 9), rng.uniform(-0.9, 0.9, 9), rng.normal(0, 0.8, (9, 2))])]
     specs.append(((0.0, 0.0), None, (0.0, 0.0)))
     specs.append(((3.0, 0.5), (3.0, 0.5), (0.0, 0.0)))
-    pool = _pool(agent_factory, specs)
+    pool = spec_pool(agent_factory, specs)
     out = _kernel_both(planner, pool)
     planner.compute_pool(pool, dt=_DT)
     assert out == pytest.approx(pool.vel[: pool.n], abs=1e-12)
@@ -403,7 +383,7 @@ def test_kernel_python_matches_compiled_in_walled_crowd(agent_factory: Callable[
 def test_kernel_resolves_infeasible_crush_with_least_violation(agent_factory: Callable[..., BaseAgent]) -> None:
     planner = ORCAPlanner()
     ring = [((0.4 * math.cos(a), 0.4 * math.sin(a)), (0.0, 0.0), (-math.cos(a), -math.sin(a))) for a in np.linspace(0.0, 2.0 * math.pi, 6, endpoint=False)]
-    pool = _pool(agent_factory, [((0.0, 0.0), (5.0, 0.0), (0.0, 0.0)), *ring])
+    pool = spec_pool(agent_factory, [((0.0, 0.0), (5.0, 0.0), (0.0, 0.0)), *ring])
     out = _kernel_both(planner, pool)
     assert np.all(np.isfinite(out))
     assert np.all(np.hypot(out[:, 0], out[:, 1]) <= pool.max_velocity[: pool.n] + 1e-9)
@@ -413,7 +393,7 @@ def test_kernel_handles_more_walls_than_query_buffer_and_tied_distances(agent_fa
     planner = ORCAPlanner()
     walls = [((-2.0 + 0.05 * k, 1.0), (-1.9 + 0.05 * k, 1.0)) for k in range(70)] + [((-1.0, -1.0), (1.0, -1.0)), ((1.0, -1.0), (-1.0, -1.0)), ((-3.0, -3.6), (3.0, -3.6))]
     planner.set_walls(walls)
-    pool = _pool(agent_factory, [((0.0, 0.0), (0.0, 5.0), (0.0, 1.0)), ((0.5, -0.4), (0.5, -5.0), (0.0, -1.0))])
+    pool = spec_pool(agent_factory, [((0.0, 0.0), (0.0, 5.0), (0.0, 1.0)), ((0.5, -0.4), (0.5, -5.0), (0.0, -1.0))])
     out = _kernel_both(planner, pool)
     assert out[0, 1] < pool.desired_vel[0]
     assert out[1, 1] > -pool.desired_vel[1]
@@ -421,7 +401,7 @@ def test_kernel_handles_more_walls_than_query_buffer_and_tied_distances(agent_fa
 
 def test_kernel_neighbor_scan_stops_at_cap_and_missing_entries(agent_factory: Callable[..., BaseAgent]) -> None:
     planner = ORCAPlanner(max_neighbors=1)
-    pool = _pool(agent_factory, [((0.0, 0.0), (5.0, 0.0), (1.0, 0.0)), ((1.0, 0.0), (-5.0, 0.0), (-1.0, 0.0)), ((0.0, 1.0), (0.0, -5.0), (0.0, -1.0))])
+    pool = spec_pool(agent_factory, [((0.0, 0.0), (5.0, 0.0), (1.0, 0.0)), ((1.0, 0.0), (-5.0, 0.0), (-1.0, 0.0)), ((0.0, 1.0), (0.0, -5.0), (0.0, -1.0))])
     capped = _kernel_both(planner, pool, np.array([[1, 0], [2, 3], [3, 3]], dtype=np.int64))
     only_first = _kernel_both(planner, pool, np.array([[1, 3], [3, 3], [3, 3]], dtype=np.int64))
     assert capped[0] == pytest.approx(only_first[0], abs=1e-12)

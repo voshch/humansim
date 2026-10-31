@@ -43,21 +43,6 @@ from arena_humansim.utils.event_bus import EventBus
 from arena_humansim.utils.types import Pose2D
 
 
-@pytest.fixture
-def rng_np() -> np.random.Generator:
-    return np.random.default_rng(42)
-
-
-@pytest.fixture
-def world() -> WorldKnowledge:
-    return WorldKnowledge()
-
-
-@pytest.fixture
-def event_bus() -> EventBus:
-    return EventBus()
-
-
 def _agent_type(sequences: dict[str, SequenceDef], *, needs: dict[str, NeedDist] | None = None, initial: str = "default") -> AgentType:
     return AgentType(
         name="test_agent",

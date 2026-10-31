@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import attrs
 import numpy as np
@@ -43,6 +43,7 @@ from arena_humansim.utils.types import (
     Pose2D,
     SeekSpec,
 )
+from ._helpers import movement_of, seed_active, tick
 
 
 @dataclass
@@ -68,29 +69,9 @@ def _mk_mgr(agents: dict[int, Any], world: WorldKnowledge | None = None) -> Inte
     return mgr
 
 
-def _seed_active(mgr: InteractionManager, participants: list[int], itype: InteractionType) -> int:
-    spec = SeekSpec(interaction_type=itype)
-    interaction = mgr._create_interaction(creator_id=participants[0], spec=spec)
-    for pid in participants[1:]:
-        mgr.accept(pid, interaction.id)
-    interaction.outcome = InteractionOutcome.ACTIVE
-    interaction.contract.formation = None
-    return interaction.id
-
-
 @pytest.fixture(autouse=True)
 def _clear_blackboard() -> None:
     py_trees.blackboard.Blackboard.clear()
-
-
-@pytest.fixture
-def rng_np() -> np.random.Generator:
-    return np.random.default_rng(42)
-
-
-@pytest.fixture
-def world() -> WorldKnowledge:
-    return WorldKnowledge()
 
 
 def _agent_with_bt(agent_factory: Callable[..., BaseAgent], agent_id: int = 1, x: float = 0.0, y: float = 0.0) -> BaseAgent:
@@ -99,17 +80,8 @@ def _agent_with_bt(agent_factory: Callable[..., BaseAgent], agent_id: int = 1, x
     return agent
 
 
-def _mv(agent: BaseAgent) -> BehaviorTreeMovement:
-    return cast(BehaviorTreeMovement, agent.movement)
-
-
 def _needs(**kv: float) -> NeedsState:
     return NeedsState(needs={k: NeedState(value=v, decay_rate=1.0) for k, v in kv.items()})
-
-
-def _tick(node: py_trees.behaviour.Behaviour) -> py_trees.common.Status:
-    node.tick_once()
-    return node.status
 
 
 def test_go_to_literal_not_at_target_reemits_every_tick(agent_factory: Callable[..., BaseAgent]) -> None:
@@ -117,10 +89,10 @@ def test_go_to_literal_not_at_target_reemits_every_tick(agent_factory: Callable[
     node = GoToNode("go", agent, target_pose=Pose2D(x=10.0, y=0.0))
     node.setup()
     for _ in range(10):
-        _mv(agent).command = None
-        status = _tick(node)
+        movement_of(agent).command = None
+        status = tick(node)
         assert status == py_trees.common.Status.RUNNING
-        cmd = _mv(agent).command
+        cmd = movement_of(agent).command
         assert cmd is not None
         assert cmd.type == CommandType.NAVIGATE
         assert cmd.target_pose.x == pytest.approx(10.0)
@@ -129,12 +101,12 @@ def test_go_to_literal_not_at_target_reemits_every_tick(agent_factory: Callable[
 def test_go_to_literal_at_target_returns_success_without_command(agent_factory: Callable[..., BaseAgent]) -> None:
     agent = _agent_with_bt(agent_factory, x=5.0, y=5.0)
     sentinel = HighLevelCommand(agent_id=agent.state.agent_id, type=CommandType.STOP, interaction_target=-1)
-    _mv(agent).command = sentinel
+    movement_of(agent).command = sentinel
     node = GoToNode("go", agent, target_pose=Pose2D(x=5.0, y=5.0))
     node.setup()
-    status = _tick(node)
+    status = tick(node)
     assert status == py_trees.common.Status.SUCCESS
-    assert _mv(agent).command is sentinel
+    assert movement_of(agent).command is sentinel
 
 
 def test_go_to_ctx_mode_reads_target_from_context(agent_factory: Callable[..., BaseAgent]) -> None:
@@ -142,9 +114,9 @@ def test_go_to_ctx_mode_reads_target_from_context(agent_factory: Callable[..., B
     ctx = StepContext(target_pose=Pose2D(x=7.0, y=0.0))
 
     node = GoToNode("go", agent, ctx=ctx)
-    status = _tick(node)
+    status = tick(node)
     assert status == py_trees.common.Status.RUNNING
-    cmd = _mv(agent).command
+    cmd = movement_of(agent).command
     assert cmd is not None
     assert cmd.type == CommandType.NAVIGATE
     assert cmd.target_pose.x == pytest.approx(7.0)
@@ -162,13 +134,13 @@ def test_go_to_recomputes_line_slot_each_tick(agent_factory: Callable[..., BaseA
     )
     ctx = StepContext(target_pose=Pose2D(x=4.8, y=0.0), target_object_id="f1")
     node = GoToNode("go", agent, ctx=ctx, world=world)
-    _tick(node)
+    tick(node)
     assert ctx.target_pose is not None
     assert ctx.target_pose.x == pytest.approx(4.8)
 
     world.set_participants_count("f1", 1)
     world.set_queue_length("f1", 2)
-    _tick(node)
+    tick(node)
     assert ctx.target_pose is not None
     assert ctx.target_pose.x == pytest.approx(7.8)
 
@@ -184,7 +156,7 @@ def test_resolve_object_present_success_populates_context(agent_factory: Callabl
         target="bench",
         ctx=ctx,
     )
-    status = _tick(node)
+    status = tick(node)
     assert status == py_trees.common.Status.SUCCESS
     assert ctx.target_pose is not None
     assert ctx.target_pose.x == pytest.approx(3.0)
@@ -204,7 +176,7 @@ def test_resolve_object_line_formation_empty_targets_slot_zero(agent_factory: Ca
     )
     ctx = StepContext()
     node = ResolveObjectNode("resolve", agent, world, target="fountain", ctx=ctx)
-    _tick(node)
+    tick(node)
     assert ctx.target_pose is not None
     assert ctx.target_pose.x == pytest.approx(4.8)
     assert ctx.target_pose.y == pytest.approx(0.0)
@@ -224,7 +196,7 @@ def test_resolve_object_line_formation_occupied_targets_next_slot(agent_factory:
     world.set_queue_length("f1", 2)
     ctx = StepContext()
     node = ResolveObjectNode("resolve", agent, world, target="fountain", ctx=ctx)
-    _tick(node)
+    tick(node)
     assert ctx.target_pose is not None
     assert ctx.target_pose.x == pytest.approx(7.8)
     assert ctx.target_pose.y == pytest.approx(0.0)
@@ -240,7 +212,7 @@ def test_resolve_object_missing_failure(agent_factory: Callable[..., BaseAgent],
         target="ghost",
         ctx=ctx,
     )
-    status = _tick(node)
+    status = tick(node)
     assert status == py_trees.common.Status.FAILURE
 
 
@@ -269,18 +241,18 @@ def test_resolve_object_writes_type_default_radius_to_context(agent_factory: Cal
         ctx=ctx,
         interaction_name="TALK_TO",
     )
-    _tick(node)
+    tick(node)
     assert ctx.interaction_radius == pytest.approx(2.0)
 
 
 def test_hold_no_duration_immediate_success_no_emission(agent_factory: Callable[..., BaseAgent], rng_np: np.random.Generator) -> None:
     agent = _agent_with_bt(agent_factory)
     sentinel = HighLevelCommand(agent_id=agent.state.agent_id, type=CommandType.NAVIGATE, interaction_target=-1)
-    _mv(agent).command = sentinel
+    movement_of(agent).command = sentinel
     node = HoldNode("hold", agent, duration_source=None, rng=rng_np, dt=0.5)
-    status = _tick(node)
+    status = tick(node)
     assert status == py_trees.common.Status.SUCCESS
-    assert _mv(agent).command is sentinel
+    assert movement_of(agent).command is sentinel
 
 
 def test_hold_with_duration_emits_navigate_to_self_with_zero_velocity(agent_factory: Callable[..., BaseAgent], rng_np: np.random.Generator) -> None:
@@ -289,9 +261,9 @@ def test_hold_with_duration_emits_navigate_to_self_with_zero_velocity(agent_fact
     node.setup()
 
     for _ in range(3):
-        _mv(agent).command = None
-        status = _tick(node)
-        cmd = _mv(agent).command
+        movement_of(agent).command = None
+        status = tick(node)
+        cmd = movement_of(agent).command
         assert cmd is not None
         assert cmd.type == CommandType.NAVIGATE
         assert cmd.agent_id == 9
@@ -316,13 +288,13 @@ def test_hold_bound_agent_preserves_formation_navigate(agent_factory: Callable[.
         target_pose=Pose2D(x=5.0, y=0.0),
         desired_velocity=1.3,
     )
-    _mv(agent).command = formation_nav
+    movement_of(agent).command = formation_nav
     ctx = StepContext(is_bound_lookup=lambda _aid: True)
     node = HoldNode("hold", agent, duration_source=ParamDist(1.0), rng=rng_np, dt=0.5, ctx=ctx)
     node.setup()
-    status = _tick(node)
+    status = tick(node)
     assert status == py_trees.common.Status.RUNNING
-    assert _mv(agent).command is formation_nav
+    assert movement_of(agent).command is formation_nav
 
 
 def test_hold_unbound_agent_still_emits_navigate_to_self(agent_factory: Callable[..., BaseAgent], rng_np: np.random.Generator) -> None:
@@ -333,9 +305,9 @@ def test_hold_unbound_agent_still_emits_navigate_to_self(agent_factory: Callable
     ctx = StepContext(is_bound_lookup=lambda _aid: False)
     node = HoldNode("hold", agent, duration_source=ParamDist(1.0), rng=rng_np, dt=0.5, ctx=ctx)
     node.setup()
-    _mv(agent).command = None
-    _tick(node)
-    cmd = _mv(agent).command
+    movement_of(agent).command = None
+    tick(node)
+    cmd = movement_of(agent).command
     assert cmd is not None
     assert cmd.type == CommandType.NAVIGATE
     assert cmd.target_pose.x == pytest.approx(1.0)
@@ -346,7 +318,7 @@ def test_satisfy_applies_deltas_and_returns_success(agent_factory: Callable[...,
     agent = _agent_with_bt(agent_factory)
     agent.needs = _needs(hunger=50.0)
     node = SatisfyNode("satisfy", agent, satisfies={"hunger": 20.0})
-    status = _tick(node)
+    status = tick(node)
     assert status == py_trees.common.Status.SUCCESS
     assert agent.needs is not None
     assert agent.needs.needs["hunger"].value == pytest.approx(70.0)
@@ -356,7 +328,7 @@ def test_satisfy_empty_dict_still_succeeds(agent_factory: Callable[..., BaseAgen
     agent = _agent_with_bt(agent_factory)
     agent.needs = _needs(rest=30.0)
     node = SatisfyNode("satisfy", agent, satisfies={})
-    assert _tick(node) == py_trees.common.Status.SUCCESS
+    assert tick(node) == py_trees.common.Status.SUCCESS
     assert agent.needs.needs["rest"].value == pytest.approx(30.0)
 
 
@@ -364,14 +336,14 @@ def test_patience_watchdog_none_runs_forever(rng_np: np.random.Generator) -> Non
     node = PatienceWatchdogNode("watchdog", patience_source=None, rng=rng_np, dt=0.5)
     node.setup()
     for _ in range(100):
-        status = _tick(node)
+        status = tick(node)
         assert status == py_trees.common.Status.RUNNING
 
 
 def test_patience_watchdog_fails_once_elapsed_crosses_patience(rng_np: np.random.Generator) -> None:
     node = PatienceWatchdogNode("watchdog", patience_source=ParamDist(1.0), rng=rng_np, dt=0.5)
     node.setup()
-    statuses = [_tick(node) for _ in range(5)]
+    statuses = [tick(node) for _ in range(5)]
     failure_indices = [i for i, s in enumerate(statuses) if s == py_trees.common.Status.FAILURE]
     assert len(failure_indices) >= 1
     for s in statuses[: failure_indices[0]]:
@@ -381,28 +353,28 @@ def test_patience_watchdog_fails_once_elapsed_crosses_patience(rng_np: np.random
 
 def test_clear_outcome_resets_last_outcome(agent_factory: Callable[..., BaseAgent]) -> None:
     agent = _agent_with_bt(agent_factory)
-    _mv(agent).last_outcome = InteractionOutcome.COMPLETED
+    movement_of(agent).last_outcome = InteractionOutcome.COMPLETED
     node = ClearOutcomeNode("clear", agent)
-    status = _tick(node)
+    status = tick(node)
     assert status == py_trees.common.Status.SUCCESS
-    assert _mv(agent).last_outcome is None
+    assert movement_of(agent).last_outcome is None
 
 
 def test_clear_outcome_no_prior_outcome(agent_factory: Callable[..., BaseAgent]) -> None:
     agent = _agent_with_bt(agent_factory)
-    _mv(agent).last_outcome = None
+    movement_of(agent).last_outcome = None
     node = ClearOutcomeNode("clear", agent)
-    status = _tick(node)
+    status = tick(node)
     assert status == py_trees.common.Status.SUCCESS
-    assert _mv(agent).last_outcome is None
+    assert movement_of(agent).last_outcome is None
 
 
 def test_clear_outcome_also_clears_interaction_id(agent_factory: Callable[..., BaseAgent]) -> None:
     agent = _agent_with_bt(agent_factory)
-    _mv(agent).interaction_id = 42
+    movement_of(agent).interaction_id = 42
     node = ClearOutcomeNode("clear", agent)
-    assert _tick(node) == py_trees.common.Status.SUCCESS
-    assert _mv(agent).interaction_id is None
+    assert tick(node) == py_trees.common.Status.SUCCESS
+    assert movement_of(agent).interaction_id is None
 
 
 def _seek_node(agent: BaseAgent, *, interaction: InteractionType = InteractionType.TALK_TO, target: str | int | None = None, offer: bool = False, duration_source: ParamDist | None = None, rng: np.random.Generator, bound: bool = False) -> SeekNode:
@@ -418,7 +390,7 @@ def test_seek_emits_seek_command_when_not_bound(rng_np: np.random.Generator) -> 
     spec = SeekSpec(interaction_type=InteractionType.TALK_TO)
     ctx = StepContext(im=mgr, is_bound_lookup=mgr.is_bound)
     node = SeekNode("seek", agent, spec=spec, ctx=ctx, duration_source=None, rng=rng_np)  # type: ignore[arg-type]
-    status = _tick(node)
+    status = tick(node)
     assert status == py_trees.common.Status.RUNNING
     assert len(mgr.interactions) == 1
     assert next(iter(mgr.interactions.values())).type == int(InteractionType.TALK_TO)
@@ -428,7 +400,7 @@ def test_seek_returns_success_when_bound(agent_factory: Callable[..., BaseAgent]
     agent = _agent_with_bt(agent_factory)
     node = _seek_node(agent, interaction=InteractionType.TALK_TO, rng=rng_np, bound=True)
     # First tick sees bound=True via fallback lookup -> SUCCESS same tick.
-    status = _tick(node)
+    status = tick(node)
     assert status == py_trees.common.Status.SUCCESS
 
 
@@ -439,7 +411,7 @@ def test_seek_threads_duration_into_spec(rng_np: np.random.Generator) -> None:
     spec = SeekSpec(interaction_type=InteractionType.TALK_TO)
     ctx = StepContext(im=mgr, is_bound_lookup=mgr.is_bound)
     node = SeekNode("seek", agent, spec=spec, ctx=ctx, duration_source=ParamDist(2.0), rng=rng_np)  # type: ignore[arg-type]
-    _tick(node)
+    tick(node)
     assert len(mgr.interactions) == 1
     istate = next(iter(mgr.interactions.values()))
     assert istate.member_durations.get(1) == pytest.approx(2.0)
@@ -452,7 +424,7 @@ def test_seek_threads_service_tag_and_offer(rng_np: np.random.Generator) -> None
     spec = SeekSpec(interaction_type=InteractionType.SERVICE, target="water", offer=True)
     ctx = StepContext(im=mgr, is_bound_lookup=mgr.is_bound)
     node = SeekNode("seek", agent, spec=spec, ctx=ctx, duration_source=None, rng=rng_np)  # type: ignore[arg-type]
-    _tick(node)
+    tick(node)
     assert len(mgr.interactions) == 1
     istate = next(iter(mgr.interactions.values()))
     assert istate.service_tag == "water"
@@ -463,18 +435,18 @@ def test_seek_completed_outcome_returns_success(agent_factory: Callable[..., Bas
     agent = _agent_with_bt(agent_factory)
     node = _seek_node(agent, rng=rng_np)
     node.tick_once()
-    _mv(agent).last_outcome = InteractionOutcome.COMPLETED
-    assert _tick(node) == py_trees.common.Status.SUCCESS
-    assert _mv(agent).last_outcome is None
+    movement_of(agent).last_outcome = InteractionOutcome.COMPLETED
+    assert tick(node) == py_trees.common.Status.SUCCESS
+    assert movement_of(agent).last_outcome is None
 
 
 def test_seek_interrupted_outcome_returns_failure(agent_factory: Callable[..., BaseAgent], rng_np: np.random.Generator) -> None:
     agent = _agent_with_bt(agent_factory)
     node = _seek_node(agent, rng=rng_np)
     node.tick_once()
-    _mv(agent).last_outcome = InteractionOutcome.INTERRUPTED
-    assert _tick(node) == py_trees.common.Status.FAILURE
-    assert _mv(agent).last_outcome is None
+    movement_of(agent).last_outcome = InteractionOutcome.INTERRUPTED
+    assert tick(node) == py_trees.common.Status.FAILURE
+    assert movement_of(agent).last_outcome is None
 
 
 def test_seek_object_bound_uses_resolved_target_from_ctx(rng_np: np.random.Generator) -> None:
@@ -486,7 +458,7 @@ def test_seek_object_bound_uses_resolved_target_from_ctx(rng_np: np.random.Gener
     spec = SeekSpec(interaction_type=InteractionType.SIT_ON, target="bench")
     ctx = StepContext(target_object_id="bench_1", im=mgr, is_bound_lookup=mgr.is_bound)
     node = SeekNode("seek", agent, spec=spec, ctx=ctx, duration_source=None, rng=rng_np)  # type: ignore[arg-type]
-    _tick(node)
+    tick(node)
     # _resolved_spec substitutes target_object_id; im.seek creates interaction with object_id="bench_1".
     assert len(mgr.interactions) == 1
     istate = next(iter(mgr.interactions.values()))
@@ -501,12 +473,12 @@ def test_cancel_node_stops_interaction_via_im() -> None:
         other_id: _FakeAgent(other_id, x=0.2),
     }
     mgr = _mk_mgr(agents)
-    iid = _seed_active(mgr, [agent_id, other_id], InteractionType.GROUP_CONVERSATION)
+    iid = seed_active(mgr, [agent_id, other_id], InteractionType.GROUP_CONVERSATION)
     assert mgr.is_bound(agent_id)
     agent: _FakeAgent = agents[agent_id]
     agent.movement.interaction_id = iid
     node = CancelNode("cancel", agent, im=mgr)  # type: ignore[arg-type]
-    assert _tick(node) == py_trees.common.Status.SUCCESS
+    assert tick(node) == py_trees.common.Status.SUCCESS
     assert not mgr.is_bound(agent_id)
     assert agent.movement.last_outcome == InteractionOutcome.CANCELED
 
@@ -518,7 +490,7 @@ def test_cancel_node_without_bound_interaction_force_stops_via_im() -> None:
     agent: _FakeAgent = agents[agent_id]
     agent.movement.interaction_id = None
     node = CancelNode("cancel", agent, im=mgr)  # type: ignore[arg-type]
-    assert _tick(node) == py_trees.common.Status.SUCCESS
+    assert tick(node) == py_trees.common.Status.SUCCESS
     assert not mgr.is_bound(agent_id)
 
 
@@ -539,7 +511,7 @@ def _block_node(agent: BaseAgent, target_lookup: Callable[[int], BaseAgent | Non
 def test_block_missing_target_returns_failure(agent_factory: Callable[..., BaseAgent], rng_np: np.random.Generator) -> None:
     agent = _agent_with_bt(agent_factory)
     node = _block_node(agent, lambda _aid: None, rng_np)
-    assert _tick(node) == py_trees.common.Status.FAILURE
+    assert tick(node) == py_trees.common.Status.FAILURE
 
 
 def test_block_pursuit_emits_navigate_to_predicted_pose(agent_factory: Callable[..., BaseAgent], rng_np: np.random.Generator) -> None:
@@ -549,10 +521,10 @@ def test_block_pursuit_emits_navigate_to_predicted_pose(agent_factory: Callable[
     target.state.desired_velocity = 1.0
 
     node = _block_node(agent, lambda aid: target if aid == 99 else None, rng_np, target_id=99, lookahead=1.0)
-    status = _tick(node)
+    status = tick(node)
 
     assert status == py_trees.common.Status.RUNNING
-    cmd = _mv(agent).command
+    cmd = movement_of(agent).command
     assert cmd is not None
     assert cmd.type == CommandType.NAVIGATE
     assert cmd.target_pose.x == pytest.approx(12.0)
@@ -565,7 +537,7 @@ def test_block_boosts_desired_velocity_during_pursuit(agent_factory: Callable[..
     target.state.desired_velocity = 1.0
 
     node = _block_node(agent, lambda aid: target if aid == 99 else None, rng_np, velocity_boost=1.5)
-    _tick(node)
+    tick(node)
     assert agent.state.desired_velocity == pytest.approx(1.5)
 
 
@@ -578,7 +550,7 @@ def test_block_within_tolerance_seeks_block_interaction_via_im(agent_factory: Ca
     ctx = StepContext(im=mgr, is_bound_lookup=mgr.is_bound)
 
     node = _block_node(agent, lambda aid: target if aid == 99 else None, rng_np, duration_source=ParamDist(4.0), ctx=ctx)
-    status = _tick(node)
+    status = tick(node)
 
     assert status == py_trees.common.Status.RUNNING
     assert len(mgr.interactions) == 1
@@ -593,9 +565,9 @@ def test_block_completed_outcome_returns_success(agent_factory: Callable[..., Ba
     target = agent_factory(agent_id=99, x=0.0, y=0.0)
     node = _block_node(agent, lambda aid: target if aid == 99 else None, rng_np)
     node.tick_once()
-    _mv(agent).last_outcome = InteractionOutcome.COMPLETED
-    assert _tick(node) == py_trees.common.Status.SUCCESS
-    assert _mv(agent).last_outcome is None
+    movement_of(agent).last_outcome = InteractionOutcome.COMPLETED
+    assert tick(node) == py_trees.common.Status.SUCCESS
+    assert movement_of(agent).last_outcome is None
 
 
 def test_block_interrupted_outcome_returns_failure(agent_factory: Callable[..., BaseAgent], rng_np: np.random.Generator) -> None:
@@ -603,8 +575,8 @@ def test_block_interrupted_outcome_returns_failure(agent_factory: Callable[..., 
     target = agent_factory(agent_id=99, x=0.0, y=0.0)
     node = _block_node(agent, lambda aid: target if aid == 99 else None, rng_np)
     node.tick_once()
-    _mv(agent).last_outcome = InteractionOutcome.INTERRUPTED
-    assert _tick(node) == py_trees.common.Status.FAILURE
+    movement_of(agent).last_outcome = InteractionOutcome.INTERRUPTED
+    assert tick(node) == py_trees.common.Status.FAILURE
 
 
 def test_block_terminate_restores_velocity_and_cancels_via_im(agent_factory: Callable[..., BaseAgent], rng_np: np.random.Generator) -> None:

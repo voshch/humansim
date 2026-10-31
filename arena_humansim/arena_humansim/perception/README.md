@@ -30,7 +30,7 @@ On top of the range + FOV gate, every agent always perceives neighbors within it
 
 ## Dense vs KDTree paths
 
-`DefaultPerception` switches strategies at `_SMALL_N_THRESHOLD = 64`:
+`DefaultPerception` switches strategies at its `small_n_threshold` (default 64):
 
 - **Dense** (N <= 64) - pairwise distance matrix, broadcast FOV test. Faster for small N, avoids tree-build overhead.
 - **KDTree** (N > 64) - `scipy.spatial.cKDTree.sparse_distance_matrix` at the max vision range in the pool, then per-row range + FOV pruning.

@@ -20,8 +20,8 @@ from arena_humansim.utils.types import (
     HighLevelCommand,
     InteractionOutcome,
     Pose2D,
-    SeekSpec,
 )
+from ._helpers import seek_command
 
 
 @dataclass
@@ -47,18 +47,10 @@ def _mk_mgr(agents: dict[int, Any], *, world: WorldKnowledge | None = None) -> I
     return mgr
 
 
-def _seek(agent_id: int, itype: InteractionType, *, target: str | int | None = None, offer: bool = False) -> HighLevelCommand:
-    return HighLevelCommand(
-        agent_id=agent_id,
-        type=CommandType.SEEK,
-        spec=SeekSpec(interaction_type=itype, target=target, offer=offer),
-    )
-
-
 def test_interaction_id_set_on_create() -> None:
     agents = {1: _FakeAgent(1)}
     mgr = _mk_mgr(agents)
-    mgr.update({1: _seek(1, InteractionType.TALK_TO)})
+    mgr.update({1: seek_command(1, InteractionType.TALK_TO)})
     iid = next(iter(mgr.interactions))
     assert agents[1].movement.interaction_id == iid
 
@@ -66,7 +58,7 @@ def test_interaction_id_set_on_create() -> None:
 def test_interaction_id_set_on_accept() -> None:
     agents = {1: _FakeAgent(1, x=0.0), 2: _FakeAgent(2, x=1.0)}
     mgr = _mk_mgr(agents)
-    mgr.update({1: _seek(1, InteractionType.GROUP_CONVERSATION), 2: _seek(2, InteractionType.GROUP_CONVERSATION)})
+    mgr.update({1: seek_command(1, InteractionType.GROUP_CONVERSATION), 2: seek_command(2, InteractionType.GROUP_CONVERSATION)})
     iid = next(iter(mgr.interactions))
     assert agents[1].movement.interaction_id == iid
     assert agents[2].movement.interaction_id == iid
@@ -75,7 +67,7 @@ def test_interaction_id_set_on_accept() -> None:
 def test_interaction_id_cleared_on_stop() -> None:
     agents = {1: _FakeAgent(1), 2: _FakeAgent(2)}
     mgr = _mk_mgr(agents)
-    mgr.update({1: _seek(1, InteractionType.GROUP_CONVERSATION), 2: _seek(2, InteractionType.GROUP_CONVERSATION)})
+    mgr.update({1: seek_command(1, InteractionType.GROUP_CONVERSATION), 2: seek_command(2, InteractionType.GROUP_CONVERSATION)})
     iid = next(iter(mgr.interactions))
     assert agents[1].movement.interaction_id == iid
 
@@ -86,7 +78,7 @@ def test_interaction_id_cleared_on_stop() -> None:
 def test_interaction_id_cleared_on_teardown_for_all_members() -> None:
     agents = {1: _FakeAgent(1), 2: _FakeAgent(2)}
     mgr = _mk_mgr(agents)
-    mgr.update({1: _seek(1, InteractionType.TALK_TO), 2: _seek(2, InteractionType.TALK_TO)})
+    mgr.update({1: seek_command(1, InteractionType.TALK_TO), 2: seek_command(2, InteractionType.TALK_TO)})
     iid = next(iter(mgr.interactions))
     assert agents[1].movement.interaction_id == iid
     assert agents[2].movement.interaction_id == iid
@@ -99,7 +91,7 @@ def test_interaction_id_cleared_on_teardown_for_all_members() -> None:
 def test_interaction_id_cleared_on_force_stop() -> None:
     agents = {1: _FakeAgent(1)}
     mgr = _mk_mgr(agents)
-    mgr.update({1: _seek(1, InteractionType.TALK_TO)})
+    mgr.update({1: seek_command(1, InteractionType.TALK_TO)})
     assert agents[1].movement.interaction_id is not None
     mgr.force_stop(1)
     assert agents[1].movement.interaction_id is None
@@ -108,7 +100,7 @@ def test_interaction_id_cleared_on_force_stop() -> None:
 def test_last_outcome_emitted_on_teardown() -> None:
     agents = {1: _FakeAgent(1), 2: _FakeAgent(2)}
     mgr = _mk_mgr(agents)
-    mgr.update({1: _seek(1, InteractionType.TALK_TO), 2: _seek(2, InteractionType.TALK_TO)})
+    mgr.update({1: seek_command(1, InteractionType.TALK_TO), 2: seek_command(2, InteractionType.TALK_TO)})
     iid = next(iter(mgr.interactions))
     mgr._teardown(iid, InteractionOutcome.COMPLETED)
     assert agents[1].movement.last_outcome == InteractionOutcome.COMPLETED
@@ -118,7 +110,7 @@ def test_last_outcome_emitted_on_teardown() -> None:
 def test_last_outcome_emitted_on_stop_when_interaction_torn_down() -> None:
     agents = {1: _FakeAgent(1), 2: _FakeAgent(2)}
     mgr = _mk_mgr(agents)
-    mgr.update({1: _seek(1, InteractionType.TALK_TO), 2: _seek(2, InteractionType.TALK_TO)})
+    mgr.update({1: seek_command(1, InteractionType.TALK_TO), 2: seek_command(2, InteractionType.TALK_TO)})
     iid = next(iter(mgr.interactions))
     mgr.stop(1, iid, reason=InteractionOutcome.CANCELED)
     # Both participants dropped below min=2 -> interaction torn down, both see CANCELED reason.
@@ -131,9 +123,9 @@ def test_queued_agent_gets_interaction_id_too() -> None:
     wk.add_object(WorldObject(object_id="atm", type="atm", pose=Pose2D()))
     agents = {1: _FakeAgent(1), 2: _FakeAgent(2)}
     mgr = _mk_mgr(agents, world=wk)
-    mgr.update({1: _seek(1, InteractionType.QUEUE_USE, target="atm")})
+    mgr.update({1: seek_command(1, InteractionType.QUEUE_USE, target="atm")})
     iid = next(iter(mgr.interactions))
-    mgr.update({2: _seek(2, InteractionType.QUEUE_USE, target="atm")})
+    mgr.update({2: seek_command(2, InteractionType.QUEUE_USE, target="atm")})
     assert 2 in mgr.interactions[iid].contract.queue
     assert agents[2].movement.interaction_id == iid
 
@@ -141,7 +133,7 @@ def test_queued_agent_gets_interaction_id_too() -> None:
 def test_command_cleared_on_teardown() -> None:
     agents = {1: _FakeAgent(1), 2: _FakeAgent(2)}
     mgr = _mk_mgr(agents)
-    mgr.update({1: _seek(1, InteractionType.TALK_TO), 2: _seek(2, InteractionType.TALK_TO)})
+    mgr.update({1: seek_command(1, InteractionType.TALK_TO), 2: seek_command(2, InteractionType.TALK_TO)})
     iid = next(iter(mgr.interactions))
     agents[1].movement.command = HighLevelCommand(agent_id=1, type=CommandType.NAVIGATE)
     mgr._teardown(iid, InteractionOutcome.INTERRUPTED)

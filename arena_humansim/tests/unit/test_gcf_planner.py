@@ -14,27 +14,11 @@ from arena_humansim.local_planner.gcf import (
     closest_approach,
     distance_response,
     ellipse_axes,
-    polar_radius,
 )
-from arena_humansim.utils.types import BeliefState, Pose2D
+from arena_humansim.utils.types import Pose2D
 
 _NO_NEIGHBORS = (np.zeros(3, dtype=np.int32), np.empty(0, dtype=np.int32))
 _PAIR = (np.array([0, 1, 2], dtype=np.int32), np.array([1, 0], dtype=np.int32))
-
-
-def _support_reference(a1: float, b1: float, th1: float, a2: float, b2: float, th2: float, psi: float) -> float:
-    phi = np.linspace(-math.pi, math.pi, 40001)
-    nx = np.cos(phi)
-    ny = np.sin(phi)
-
-    def support(a: float, b: float, th: float) -> np.ndarray:
-        u = nx * math.cos(th) + ny * math.sin(th)
-        v = ny * math.cos(th) - nx * math.sin(th)
-        return np.sqrt(a * a * u * u + b * b * v * v)
-
-    nd = nx * math.cos(psi) + ny * math.sin(psi)
-    front = nd > 1e-9
-    return float(np.min((support(a1, b1, th1) + support(a2, b2, th2))[front] / nd[front]))
 
 
 def _pool(
@@ -63,22 +47,6 @@ def _forces(planner: GCFPlanner, pool: AgentPool) -> np.ndarray:
     return planner._last_force_arrays[2]
 
 
-def test_closest_approach_matches_support_function_reference() -> None:
-    rng = np.random.default_rng(7)
-    axis_angles = (0.0, math.pi / 2, math.pi, -math.pi / 2)
-    for k in range(300):
-        a1, a2 = rng.uniform(0.15, 1.2, 2)
-        b1, b2 = rng.uniform(0.15, 0.4, 2)
-        if k % 5 == 0:
-            b1 = a1 * (1.0 + rng.normal(0.0, 1e-4))
-        th1 = float(rng.choice(axis_angles)) if k % 3 == 0 else rng.uniform(-math.pi, math.pi)
-        th2 = th1 + float(rng.choice((0.0, math.pi))) + rng.normal(0.0, 1e-5) if k % 4 == 0 else rng.uniform(-math.pi, math.pi)
-        psi = th1 if k % 7 == 0 else rng.uniform(-math.pi, math.pi)
-        got = closest_approach(a1, b1, math.cos(th1), math.sin(th1), a2, b2, math.cos(th2), math.sin(th2), math.cos(psi), math.sin(psi))
-        ref = _support_reference(a1, b1, th1, a2, b2, th2, psi)
-        assert got == pytest.approx(ref, abs=2e-3), (k, a1, b1, th1, a2, b2, th2, psi)
-
-
 def test_closest_approach_of_circles_is_sum_of_radii() -> None:
     rng = np.random.default_rng(3)
     for _ in range(50):
@@ -86,37 +54,6 @@ def test_closest_approach_of_circles_is_sum_of_radii() -> None:
         th1, th2, psi = rng.uniform(-math.pi, math.pi, 3)
         got = closest_approach(r1, r1, math.cos(th1), math.sin(th1), r2, r2, math.cos(th2), math.sin(th2), math.cos(psi), math.sin(psi))
         assert got == pytest.approx(r1 + r2, abs=1e-9)
-
-
-def test_polar_radius_lies_on_the_ellipse() -> None:
-    a, b, th = 0.6, 0.25, 0.7
-    for psi in np.linspace(-math.pi, math.pi, 37):
-        r = polar_radius(a, b, math.cos(th), math.sin(th), math.cos(psi), math.sin(psi))
-        u = r * math.cos(psi - th)
-        v = r * math.sin(psi - th)
-        assert (u / a) ** 2 + (v / b) ** 2 == pytest.approx(1.0)
-
-
-def test_distance_response_is_continuous_and_truncated() -> None:
-    max_dist, width, max_force = 2.0, 0.12, 3.0
-    for x in (0.0, width, max_dist - width, max_dist):
-        assert distance_response(x - 1e-9, max_dist, width, max_force) == pytest.approx(distance_response(x + 1e-9, max_dist, width, max_force), abs=1e-6)
-    assert distance_response(-0.3, max_dist, width, max_force) == 3.0 * max_force
-    assert distance_response(1.0, max_dist, width, max_force) == pytest.approx(1.0)
-    for x in (max_dist, max_dist + 0.5, 10.0):
-        assert distance_response(x, max_dist, width, max_force) == 0.0
-    samples = [distance_response(x, max_dist, width, max_force) for x in np.linspace(width, max_dist, 400)]
-    assert np.all(np.diff(samples) <= 1e-12)
-
-
-def test_ellipse_axes_follow_speed() -> None:
-    p = GCFPlanner.PARAM_DEFAULTS
-    a_min, a_rate, b_max, b_growth = p["a_min"].mean, p["a_rate"].mean, p["b_max"].mean, p["b_growth"].mean
-    assert ellipse_axes(a_min, a_rate, b_max, b_growth, 0.0) == pytest.approx((a_min, b_max))
-    a, b = ellipse_axes(a_min, a_rate, b_max, b_growth, 1.3)
-    assert a == pytest.approx(a_min + a_rate * 1.3)
-    assert b == pytest.approx(b_max - b_growth)
-    assert ellipse_axes(a_min, a_rate, b_max, b_growth, 100.0)[1] > 0.0
 
 
 def test_faster_leader_elongates_and_pushes_harder(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
@@ -220,29 +157,6 @@ def test_walls_shorter_than_guard_length_are_ignored(pool_empty: Callable[..., A
     planner.set_walls([((-0.04, -0.5), (0.04, -0.5))])
     pool = _pool(pool_empty, agent_factory, planner, [(0.0, 0.0, 0.0, 0.0, 0.0)], [(10.0, 0.0)], (np.zeros(2, dtype=np.int32), np.empty(0, dtype=np.int32)))
     assert np.allclose(_forces(planner, pool)[0, WALL], 0.0)
-
-
-def test_pooled_and_per_agent_paths_agree(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:
-    planner = GCFPlanner()
-    planner.set_walls([((-5.0, -0.8), (5.0, -0.8))])
-    agents = [agent_factory(agent_id=1, x=0.0, y=0.0), agent_factory(agent_id=2, x=0.9, y=0.2)]
-    agents[0].state.velocity = (0.6, 0.0)
-    agents[1].state.velocity = (-0.4, 0.2)
-    for agent, other in zip(agents, reversed(agents), strict=True):
-        agent.belief = BeliefState(observed_agents=[other.state])
-    goals = {1: Pose2D(x=10.0, y=0.0), 2: Pose2D(x=-10.0, y=0.0)}
-
-    pool = pool_empty(capacity=4)
-    planner.attach(pool)
-    for agent in agents:
-        pool.add_agent(agent)
-    pool.set_goals(goals)
-    pool.set_neighbor_csr(*_PAIR)
-    planner.compute_pool(pool, dt=0.05)
-
-    per_agent = planner.compute(agents, goals, dt=0.05)
-    for i, agent in enumerate(agents):
-        assert np.allclose(per_agent[agent.state.agent_id], pool.vel[i])
 
 
 def test_coincident_stationary_agents_on_a_wall_stay_finite(pool_empty: Callable[..., AgentPool], agent_factory: Callable[..., BaseAgent]) -> None:

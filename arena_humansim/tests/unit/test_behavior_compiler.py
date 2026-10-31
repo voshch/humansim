@@ -34,21 +34,6 @@ from arena_humansim.utils.event_bus import EventBus
 from arena_humansim.utils.types import BehaviorTreeMovement, NeedsState, NeedState, Pose2D
 
 
-@pytest.fixture
-def rng_np() -> np.random.Generator:
-    return np.random.default_rng(42)
-
-
-@pytest.fixture
-def world() -> WorldKnowledge:
-    return WorldKnowledge()
-
-
-@pytest.fixture
-def event_bus() -> EventBus:
-    return EventBus()
-
-
 def _concrete_step() -> StepDef:
     return StepDef(duration=ParamDist(1.0), autonomous=False)
 
