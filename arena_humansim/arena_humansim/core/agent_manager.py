@@ -2279,6 +2279,11 @@ class AgentManager(Node):
             self._feedback_callback,
         )
 
+    def _forget_agents(self) -> None:
+        """Clear what every global planner keeps per agent id, for a crowd that numbers its agents from 1 again."""
+        for planner in self._module_pool["global_planner"].values():
+            planner.forget_agents()
+
     def _check_overrun(self, elapsed: float):
         if elapsed <= self._dt:
             return
@@ -2973,6 +2978,7 @@ class AgentManager(Node):
             self._interaction_manager.reset()
             self._event_bus.clear()
             self._pending_stimuli.clear()
+            self._forget_agents()  # the next agent 1 must not walk on the old agent 1's cached path
             self._next_agent_id = 1
             self._next_robot_id = -1
             self._tick_count = 0
@@ -3037,6 +3043,7 @@ class AgentManager(Node):
             subsystem.set_walls([])
         self._world_knowledge.clear()
         self._rng.reset()
+        self._forget_agents()
         self._next_agent_id = 1
         self._next_robot_id = -1
         self._tick_count = 0

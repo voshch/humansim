@@ -73,3 +73,26 @@ def test_reset_deterministic_trajectory(system: RosTestSystem) -> None:
     second = run_one_pass()
 
     assert first == second, "reset+reseed must produce identical trajectory"
+
+
+@pytest.mark.parametrize("wipe", [False, True], ids=["remove_all", "reset"])
+def test_a_fresh_crowd_starts_without_the_old_crowds_paths(system: RosTestSystem, wipe: bool) -> None:
+    """Ids restart at 1, so a path or goal cached for the old agent 1 would steer the new agent 1."""
+    import numpy as np
+
+    from arena_humansim.utils.types import Pose2D
+
+    system.call(RemoveAgents, "remove_agents", make_remove_request([]))
+    system.call(SpawnAgents, "spawn_agents", make_spawn_request([{"x": 0.0, "y": 0.0, "waypoints": [(5.0, 0.0)]}]))
+    system.tick_manager(5)
+    planners = system.manager._module_pool["global_planner"].values()
+    for planner in planners:
+        planner._path_cache[1] = ((5.0, 0.0), [Pose2D(x=5.0, y=0.0)], np.array([[5.0, 0.0]]), 0)
+        planner._cached_results = {1: Pose2D(x=5.0, y=0.0)}
+    if wipe:
+        system.call(ResetSimulation, "reset", make_reset_request())
+    else:
+        system.call(RemoveAgents, "remove_agents", make_remove_request([]))
+    for planner in planners:
+        assert planner.get_cached_paths() == {}
+        assert planner.get_cached_goals() == {}
