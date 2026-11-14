@@ -312,3 +312,24 @@ def test_wall_off_the_mesh_edges_meshes_again() -> None:
     mesh = planner._mesh
     planner.set_walls([*rooms, ((2.0, 1.0), (4.0, 5.0))])
     assert planner._mesh is not mesh
+
+
+def test_obstacle_boxes_are_routed_around(
+    agent_factory: Callable[..., BaseAgent],
+    commands_factory: Callable[..., dict[int, Any]],
+) -> None:
+    pytest.importorskip("rclpy")
+    pytest.importorskip("arena_humansim_msgs")
+    from arena_humansim.core.agent_manager import AgentManager
+
+    table = AgentManager._decompose_obstacle_to_walls(Pose2D(x=6.0, y=3.0, theta=0.3), -2.0, 2.0, -0.5, 0.5)
+    planner = NavMeshPlanner(inflation_radius=_INFLATION)
+    planner.set_walls([*_two_rooms(12.0)[:4], *table])
+    planner.compute([agent_factory(agent_id=1, x=1.0, y=3.0)], commands_factory(agent_ids=[1], target=(11.0, 3.0)))
+    poly = np.array([(w.x, w.y) for w in planner.get_cached_paths()[1]])
+    samples = _sample_polyline(poly)
+    local = samples - np.array([6.0, 3.0])
+    c, s = math.cos(-0.3), math.sin(-0.3)
+    x, y = c * local[:, 0] - s * local[:, 1], s * local[:, 0] + c * local[:, 1]
+    assert not np.any((np.abs(x) < 2.0) & (np.abs(y) < 0.5))
+    assert len(poly) > 2
