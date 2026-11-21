@@ -113,6 +113,17 @@ Every interaction follows a single flow: a BT `SeekNode` emits a SEEK command, I
 - Agents are routed from source to sink via weighted `sink_affinity`
 - TTL-based removal as fallback
 
+### Pedestrian lanes
+
+A source with a `lane` block walks a centreline instead of aiming at the sink. Each walker gets its own track: the centreline offset by a truncated-normal fraction `q` of the band that the free space allows.
+
+- `side` is required: `right`, `left` or `centre`. There is no default.
+- `offset` (metres, positive to the left of travel) is optional. When given, the band centres on it, bounded by the walls. The message carries `has_offset`, so `0` is a valid offset. Without an offset, the band centres on the free space on `side`.
+- Every other setting is `0` in the message for derived. `track_spacing` comes from `chord_tolerance` and is capped at 3 m. `arrival_radius` is a third of the spacing. `spawn_length` is the source extent along the lane minus the arrival radius. `sweep_length` defaults to the spacing. `merge_length` comes from the band at each junction.
+- `sigma_q` (default 0.5) and `chord_tolerance` (default 0.05 m) set the spread and the track.
+- A lane flow needs exactly one sink affinity. Its end band must lie in that sink: inside the polygon, or within `absorption_radius` of a circle sink.
+- A wall or obstacle change that leaves any lane without a band is refused, and the walls stay as they were.
+
 ## Teleport Zones
 
 A teleport zone is a floor area, in the engine frame, that pedestrians wait at, enter and leave by teleport: a name, the zones a teleport from it can land in, an entry pose at the outer edge of its opening facing in, a wait pose clear of the opening, a hold pose inside whose heading holders take, the footprint polygon, whether it is open, a delay, a `kind` and a `belt` speed. An empty `kind` makes the zone an elevator cabin, `stairs` or `escalator` makes it a stair half (see Stairs below). The engine never moves a zone. `set_teleport_zones` replaces every zone, `set_zone_access` opens and closes zones by name, and `teleport_agents` moves pedestrians. Zones also come from the scenario's `teleport_zones:` list, poses and footprint points written as `{x: .., y: ..}` maps like wall ends, `open` defaulting to `true`, `delay` to `0`, `destinations` to none, `kind` to a cabin and `belt` to `0`:

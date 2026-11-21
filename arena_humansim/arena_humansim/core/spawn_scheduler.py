@@ -3,9 +3,22 @@ from collections.abc import Callable, Sequence
 
 import numpy as np
 
+from arena_humansim.utils.lanes import build_track, truncated_normal
 from arena_humansim.utils.loggable import Loggable
 from arena_humansim.utils.rng import RNG, derive_seed
-from arena_humansim.utils.types import AgentLifetime, Pose2D, RateKeyframe, Shape, ShapeType, SinkConfig, SourceConfig, SourceType, SpawnRequest
+from arena_humansim.utils.types import (
+    AgentLifetime,
+    Lane,
+    Pose2D,
+    RateKeyframe,
+    Shape,
+    ShapeType,
+    SinkConfig,
+    SourceConfig,
+    SourceType,
+    SpawnRequest,
+    WaypointMode,
+)
 
 
 class SpawnScheduler(Loggable):
@@ -87,6 +100,11 @@ class SpawnScheduler(Loggable):
                 raise ValueError(f"source {config.name!r}: type max needs max_concurrent > 0")
             if config.rate_profile:
                 raise ValueError(f"source {config.name!r}: type max takes no rate_profile")
+        if config.lane_config is not None:
+            if len(config.agent.sink_affinity) != 1:
+                raise ValueError(f"source {config.name!r}: a lane flow needs exactly one sink affinity")
+            if config.lane is None:
+                raise ValueError(f"source {config.name!r}: the lane is not resolved")
 
     def add_source(self, config: SourceConfig) -> str:
         self.validate(config)
@@ -134,7 +152,37 @@ class SpawnScheduler(Loggable):
 
         return profile[-1].rate
 
+    def _sample_lane_spawn_request(self, src: SourceConfig, lane: Lane, tick_count: int, seq: int) -> SpawnRequest:
+        tmpl = src.agent
+        rng = self._event_stream(f"{src.name}/event/{seq}")
+        desired_velocity = rng.uniform(tmpl.desired_velocity_min, tmpl.desired_velocity_max)
+        q = truncated_normal(lane.settings.sigma_q, rng)
+        s0 = float(rng.uniform(0.0, lane.settings.spawn_length))
+        track = build_track(lane, q, s0)
+        first, second = track.points[0], track.points[1]
+        pose = Pose2D(x=first.x, y=first.y, theta=math.atan2(second.y - first.y, second.x - first.x))
+        lifetime = AgentLifetime(
+            source_name=src.name,
+            source_seq=seq,
+            spawn_tick=tick_count,
+            target_sink_name=tmpl.sink_affinity[0].sink_name,
+        )
+        robot_awareness = tmpl.robot_awareness if tmpl.robot_awareness is not None else tmpl.robot_aware
+        return SpawnRequest(
+            pose=pose,
+            desired_velocity=desired_velocity,
+            agent_radius=tmpl.agent_radius,
+            agent_type=tmpl.agent_type,
+            waypoints=track.points,
+            lifetime=lifetime,
+            robot_awareness=robot_awareness,
+            waypoint_radii=track.radii,
+            waypoint_mode=WaypointMode.ONCE,
+        )
+
     def _sample_spawn_request(self, src: SourceConfig, tick_count: int, seq: int) -> SpawnRequest:
+        if src.lane is not None:
+            return self._sample_lane_spawn_request(src, src.lane, tick_count, seq)
         tmpl = src.agent
         rng = self._event_stream(f"{src.name}/event/{seq}")
 
