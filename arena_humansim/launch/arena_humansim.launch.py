@@ -29,6 +29,7 @@ FORWARDED_PARAMS = (
     params.PERCEPTION,
     params.GLOBAL_PLANNER,
     params.LOCAL_PLANNER,
+    params.LOCAL_PLANNER_PARAMS,
     params.FORCE_LOCAL_PLANNER,
     params.ROBOT_POLICY,
     params.ROBOT_SHUTDOWN,

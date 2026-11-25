@@ -427,6 +427,11 @@ class AgentManager(TimeNode):
             self._module_selections["local_planner"],
         )
         self._declare_local_planner_params(type(self._local_planner))
+        self._local_planner_params = str(self.get_parameter("local_planner_params").value)
+        try:
+            self._tune_local_planner()
+        except ValueError as exc:
+            raise ValueError(f"local_planner_params for {self._module_selections['local_planner']}: {exc}") from None
         self._lp_means = self._read_lp_means()
         self._pinned: dict[int, _Pinned] = {}
         self._carrier = Carrier()
@@ -840,9 +845,20 @@ class AgentManager(TimeNode):
     def _select_local_planner(self, name: str) -> None:
         idx = self._resolve_policy_idx(name)
         self._default_policy_idx = idx
-        self._local_planner = self._policies[idx]
+        previous, self._local_planner = self._local_planner, self._policies[idx]
+        if self._local_planner is not previous:
+            try:
+                self._tune_local_planner()
+            except ValueError as exc:
+                self._logger.error(f"local_planner_params not applied to {name}: {exc}")
         self._module_pool["local_planner"][name] = self._local_planner
         self._module_selections["local_planner"] = name
+
+    def _tune_local_planner(self) -> None:
+        if not self._local_planner_params:
+            return
+        self._local_planner.apply_policy_params(self._local_planner_params)
+        self._logger.info(f"local_planner_params applied to {type(self._local_planner).__name__}: {self._local_planner_params}")
 
     def _select_global_planner(self, name: str) -> None:
         global_planners = self._module_pool["global_planner"]
@@ -2794,10 +2810,10 @@ class AgentManager(TimeNode):
             else:
                 policy_idx = self._default_policy_idx if kind == 0 else -1
             if policy_params and 0 <= policy_idx < len(self._policies):
-                planner = self._policies[policy_idx]
-                apply = getattr(planner, "apply_policy_params", None)
-                if callable(apply):
-                    apply(policy_params)
+                try:
+                    self._policies[policy_idx].apply_policy_params(policy_params)
+                except ValueError as exc:
+                    self._logger.error(f"agent {aid}: policy_params not applied: {exc}")
 
             agent = self._build_base_agent(aid, agent_msg, waypoints)
             if policy_name and not self._force_local_planner:

@@ -289,30 +289,32 @@ class SFMPlanner(LocalPlanner):
         pass
 
     def apply_policy_params(self, params_json: str) -> None:
+        """Set class gain entries from {"kind_gains": {"<observer>_<neighbor>": {"strength_scale": s, "range_scale": r}}}, all or none."""
         if not params_json:
             return
         try:
             blob = json.loads(params_json)
-        except (ValueError, TypeError):
-            return
-        if not isinstance(blob, dict):
-            return
-        gains = blob.get("kind_gains")
-        if not isinstance(gains, dict):
-            return
-        for key, entry in gains.items():
-            if not isinstance(entry, dict) or "_" not in key:
-                continue
-            a, b = key.split("_", 1)
-            i = interaction_classes.index(a.lower())
-            j = interaction_classes.index(b.lower())
+        except ValueError as exc:
+            raise ValueError(f"not JSON ({exc}): {params_json}") from None
+        if not isinstance(blob, dict) or set(blob) != {"kind_gains"} or not isinstance(blob["kind_gains"], dict):
+            raise ValueError(f'expected {{"kind_gains": {{"<observer>_<neighbor>": {{...}}}}}}, got {params_json}')
+        updates: list[tuple[str, str, dict[str, float]]] = []
+        for key, entry in blob["kind_gains"].items():
+            a, _, b = key.partition("_")
+            if not a or not b or not isinstance(entry, dict) or not entry or set(entry) - {"strength_scale", "range_scale"}:
+                raise ValueError(f'kind_gains.{key}: expected "<observer>_<neighbor>": {{"strength_scale": s, "range_scale": r}}, got {entry!r}')
+            for name, value in entry.items():
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0.0:
+                    raise ValueError(f"kind_gains.{key}.{name}: expected a non-negative number, got {value!r}")
+            updates.append((a.lower(), b.lower(), entry))
+        for a, b, entry in updates:
+            i = interaction_classes.index(a)
+            j = interaction_classes.index(b)
             self._ensure_gain_classes(max(i, j) + 1)
-            s = entry.get("strength_scale")
-            r = entry.get("range_scale")
-            if isinstance(s, (int, float)):
-                self._gain_strength_scale[i, j] = float(s)
-            if isinstance(r, (int, float)):
-                self._gain_range_scale[i, j] = float(r)
+            if "strength_scale" in entry:
+                self._gain_strength_scale[i, j] = float(entry["strength_scale"])
+            if "range_scale" in entry:
+                self._gain_range_scale[i, j] = float(entry["range_scale"])
 
     def set_walls(self, segments: Segments) -> None:
         self._wall_segments = list(segments)

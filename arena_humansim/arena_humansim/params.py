@@ -24,6 +24,7 @@ GLOBAL_PLANNER_INFLATION_RADIUS = Param[float]("global_planner.inflation_radius"
 GLOBAL_PLANNER_RESOLUTION = Param[float]("global_planner.resolution", 0.2, "Planning grid cell size in meters.", constraint=Range(0.01, 5.0))
 GLOBAL_PLANNER_COMFORT_RADIUS = Param[float]("global_planner.comfort_radius", 0.6, "Preferred wall clearance of navmesh paths in meters, relaxed in narrow passages.", constraint=Range(0.0, 5.0))
 LOCAL_PLANNER = Param[str]("local_planner", "sfm", "Default local planner module name.")
+LOCAL_PLANNER_PARAMS = Param[str]("local_planner_params", "", 'JSON applied once to the default local planner through apply_policy_params, e.g. {"kind_gains": {"human_robot": {"strength_scale": 1.5, "range_scale": 1.3}}} for SFM (empty = planner defaults).')
 FORCE_LOCAL_PLANNER = Param[bool]("force_local_planner", False, "Put every agent on local_planner, ignoring the scenario's per-agent policies.")
 ROBOT_POLICY = Param[str]("robot_policy", "", "Policy that replaces the policy of every robot-kind agent at scenario load (empty = keep the scenario policy).")
 ROBOT_SHUTDOWN = Param[str]("robot_shutdown", "", "End the sim once every robot latched on its final waypoint: true or false overrides the scenario, empty = use the scenario value.")
@@ -68,6 +69,7 @@ AGENT_MANAGER_PARAMS = (
     GLOBAL_PLANNER_RESOLUTION,
     GLOBAL_PLANNER_COMFORT_RADIUS,
     LOCAL_PLANNER,
+    LOCAL_PLANNER_PARAMS,
     FORCE_LOCAL_PLANNER,
     ROBOT_POLICY,
     ROBOT_SHUTDOWN,

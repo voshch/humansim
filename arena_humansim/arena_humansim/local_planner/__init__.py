@@ -58,6 +58,11 @@ class LocalPlanner(PoolAware, WallAware, Loggable, ABC):
     def publish_markers(self, pub: MarkerPublisher) -> None:
         pass
 
+    def apply_policy_params(self, params_json: str) -> None:
+        """Apply a planner-specific JSON blob, ValueError when the planner takes none or the blob is invalid."""
+        if params_json:
+            raise ValueError(f"{type(self).__name__} takes no policy params")
+
     @classmethod
     def register(cls, name: str, label: str | None = None) -> Callable[[Callable[[], type[LocalPlanner]]], Callable[[], type[LocalPlanner]]]:
         return _registry.register(name, label)

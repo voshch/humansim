@@ -98,7 +98,7 @@ Agent-agent repulsion in `sfm`/`hsfm` is scaled per ordered pair (observer class
 | human | wheelchair | 1.3 | 1.4 |
 | wheelchair | robot | 1.5 | 1.3 |
 
-A policy's `params_json` overrides any pair through `kind_gains`; an unknown class name in a key registers it:
+A policy's `params_json`, or the node param `local_planner_params` for the default planner, overrides any pair through `kind_gains` with absolute scales. An unknown class name in a key registers it. Any other key, a key that is not `<observer>_<neighbor>`, or a scale that is not a non-negative number rejects the whole blob:
 
 ```json
 {"kind_gains": {"human_robot": {"strength_scale": 3.0, "range_scale": 2.0}, "human_scooter": {"strength_scale": 2.0}}}

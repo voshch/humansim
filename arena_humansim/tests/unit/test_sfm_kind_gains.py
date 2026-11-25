@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import numpy as np
+import pytest
 
 from arena_humansim.core import interaction_classes
 from arena_humansim.core.agents.base import BaseAgent
@@ -107,14 +108,47 @@ def test_apply_policy_params_parses_overrides() -> None:
     assert p._gain_range_scale[0, 1] == 2.0
 
 
-def test_apply_policy_params_defensive_against_garbage() -> None:
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "not json",
+        "[1,2,3]",
+        "{}",
+        '{"kind_gains": "nope"}',
+        '{"kind_gain": {"human_robot": {"strength_scale": 2.0}}}',
+        '{"kind_gains": {}, "other": 1}',
+        '{"kind_gains": {"bad": {"strength_scale": 2.0}}}',
+        '{"kind_gains": {"human_robot": {}}}',
+        '{"kind_gains": {"human_robot": {"strenght_scale": 2.0}}}',
+        '{"kind_gains": {"human_robot": {"strength_scale": "2"}}}',
+        '{"kind_gains": {"human_robot": {"strength_scale": true}}}',
+        '{"kind_gains": {"human_robot": {"range_scale": -1.0}}}',
+        '{"kind_gains": {"human_robot": {"strength_scale": NaN}}}',
+        '{"kind_gains": {"human_robot": {"strength_scale": 2.0}, "bad": {}}}',
+    ],
+)
+def test_apply_policy_params_rejects_bad_blob_whole(bad: str) -> None:
     p = SFMPlanner()
     before_s = p._gain_strength_scale.copy()
     before_r = p._gain_range_scale.copy()
-    for bad in ["", "not json", "[1,2,3]", '{"kind_gains": "nope"}', '{"kind_gains": {"bad": {}}}']:
+    with pytest.raises(ValueError):
         p.apply_policy_params(bad)
     assert np.array_equal(p._gain_strength_scale, before_s)
     assert np.array_equal(p._gain_range_scale, before_r)
+
+
+def test_empty_policy_params_keep_gains() -> None:
+    p = SFMPlanner()
+    before_s = p._gain_strength_scale.copy()
+    p.apply_policy_params("")
+    assert np.array_equal(p._gain_strength_scale, before_s)
+
+
+def test_planner_without_policy_params_rejects_them() -> None:
+    planner = LocalPlanner.create("orca")
+    planner.apply_policy_params("")
+    with pytest.raises(ValueError, match="takes no policy params"):
+        planner.apply_policy_params('{"kind_gains": {}}')
 
 
 def test_registry_includes_straight() -> None:

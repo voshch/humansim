@@ -178,7 +178,7 @@ ros2 launch arena_humansim arena_humansim.launch.py \
   rviz:=true
 ```
 
-Every node param that the launch file only forwards (`seed`, `ticks`, `time`, `rtf`, the module selectors, `robot_policy`, `robot_shutdown`, `force_waypoint_mode`, `force_local_planner`, `strict_recording`, `trial_id`, `frame_id`) is a launch argument generated from its `Param` in `arena_humansim/params.py`, with the same name, description and choices. Empty means the node default from the parameters table below. `mode`, `scenario`, `markers`, `record`, `record_dir`, `render`, `render_format`, `rviz`, `namespace` and `use_sim_time` are launch-side arguments. Any other launch arg is forwarded to the node as the param of the same name, e.g. `global_planner.resolution:=0.1` or `local_planner.relaxation_time:=0.7`. The value is typed by YAML rules, so write a double with a decimal point. A name the node does not declare is ignored.
+Every node param that the launch file only forwards (`seed`, `ticks`, `time`, `rtf`, the module selectors, `local_planner_params`, `robot_policy`, `robot_shutdown`, `force_waypoint_mode`, `force_local_planner`, `strict_recording`, `trial_id`, `frame_id`) is a launch argument generated from its `Param` in `arena_humansim/params.py`, with the same name, description and choices. Empty means the node default from the parameters table below. `mode`, `scenario`, `markers`, `record`, `record_dir`, `render`, `render_format`, `rviz`, `namespace` and `use_sim_time` are launch-side arguments. Any other launch arg is forwarded to the node as the param of the same name, e.g. `global_planner.resolution:=0.1` or `local_planner.relaxation_time:=0.7`. The value is typed by YAML rules, so write a double with a decimal point. A name the node does not declare is ignored.
 
 Scenarios (world objects, agents, flow, walls) are authored under [`config/scenarios/`](arena_humansim/config/scenarios/README.md).
 
@@ -241,6 +241,7 @@ Config format and stage semantics: [`config/benchmark/README.md`](arena_humansim
 | `log_dir` | `""` | Directory for simulation replay logs, empty = no logging |
 | `replay_mode` | `""` | Replay log to load and play back, empty = no replay |
 | `force_local_planner` | `false` | Force every agent onto `local_planner` and ignore the per-agent policy of the scenario |
+| `local_planner_params` | `""` | JSON applied to the default local planner at startup and whenever a reset creates a new one, e.g. the `sfm` family's [`kind_gains`](arena_humansim/arena_humansim/local_planner/README.md#interaction-classes-sfm-family). Invalid JSON, a schema error or a planner that takes no params fails the node at startup. Empty = planner defaults |
 | `robot_policy` | `""` | Policy that replaces the policy of every robot-kind agent at scenario load, empty = keep the scenario policy |
 | `robot_shutdown` | `""` | `true` or `false` overrides `scenario.simulation.robot_shutdown`, empty = use the scenario value |
 | `force_waypoint_mode` | `""` | `once`, `repeat`, `reverse` or `random` replaces the waypoint mode of every human scenario agent at load, empty = keep the scenario value |
