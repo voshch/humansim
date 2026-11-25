@@ -318,11 +318,9 @@ def test_obstacle_boxes_are_routed_around(
     agent_factory: Callable[..., BaseAgent],
     commands_factory: Callable[..., dict[int, Any]],
 ) -> None:
-    pytest.importorskip("rclpy")
-    pytest.importorskip("arena_humansim_msgs")
-    from arena_humansim.core.agent_manager import AgentManager
+    from arena_humansim.utils.geometry import box_wall_segments
 
-    table = AgentManager._decompose_obstacle_to_walls(Pose2D(x=6.0, y=3.0, theta=0.3), -2.0, 2.0, -0.5, 0.5)
+    table = box_wall_segments(Pose2D(x=6.0, y=3.0, theta=0.3), -2.0, 2.0, -0.5, 0.5)
     planner = NavMeshPlanner(inflation_radius=_INFLATION)
     planner.set_walls([*_two_rooms(12.0)[:4], *table])
     planner.compute([agent_factory(agent_id=1, x=1.0, y=3.0)], commands_factory(agent_ids=[1], target=(11.0, 3.0)))
